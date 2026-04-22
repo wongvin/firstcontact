@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hello World</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    h1 { font-size: 3rem; margin: 0 0 0.5rem; }
+    p  { font-size: 1.25rem; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>Hello, World!</h1>
+    <p id="device">Loading device info…</p>
+  </div>
+  <script>
+    document.getElementById('device').textContent =
+      'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];
+  </script>
+</body>
+</html>
