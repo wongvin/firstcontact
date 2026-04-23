@@ -18,16 +18,55 @@
     }
     h1 { font-size: 3rem; margin: 0 0 0.5rem; }
     p  { font-size: 1.25rem; opacity: 0.9; }
+    blockquote {
+      max-width: 28rem;
+      margin: 2rem auto 0;
+      padding: 1rem 1.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.4);
+      font-style: italic;
+      font-size: 1rem;
+      line-height: 1.5;
+      opacity: 0.95;
+    }
+    blockquote footer {
+      margin-top: 0.5rem;
+      font-style: normal;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
   </style>
 </head>
 <body>
   <div>
     <h1>Hello, World!</h1>
     <p id="device">Loading device info…</p>
+    <blockquote id="quote">
+      <span id="quote-text"></span>
+      <footer>— <span id="quote-author"></span></footer>
+    </blockquote>
   </div>
   <script>
     document.getElementById('device').textContent =
       'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];
+
+    const QUOTES = [
+      { text: 'A journey of a thousand miles begins with a single step.', author: 'Lao Tzu' },
+      { text: 'Done is better than perfect.', author: 'Sheryl Sandberg' },
+      { text: 'Simplicity is the ultimate sophistication.', author: 'Leonardo da Vinci' },
+      { text: 'Real artists ship.', author: 'Steve Jobs' },
+      { text: 'Make it work, make it right, make it fast.', author: 'Kent Beck' },
+      { text: 'The secret of getting ahead is getting started.', author: 'Mark Twain' },
+      { text: 'Security is not a product, but a process.', author: 'Bruce Schneier' },
+    ];
+
+    const now = new Date();
+    const dayOfYear = Math.floor(
+      (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+        - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000
+    );
+    const quote = QUOTES[dayOfYear % QUOTES.length];
+    document.getElementById('quote-text').textContent = '“' + quote.text + '”';
+    document.getElementById('quote-author').textContent = quote.author;
   </script>
 </body>
 </html>
