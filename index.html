@@ -34,6 +34,44 @@
       font-size: 0.9rem;
       opacity: 0.8;
     }
+    #recent-tasks {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      width: min(20rem, calc(100vw - 2rem));
+      max-height: 25vh;
+      overflow-y: auto;
+      padding: 0.75rem 1rem;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.5rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      text-align: left;
+      font-size: 0.85rem;
+      line-height: 1.35;
+    }
+    #recent-tasks h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 0.75rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    #recent-tasks ol {
+      padding-left: 1.25rem;
+      margin: 0;
+    }
+    #recent-tasks li {
+      padding: 0.25rem 0;
+    }
+    #recent-tasks .empty {
+      list-style: none;
+      margin-left: -1.25rem;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -45,6 +83,10 @@
       <footer>— <span id="quote-author"></span></footer>
     </blockquote>
   </div>
+  <aside id="recent-tasks" aria-label="Changes made this week">
+    <h2>Changes made this week</h2>
+    <ol id="recent-tasks-list"><li class="empty">Loading…</li></ol>
+  </aside>
   <script>
     document.getElementById('device').textContent =
       'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];
@@ -67,6 +109,37 @@
     const quote = QUOTES[dayOfYear % QUOTES.length];
     document.getElementById('quote-text').textContent = '“' + quote.text + '”';
     document.getElementById('quote-author').textContent = quote.author;
+
+    (async function loadRecent() {
+      const list = document.getElementById('recent-tasks-list');
+      const setEmpty = (msg) => {
+        list.replaceChildren();
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = msg;
+        list.appendChild(li);
+      };
+      try {
+        const res = await fetch(
+          'https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=30&sort=updated&direction=desc'
+        );
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const items = await res.json();
+        const cutoff = Date.now() - 7 * 86400000;
+        const recent = items
+          .filter((i) => !i.pull_request && i.closed_at && new Date(i.closed_at).getTime() >= cutoff)
+          .sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at));
+        if (recent.length === 0) return setEmpty('No changes this week.');
+        list.replaceChildren();
+        for (const item of recent) {
+          const li = document.createElement('li');
+          li.textContent = item.title;
+          list.appendChild(li);
+        }
+      } catch (e) {
+        setEmpty('Could not load recent changes.');
+      }
+    })();
   </script>
 </body>
 </html>
