@@ -2,6 +2,13 @@
 
 ## 2026-04-23
 
+### docs: add CLAUDE.md with project conventions
+
+- Document the "closed issues via public REST API" data source for homepage task lists, with rationale for skipping GraphQL and Actions-generated JSON
+- Document the `createElement` + `textContent` rule for rendering any GitHub-API-sourced text, as defense-in-depth against HTML in titles
+- Document commit hygiene: ChangeLog.md updates ship in the same commit as the code change
+- Document issue-close workflow: always post an implementation-summary comment at close time (not a bare "shipped" line), with guidance on `--body-file -` heredoc for long markdown bodies
+
 ### feat: display recent changes on homepage
 
 - Add a top-right fixed panel ("Changes made this week") capped at 25vh with internal scroll
