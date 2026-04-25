@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-04-24
+
+### docs: add manual test plan
+
+- Add TEST-PLAN.md covering HTTPS/redirect, hero/device line, daily quote rotation, and recent-changes panel (happy/empty/error/defense paths)
+- Document required environments (Chrome, Safari, Mobile Safari) and exit criteria
+- Note for future features: append a new section per issue rather than rewriting existing ones (regression coverage)
+
 ## 2026-04-23
 
 ### docs: add CLAUDE.md with project conventions
