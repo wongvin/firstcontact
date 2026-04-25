@@ -2,6 +2,14 @@
 
 ## 2026-04-24
 
+### docs: add executable instructions to TEST-PLAN.md manual cases
+
+- Add an Appendix of reusable Chrome DevTools procedures (open, breakpoints, request blocking, network throttling, response overrides, JS toggle, device toolbar, computed styles / accessibility, Lighthouse, real-iPhone pairing)
+- Cross-reference the appendix from the manual test cases by letter
+- Expand inline steps for the empty/error/defense-in-depth and quote-rotation cases with concrete line locations, console snippets, and a sample XSS payload
+- Note HSTS-cache pitfall on the HTTP→HTTPS redirect test (use incognito)
+- Update expected ordering in 4a.3 to match the current `closed_at` order at commit 119b0e5 (#3 → #2 → #1)
+
 ### docs: add manual test plan
 
 - Add TEST-PLAN.md covering HTTPS/redirect, hero/device line, daily quote rotation, and recent-changes panel (happy/empty/error/defense paths)
