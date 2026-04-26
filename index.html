@@ -91,24 +91,20 @@
     document.getElementById('device').textContent =
       'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];
 
-    const QUOTES = [
-      { text: 'A journey of a thousand miles begins with a single step.', author: 'Lao Tzu' },
-      { text: 'Done is better than perfect.', author: 'Sheryl Sandberg' },
-      { text: 'Simplicity is the ultimate sophistication.', author: 'Leonardo da Vinci' },
-      { text: 'Real artists ship.', author: 'Steve Jobs' },
-      { text: 'Make it work, make it right, make it fast.', author: 'Kent Beck' },
-      { text: 'The secret of getting ahead is getting started.', author: 'Mark Twain' },
-      { text: 'Security is not a product, but a process.', author: 'Bruce Schneier' },
-    ];
-
-    const now = new Date();
-    const dayOfYear = Math.floor(
-      (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-        - Date.UTC(now.getUTCFullYear(), 0, 0)) / 86400000
-    );
-    const quote = QUOTES[dayOfYear % QUOTES.length];
-    document.getElementById('quote-text').textContent = '“' + quote.text + '”';
-    document.getElementById('quote-author').textContent = quote.author;
+    (async function loadQuote() {
+      const textEl = document.getElementById('quote-text');
+      const authorEl = document.getElementById('quote-author');
+      try {
+        const res = await fetch('https://dummyjson.com/quotes/random');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        textEl.textContent = '“' + data.quote + '”';
+        authorEl.textContent = data.author;
+      } catch (e) {
+        textEl.textContent = 'Could not load today’s quote.';
+        authorEl.textContent = '';
+      }
+    })();
 
     (async function loadRecent() {
       const list = document.getElementById('recent-tasks-list');

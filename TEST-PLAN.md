@@ -50,15 +50,19 @@ DevTools procedures (set a breakpoint, block a URL, override a response, etc.) a
 | 2.4 | Open the URL on a real iPhone in Safari (see Appendix J). | Hero and device line render. Nothing overflows the viewport horizontally. Pinch-zoom not required to read text. |
 | 2.5 | Disable JavaScript (Appendix F), reload. | Hero heading still renders. Device line keeps placeholder text "Loading device info…". Quote and recent-tasks panels remain in their loading/empty state. (Acceptable graceful degradation.) Re-enable JS when done. |
 
-## 3. Quote of the day (issue #2)
+## 3. Quote of the day (issues #2, #4)
+
+This feature was originally a static day-of-year-rotating array (issue #2) and was replaced by a live API fetch from `dummyjson.com/quotes/random` in issue #4. Tests below cover the current implementation.
 
 | ID | Steps | Expected |
 |---|---|---|
-| 3.1 | Load homepage. | A quote and `— <author>` line render below the device line, italicized, with a thin top border separating them from the hero. |
-| 3.2 | Open DevTools → **Console** (Cmd-Option-J). Paste and run:<br>`for (let i=0;i<7;i++){ const d=new Date(Date.UTC(2026,0,1+i)); const day=Math.floor((d-Date.UTC(2026,0,0))/86400000); console.log(day%7); }` | Console prints seven lines: `1 2 3 4 5 6 0`. Confirms the day-of-year modulo-7 mapping covers all seven `QUOTES` indices. |
-| 3.3 | Easiest: set a breakpoint inside the IIFE that picks the quote (Appendix B), at the `const quote = QUOTES[dayOfYear % QUOTES.length];` line. In the Console, evaluate `dayOfYear` to confirm today's value, then set `dayOfYear = dayOfYear + 1` and resume — quote text changes. Repeat for `+2`, `+3`. (Alternative: change your system clock to the next day, hard-refresh, observe.) | A different quote and author appear after each `dayOfYear` shift. Repeated reloads on the same UTC day always show the same quote. |
-| 3.4 | DevTools → Elements panel, locate `<blockquote id="quote">`. | Contains `<span id="quote-text">` (non-empty) and a `<footer>` with `<span id="quote-author">` (non-empty). Both spans show today's quote text and author. |
+| 3.1 | Load homepage. | A quote in italics and a `— <author>` line render below the device line, with a thin top border separating them from the hero. (May briefly appear empty before the fetch resolves — typically <1s on a normal connection.) |
+| 3.2 | DevTools → **Network** tab (Appendix A), hard-refresh, filter by "dummyjson". | Exactly one request to `https://dummyjson.com/quotes/random`. Status `200`, type `fetch`. Response JSON has `quote` and `author` string fields. |
+| 3.3 | Hard-refresh the page three times. | At least two **different** quote texts appear across the three loads. (Random API; small chance of two repeats — a third try should produce variation. If all three are identical across many tries, suspect API caching at an edge.) |
+| 3.4 | DevTools → Elements panel, locate `<blockquote id="quote">`. | Contains `<span id="quote-text">` (non-empty, with smart double-quotes around the API text) and a `<footer>` with `<span id="quote-author">` (non-empty, plain text). Values match the most recent network response. |
 | 3.5 | Open the URL on a real iPhone (Appendix J). | Quote card readable. Doesn't push the hero off-screen on a 375-px-wide viewport. |
+| 3.6 | Block the URL pattern `*dummyjson.com*` (Appendix C), hard-refresh. | Quote area shows the message **"Could not load today's quote."** (plain text, no smart quotes around it; author span empty). No JS error pop-up. Page does not appear broken. Remove the block when done. |
+| 3.7 | DevTools → Network → throttle to "Offline" (Appendix D), hard-refresh. | Same as 3.6: graceful "Could not load today's quote." Restore "No throttling" when done. |
 
 ## 4. Changes made this week (issue #3)
 

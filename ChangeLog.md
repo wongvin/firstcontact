@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-04-25
+
+### feat: replace static quote array with live API fetch (issue #4)
+
+- Remove the curated `QUOTES` array and day-of-year rotation logic from index.html
+- Fetch a random quote on each page load from `https://dummyjson.com/quotes/random`; populate the existing `quote-text` / `quote-author` spans via `textContent` (per CLAUDE.md defense-in-depth rule)
+- Show "Could not load today's quote." on fetch failure or non-200 response
+- Trade-off recorded on issue #4: thematic-tag filtering is not available on the chosen API's free tier, so the previous "reflect on my current work" curation is relaxed to "any random inspirational quote"
+
+### docs: refresh TEST-PLAN.md §3 for dynamic quote feature
+
+- Replace day-of-year math test with API-fetch verification (Network tab check, response shape, randomness across reloads)
+- Add empty/error-path coverage (block dummyjson, throttle offline) — both expect graceful "Could not load today's quote."
+- Section heading now references issues #2 and #4 to capture the feature's history
+
 ## 2026-04-24
 
 ### docs: add executable instructions to TEST-PLAN.md manual cases
