@@ -2,6 +2,14 @@
 
 ## 2026-04-26
 
+### feat: port quote-of-the-day fetch to SwiftUI (issue #10)
+
+- Add a `Quote` `Codable` struct (`{id, quote, author}`) matching `https://dummyjson.com/quotes/random`
+- Fetch on view appear via `.task` using `URLSession` + `async/await`; populate `@State` quote, set error flag on non-200 or thrown error
+- Render the quote text in italic 16pt with smart double-quotes; author below at 14pt with 0.8 opacity; thin 1pt white-40 divider above (visual parity with the web `blockquote`'s `border-top`)
+- Error state: muted 14pt "Could not load today's quote." (matches web fallback)
+- Verified with `xcodebuild -scheme FirstContact -sdk iphonesimulator build` → `BUILD SUCCEEDED`
+
 ### feat: port homepage hero to SwiftUI (issue #9)
 
 - Replace the default Xcode template `ContentView` with a SwiftUI port of the web hero
