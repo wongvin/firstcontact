@@ -35,6 +35,32 @@ Does not require an issue:
 Format issue bodies with a short rationale and a `### Requirements` checklist —
 match the style of issues #1–#5.
 
+### Tracking active work
+
+When implementation begins on an issue (you start coding, run a setup
+command, or the issue moves out of Backlog → Ready / In progress), set
+the **Start date** custom field on the project item to that day. Set it
+once — when work begins — and don't update on subsequent revisions.
+
+You can set it from the GitHub UI (project board → click into the item →
+set Start date) or via the `gh` CLI:
+
+```bash
+PROJECT_ID=$(gh project view 1 --owner wongvin --format json --jq .id)
+START_DATE_FIELD_ID=$(gh project field-list 1 --owner wongvin --format json \
+  --jq '.fields[] | select(.name == "Start date") | .id')
+ITEM_ID=$(gh project item-list 1 --owner wongvin --format json --limit 50 \
+  --jq '.items[] | select(.content.number == <ISSUE_NUMBER>) | .id')
+
+gh project item-edit \
+  --id "$ITEM_ID" --field-id "$START_DATE_FIELD_ID" \
+  --project-id "$PROJECT_ID" --date YYYY-MM-DD
+```
+
+The CLI path requires the `project` scope on your `gh` token. The default
+`read:project` scope is read-only and insufficient for writes; refresh with
+`gh auth refresh -s project` once if you hit a scope error.
+
 ### Commit hygiene
 
 Update the root [ChangeLog.md](ChangeLog.md) in the same commit as any code

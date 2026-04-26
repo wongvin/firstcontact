@@ -2,6 +2,13 @@
 
 ## 2026-04-26
 
+### docs: require project Start date when work begins on an issue
+
+- Add a "Tracking active work" subsection to root `CLAUDE.md` between Issue tracking and Commit hygiene
+- Document the trigger (status moves out of Backlog to Ready/In progress, or coding begins) and the one-shot semantics (set once, do not update on revisions)
+- Include both UI and `gh` CLI paths; note that writing custom fields requires the `project` scope on the gh token (not the default `read:project`)
+- Backfilled Start dates on issues #1–#8 the same day this rule was adopted
+
 ### docs: document iOS signing and device deployment (issues #7, #8)
 
 - Add `ios/CLAUDE.md` with sections for: free-Apple-ID signing chicken-and-egg, first install on iPhone via USB (Trust + Developer Mode + reboot), wireless deployment (Window → Devices and Simulators → Connect via network), and a list of capabilities unavailable on free signing
