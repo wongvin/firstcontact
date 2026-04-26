@@ -2,6 +2,15 @@
 
 ## 2026-04-25
 
+### chore: split repo into `web/` and `ios/` targets
+
+- Move `index.html` and `TEST-PLAN.md` into a new `web/` folder
+- Move web-specific Claude conventions (data source, API-text rendering) into `web/CLAUDE.md`; slim the root `CLAUDE.md` down to repo-wide rules (commit hygiene, issue closing) and a structure overview
+- Add empty `ios/` folder with a placeholder README to host an upcoming SwiftUI app target (free-Apple-ID signing for personal use)
+- Add `.github/workflows/pages.yml` that uploads the `web/` directory as the Pages artifact, replacing the legacy "build from `main:/`" Pages source — same URL (https://wongvin.github.io/firstcontact/), unchanged content
+- Update root `README.md` to describe the new layout
+
+
 ### feat: replace static quote array with live API fetch (issue #4)
 
 - Remove the curated `QUOTES` array and day-of-year rotation logic from index.html

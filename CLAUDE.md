@@ -1,45 +1,24 @@
-# Project conventions for Claude
+# First Contact — repo conventions
 
-Personal static-site hosted on GitHub Pages at https://wongvin.github.io/firstcontact/.
-A single `index.html` — no build step, no dependencies, no backend.
+This repo contains two top-level targets:
 
-## Data source for project/task state
+- [`web/`](web/) — static homepage deployed to https://wongvin.github.io/firstcontact/. Web-specific conventions in [web/CLAUDE.md](web/CLAUDE.md).
+- [`ios/`](ios/) — native iOS app (early development, free Apple ID signing for personal use). Target conventions will live in `ios/CLAUDE.md` once they emerge.
 
-Project-board "Done" items are kept in sync with closed GitHub issues via the
-board's built-in workflow automation. When the homepage needs task/issue data,
-fetch the public REST endpoint directly from the browser:
+The `web/` target is deployed by the GitHub Actions workflow at [.github/workflows/pages.yml](.github/workflows/pages.yml).
 
-```
-https://api.github.com/repos/wongvin/firstcontact/issues?state=closed
-```
+## Repo-wide conventions
 
-- No auth required. CORS is open. 60 req/hr per visitor IP is plenty for a
-  personal page.
-- `/issues` returns both issues **and** PRs — always filter out entries with
-  `pull_request` set.
+### Commit hygiene
 
-Do **not** reach for GraphQL (requires a token, even for public data) or a
-GitHub Actions cron that pre-generates a `tasks.json` — both are
-over-engineered at this scale.
+Update the root [ChangeLog.md](ChangeLog.md) in the same commit as any code
+change in any target. Add an entry under today's date heading (create the
+heading if one doesn't exist yet) with a prefix matching the commit type
+(`feat:`, `fix:`, `docs:`, …) and 1–4 short bullets describing the change.
+Stage `ChangeLog.md` alongside the code so both land in one commit. Cross-target
+changes (touching both `web/` and `ios/`) get one entry that mentions both.
 
-## Rendering API-sourced text
-
-When rendering any text pulled from the GitHub API (titles, bodies, labels)
-into the DOM, construct nodes with `document.createElement` +
-`textContent` — never `innerHTML` with API strings.
-
-Cheap defense-in-depth against any future issue title containing HTML
-characters. No HTML-escape helper needed.
-
-## Commit hygiene
-
-Update `ChangeLog.md` in the same commit as the code change. Add an entry
-under today's date heading (create the heading if one doesn't exist yet) with
-a prefix matching the commit type (`feat:`, `fix:`, `docs:`, …) and 1–4 short
-bullets describing the change. Stage `ChangeLog.md` alongside the code so
-both land in one commit.
-
-## Closing issues
+### Closing issues
 
 When closing an issue, include an implementation summary in the close comment —
 not a bare "shipped in `<sha>`" line. Cover:
@@ -51,4 +30,6 @@ not a bare "shipped in `<sha>`" line. Cover:
 For infra-only work, describe the commands / API calls made and how they were
 verified. Exclude `ChangeLog.md` noise — focus on the functional change. For
 long markdown bodies, post via `gh issue comment N --body-file -` with a
-stdin heredoc (avoids bash parse errors on backticks/quotes).
+stdin heredoc (avoids bash parse errors on backticks/quotes). The same
+`-F -` heredoc pattern is the safe form for `git commit` messages that
+contain shell metacharacters like parentheses.
