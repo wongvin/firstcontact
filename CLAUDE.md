@@ -9,6 +9,32 @@ The `web/` target is deployed by the GitHub Actions workflow at [.github/workflo
 
 ## Repo-wide conventions
 
+### Issue tracking
+
+Every non-trivial change to this repo is tracked by a GitHub issue in
+[Project 1](https://github.com/users/wongvin/projects/1). File the issue
+**before** starting work when you can; if work has already begun or is
+already shipped, file a retroactive issue so the project board stays
+complete (see issue #5 for an example).
+
+Counts as non-trivial:
+
+- New features in any target (`web`, `ios`)
+- Repo restructures / infra changes (CI workflows, Pages source switches,
+  splitting/merging targets)
+- Bug fixes that change user-visible behavior
+- Multi-file refactors
+
+Does not require an issue:
+
+- Single-line typo or lint fixes
+- A small tweak immediately following a freshly-closed issue (comment on
+  that issue instead)
+- Reformatting / wording-only doc edits
+
+Format issue bodies with a short rationale and a `### Requirements` checklist —
+match the style of issues #1–#5.
+
 ### Commit hygiene
 
 Update the root [ChangeLog.md](ChangeLog.md) in the same commit as any code

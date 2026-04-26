@@ -2,6 +2,12 @@
 
 ## 2026-04-25
 
+### docs: require a tracking issue for every non-trivial change
+
+- Add an "Issue tracking" subsection to root `CLAUDE.md` listing the workflow: file an issue (retroactively if needed) for any feature, repo restructure, infra change, user-visible bug fix, or multi-file refactor; skip for typos and trivial doc tweaks
+- Cross-references issue #5 as the retroactive-filing example
+- Adopted after the issue #5 retroactive demonstration so the project board stays a complete record of repo evolution
+
 ### chore: split repo into `web/` and `ios/` targets
 
 - Move `index.html` and `TEST-PLAN.md` into a new `web/` folder
