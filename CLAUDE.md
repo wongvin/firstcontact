@@ -37,23 +37,45 @@ match the style of issues #1–#5.
 
 ### Tracking active work
 
-When implementation begins on an issue (you start coding, run a setup
-command, or the issue moves out of Backlog → Ready / In progress), set
-the **Start date** custom field on the project item to that day. Set it
-once — when work begins — and don't update on subsequent revisions.
+The project board's Status field tracks where each issue is in its lifecycle:
 
-You can set it from the GitHub UI (project board → click into the item →
-set Start date) or via the `gh` CLI:
+| Status | Trigger |
+|---|---|
+| Backlog | default — new issues land here |
+| Ready | manually queued for the next session |
+| In progress | implementation has begun |
+| In review | implementation done, awaiting commit consent |
+| Done | issue closed (set automatically by project automation on close) |
+
+When implementation begins on an issue:
+
+1. Move status from Backlog/Ready → **In progress**.
+2. Set the **Start date** custom field to today. Set it once — don't update on subsequent revisions.
+
+When implementation is complete and the diff is ready for commit:
+
+3. Move status from In progress → **In review**.
+4. Pause for explicit user consent before staging, committing, or pushing (see Commit hygiene below).
+
+Both the status transition and the Start date can be set from the GitHub UI (project board → click the item → fields panel on the right) or via the `gh` CLI:
 
 ```bash
 PROJECT_ID=$(gh project view 1 --owner wongvin --format json --jq .id)
-START_DATE_FIELD_ID=$(gh project field-list 1 --owner wongvin --format json \
-  --jq '.fields[] | select(.name == "Start date") | .id')
 ITEM_ID=$(gh project item-list 1 --owner wongvin --format json --limit 50 \
   --jq '.items[] | select(.content.number == <ISSUE_NUMBER>) | .id')
 
-gh project item-edit \
-  --id "$ITEM_ID" --field-id "$START_DATE_FIELD_ID" \
+# Status -> In progress (or "In review")
+STATUS_FIELD=$(gh project field-list 1 --owner wongvin --format json \
+  --jq '.fields[] | select(.name == "Status") | .id')
+OPT_ID=$(gh project field-list 1 --owner wongvin --format json \
+  --jq '.fields[] | select(.name == "Status") | .options[] | select(.name == "In progress") | .id')
+gh project item-edit --id "$ITEM_ID" --field-id "$STATUS_FIELD" \
+  --project-id "$PROJECT_ID" --single-select-option-id "$OPT_ID"
+
+# Start date -> today
+START_DATE_FIELD=$(gh project field-list 1 --owner wongvin --format json \
+  --jq '.fields[] | select(.name == "Start date") | .id')
+gh project item-edit --id "$ITEM_ID" --field-id "$START_DATE_FIELD" \
   --project-id "$PROJECT_ID" --date YYYY-MM-DD
 ```
 
@@ -62,6 +84,12 @@ The CLI path requires the `project` scope on your `gh` token. The default
 `gh auth refresh -s project` once if you hit a scope error.
 
 ### Commit hygiene
+
+**Never commit or push without explicit user consent.** When implementation
+is complete, move the issue to **In review** (see Tracking active work) and
+pause for review before staging or committing. The user approves the change
+explicitly before code lands on the remote — every time, including doc-only
+commits.
 
 Update the root [ChangeLog.md](ChangeLog.md) in the same commit as any code
 change in any target. Add an entry under today's date heading (create the

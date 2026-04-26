@@ -2,6 +2,12 @@
 
 ## 2026-04-26
 
+### docs: add status-transition and consent gates to repo workflow
+
+- Expand "Tracking active work" in `CLAUDE.md`: add the full status table (Backlog → Ready → In progress → In review → Done), require moving to **In progress** when implementation begins, and **In review** when ready to commit
+- Update "Commit hygiene" to require explicit user consent before any commit or push (every time, including doc-only commits)
+- Document the `gh project item-edit` CLI invocation for status transitions alongside the Start date set
+
 ### feat: port quote-of-the-day fetch to SwiftUI (issue #10)
 
 - Add a `Quote` `Codable` struct (`{id, quote, author}`) matching `https://dummyjson.com/quotes/random`
