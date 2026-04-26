@@ -2,6 +2,13 @@
 
 ## 2026-04-26
 
+### feat: port homepage hero to SwiftUI (issue #9)
+
+- Replace the default Xcode template `ContentView` with a SwiftUI port of the web hero
+- Full-bleed `LinearGradient` matching `web/index.html` (#667eea → #764ba2, top-leading → bottom-trailing) via `.ignoresSafeArea()`
+- "Hello, World!" headline at 48pt bold; below it the device line `You are on: iOS <version>` from `UIDevice.current.systemName + systemVersion` at 20pt with 0.9 opacity
+- Verified with `xcodebuild -scheme FirstContact -sdk iphonesimulator build` → `BUILD SUCCEEDED`
+
 ### docs: require project Start date when work begins on an issue
 
 - Add a "Tracking active work" subsection to root `CLAUDE.md` between Issue tracking and Commit hygiene
