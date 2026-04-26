@@ -1,0 +1,18 @@
+# Xcode build artifacts and per-user state
+build/
+DerivedData/
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# CocoaPods (not in use, but excluded just in case)
+Pods/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Package.resolved

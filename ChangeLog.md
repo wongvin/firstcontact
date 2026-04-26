@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-04-26
+
+### chore: add empty SwiftUI Xcode project for iOS target (issue #6)
+
+- Create `ios/FirstContact/` Xcode project — App template, SwiftUI, Swift, deployment target iOS 26.0
+- Bundle identifier `com.vwong.FirstContact`, Personal Team signing (free Apple ID)
+- Add `ios/.gitignore` covering Xcode build artifacts and per-user state (`build/`, `DerivedData/`, `xcuserdata/`, `*.xcuserstate`, `.DS_Store`, `.swiftpm/`)
+- Verified on iPhone SE (3rd gen, iOS 26.3.1): default template app builds, installs, and launches on device
+- Captured the free-Apple-ID provisioning gotcha (no profile generated until at least one device is registered to the team) as comments on issue #6 for future reference
+
 ## 2026-04-25
 
 ### docs: require a tracking issue for every non-trivial change
