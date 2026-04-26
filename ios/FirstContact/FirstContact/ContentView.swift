@@ -47,18 +47,29 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 8) {
-                Text("Hello, World!")
-                    .font(.system(size: 48, weight: .bold))
-                Text("You are on: \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)")
-                    .font(.system(size: 20))
-                    .opacity(0.9)
-
-                quoteSection
+            GeometryReader { geo in
+                ScrollView {
+                    VStack(spacing: 8) {
+                        Spacer(minLength: 0)
+                        Text("Hello, World!")
+                            .font(.system(size: 48, weight: .bold))
+                        Text("You are on: \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)")
+                            .font(.system(size: 20))
+                            .opacity(0.9)
+                        quoteSection
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                    .padding()
+                }
+                .refreshable {
+                    async let q: Void = loadQuote()
+                    async let i: Void = loadIssues()
+                    _ = await (q, i)
+                }
             }
             .foregroundStyle(.white)
             .multilineTextAlignment(.center)
-            .padding()
 
             recentChangesPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -143,6 +154,7 @@ struct ContentView: View {
     }
 
     private func loadQuote() async {
+        quoteError = false
         do {
             let url = URL(string: "https://dummyjson.com/quotes/random")!
             let (data, response) = try await URLSession.shared.data(from: url)
@@ -156,6 +168,7 @@ struct ContentView: View {
     }
 
     private func loadIssues() async {
+        issuesError = false
         do {
             let url = URL(string: "https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=30&sort=updated&direction=desc")!
             let (data, response) = try await URLSession.shared.data(from: url)

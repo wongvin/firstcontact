@@ -2,6 +2,14 @@
 
 ## 2026-04-26
 
+### feat: add pull-to-refresh to iOS app (issue #12)
+
+- Wrap the centered hero/quote content in a `GeometryReader` + `ScrollView` so vertical centering is preserved while pull-down works
+- Attach `.refreshable { ... }` to the `ScrollView`; the closure runs `loadQuote()` and `loadIssues()` concurrently via `async let`
+- Reset `quoteError` and `issuesError` to `false` at the start of each fetch so a successful refresh after a previous failure clears the error state
+- Recent-changes panel stays as a top-right ZStack overlay outside the ScrollView; not part of the refresh gesture's visible content but its data is reloaded by the same gesture
+- Verified with `xcodebuild build` → `BUILD SUCCEEDED` plus a simulator screenshot read on iPhone 17 (no static-layout regression)
+
 ### docs: require simulator-screenshot read for UI-touching iOS changes
 
 - Add a "Verifying UI changes" section to `ios/CLAUDE.md` between "Wireless deployment" and "Capabilities not available on free signing"
