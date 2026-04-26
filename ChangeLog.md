@@ -2,6 +2,11 @@
 
 ## 2026-04-26
 
+### docs: document iOS signing and device deployment (issues #7, #8)
+
+- Add `ios/CLAUDE.md` with sections for: free-Apple-ID signing chicken-and-egg, first install on iPhone via USB (Trust + Developer Mode + reboot), wireless deployment (Window → Devices and Simulators → Connect via network), and a list of capabilities unavailable on free signing
+- Cross-references the failure narrative from issue #6 so the rationale isn't lost
+
 ### chore: add empty SwiftUI Xcode project for iOS target (issue #6)
 
 - Create `ios/FirstContact/` Xcode project — App template, SwiftUI, Swift, deployment target iOS 26.0
