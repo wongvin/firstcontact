@@ -2,6 +2,15 @@
 
 ## 2026-04-26
 
+### docs: require simulator-screenshot read for UI-touching iOS changes
+
+- Add a "Verifying UI changes" section to `ios/CLAUDE.md` between "Wireless deployment" and "Capabilities not available on free signing"
+- Spell out why `xcodebuild` succeeding is insufficient for layout correctness (frame alignment, ZStack layering, off-screen content, missing data states)
+- Provide a portable recipe: build → look up the `.app` path and a simulator UUID via `xcodebuild -showBuildSettings` and `xcrun simctl list devices` → boot, install, launch, screenshot to `/tmp/firstcontact-sim.png`
+- Add a "Surfacing screenshots in issue comments" subsection: when posting a review-completion comment, prep the PNG on the macOS clipboard via `osascript`, post the comment with a placeholder, open the URL, and instruct the user to paste at the placeholder via ⋯ → Edit
+- Note that `xcrun simctl io ... screenshot` captures the device-only framebuffer (no Mac desktop chrome) and that the simulator does not replace real-device testing
+- Explicitly forbid committing screenshots or hosting via releases as a workaround for embedding images in comments
+
 ### feat: port "Changes made this week" panel to SwiftUI (issue #11)
 
 - Add `Issue` `Codable` struct decoding `id`, `title`, `closed_at` (ISO-8601 → `Date`), and a marker for `pull_request`

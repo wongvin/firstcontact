@@ -42,6 +42,73 @@ If the wireless connection drops:
 - iPhone must be unlocked for Xcode to discover it.
 - Recovery: re-cable for a moment to re-establish the pair.
 
+## Verifying UI changes
+
+`xcodebuild` succeeding is **necessary but not sufficient** for any change that
+touches a SwiftUI view. A successful compile only confirms syntax — it doesn't
+catch frame-alignment bugs (e.g. `ZStack(alignment:)` applies to *all* children),
+ZStack layering issues, off-screen content, wrong sizes, or missing data states.
+
+**Any commit that modifies a SwiftUI view must include a simulator screenshot
+read before the issue moves to In review.** Run this from any working directory:
+
+```bash
+# 1. Build the simulator binary
+cd /Users/vwong/repos/firstcontact/ios/FirstContact
+xcodebuild -scheme FirstContact -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  -configuration Debug build
+
+# 2. Look up paths (machine-stable, not portable across Macs)
+APP=$(xcodebuild -showBuildSettings -scheme FirstContact \
+  -configuration Debug -sdk iphonesimulator \
+  | awk '/ BUILT_PRODUCTS_DIR / {print $3}')/FirstContact.app
+DEVICE=$(xcrun simctl list devices available \
+  | awk -F'[()]' '/iPhone 17 \(/ {print $2; exit}')
+
+# 3. Boot, install, launch, settle, screenshot
+xcrun simctl boot "$DEVICE" 2>/dev/null || true
+xcrun simctl terminate "$DEVICE" com.vwong.FirstContact 2>/dev/null || true
+xcrun simctl install "$DEVICE" "$APP"
+xcrun simctl launch "$DEVICE" com.vwong.FirstContact
+sleep 4   # let async fetches settle
+xcrun simctl io "$DEVICE" screenshot /tmp/firstcontact-sim.png
+```
+
+Then `Read /tmp/firstcontact-sim.png` and visually confirm the layout matches
+intent. `xcrun simctl io ... screenshot` captures only the simulated phone's
+framebuffer (no Mac desktop chrome).
+
+The screenshot doesn't replace device testing — a real iPhone still catches
+issues the simulator misses (true `backdrop-filter` rendering, scroll inertia,
+real network conditions). But it's the cheapest, most reliable check for the
+whole class of bugs that compile fine yet render wrong.
+
+### Surfacing screenshots in issue comments
+
+After capturing a screenshot, if you also post an issue comment summarizing
+the review (e.g. when status moves to In review, or in the close-issue
+summary), **proactively suggest the user paste the screenshot into that
+comment**. GitHub renders pasted images via its user-attachments service —
+the only way to embed an image in a comment without committing it to the
+repo or hosting it elsewhere.
+
+The clean workflow:
+
+1. Post the comment with a placeholder line, e.g. `<!-- paste screenshot here -->`.
+2. Put the PNG on the macOS clipboard:
+   ```bash
+   osascript -e 'set the clipboard to (read (POSIX file "/tmp/firstcontact-sim.png") as «class PNGf»)'
+   ```
+3. `open` the comment URL in the browser.
+4. Instruct the user: click ⋯ → Edit, paste at the placeholder, Update comment.
+
+Step 4 is manual because GitHub's user-attachments upload endpoint is only
+exposed via the web UI's drag-drop / paste handler — there is no public
+API for it. Don't try to work around this by committing the screenshot
+to the repo or creating a release for hosting; either of those violates
+the "no commit/push without consent" gate.
+
 ## Capabilities not available on free signing
 
 - TestFlight and App Store distribution (paid Apple Developer Program, $99/yr)
