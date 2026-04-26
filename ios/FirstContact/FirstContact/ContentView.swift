@@ -14,9 +14,26 @@ struct Quote: Codable {
     let author: String
 }
 
+struct Issue: Codable, Identifiable {
+    let id: Int
+    let title: String
+    let closedAt: Date?
+    let pullRequest: PRMarker?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case closedAt = "closed_at"
+        case pullRequest = "pull_request"
+    }
+    struct PRMarker: Codable {}
+}
+
 struct ContentView: View {
     @State private var quote: Quote?
     @State private var quoteError = false
+    @State private var issues: [Issue] = []
+    @State private var issuesLoaded = false
+    @State private var issuesError = false
 
     var body: some View {
         ZStack {
@@ -42,10 +59,13 @@ struct ContentView: View {
             .foregroundStyle(.white)
             .multilineTextAlignment(.center)
             .padding()
+
+            recentChangesPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding()
         }
-        .task {
-            await loadQuote()
-        }
+        .task { await loadQuote() }
+        .task { await loadIssues() }
     }
 
     @ViewBuilder
@@ -75,6 +95,53 @@ struct ContentView: View {
         }
     }
 
+    private var recentChangesPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CHANGES MADE THIS WEEK")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.0)
+                    .padding(.bottom, 4)
+                    .overlay(
+                        Rectangle()
+                            .fill(.white.opacity(0.3))
+                            .frame(height: 1),
+                        alignment: .bottom
+                    )
+
+                if !issues.isEmpty {
+                    ForEach(Array(issues.enumerated()), id: \.element.id) { idx, issue in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("\(idx + 1).").bold()
+                            Text(issue.title)
+                        }
+                        .font(.system(size: 12))
+                    }
+                } else if issuesError {
+                    Text("Could not load recent changes.")
+                        .font(.system(size: 12))
+                        .opacity(0.7)
+                } else if issuesLoaded {
+                    Text("No changes this week.")
+                        .font(.system(size: 12))
+                        .opacity(0.7)
+                } else {
+                    Text("Loading\u{2026}")
+                        .font(.system(size: 12))
+                        .opacity(0.7)
+                }
+            }
+            .padding(12)
+        }
+        .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.25), lineWidth: 1)
+        )
+        .foregroundStyle(.white)
+    }
+
     private func loadQuote() async {
         do {
             let url = URL(string: "https://dummyjson.com/quotes/random")!
@@ -86,6 +153,26 @@ struct ContentView: View {
         } catch {
             quoteError = true
         }
+    }
+
+    private func loadIssues() async {
+        do {
+            let url = URL(string: "https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=30&sort=updated&direction=desc")!
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let all = try decoder.decode([Issue].self, from: data)
+            let cutoff = Date().addingTimeInterval(-7 * 86_400)
+            issues = all
+                .filter { $0.pullRequest == nil && ($0.closedAt ?? .distantPast) >= cutoff }
+                .sorted { ($0.closedAt ?? .distantPast) > ($1.closedAt ?? .distantPast) }
+        } catch {
+            issuesError = true
+        }
+        issuesLoaded = true
     }
 }
 
