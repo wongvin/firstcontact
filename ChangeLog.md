@@ -2,6 +2,14 @@
 
 ## 2026-04-26
 
+### feat: design and add iOS app icon (issue #13)
+
+- Generate three 1024×1024 PNG icons via PIL — light (gradient + concentric rings + center dot), dark (same — gradient is dark-friendly), tinted (white-rings-on-transparent for iOS to system-tint)
+- Visual style: purple-indigo `#667eea → #764ba2` gradient (matches the hero), concentric "transmission" rings + center dot — evokes "first contact" / radio-ripple metaphor
+- Place PNGs in `ios/FirstContact/FirstContact/Assets.xcassets/AppIcon.appiconset/` and update `Contents.json` to reference each by `filename` (per appearance variant)
+- Apple HIG compliance: no text in the icon, abstract geometry, readable at home-screen scale
+- Verified with `xcodebuild build` → `BUILD SUCCEEDED` and `xcrun simctl io … screenshot` of the simulator home screen showing the FirstContact app with the new icon
+
 ### docs: require simulator-screenshot read for UI-touching iOS changes
 
 - Add a "Verifying UI changes" section to `ios/CLAUDE.md` between "Wireless deployment" and "Capabilities not available on free signing"
