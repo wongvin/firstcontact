@@ -46,6 +46,7 @@ The project board's Status field tracks where each issue is in its lifecycle:
 | In progress | implementation has begun |
 | In review | implementation done, awaiting commit consent |
 | Done | issue closed (set automatically by project automation on close) |
+| Rejected | issue will not be implemented — declined outright, or implementation was tried but not merged (any tried-then-rejected branch is preserved for reference, e.g. #12) |
 
 When implementation begins on an issue:
 

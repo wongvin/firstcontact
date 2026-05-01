@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-04-30
+
+### chore: add Rejected status column to project board (issues #16, #17)
+
+- Add a new Status option **Rejected** (red) to the project board via GraphQL `updateProjectV2Field`, alongside the existing Backlog / Ready / In progress / In review / Done (#16)
+- Final description scoped to cover both rejection cases (#17): "issue will not be implemented (declined outright, or implementation tried but not merged)" — covers issues declined for any/no reason without code, and the tried-then-rejected pattern from #12 where a branch is preserved for reference
+- Document the new status in root `CLAUDE.md` Tracking active work table
+- Existing options preserved by ID during the GraphQL update — no items lost their assignment
+
 ## 2026-04-26
 
 ### feat: design and add iOS app icon (issue #13)
