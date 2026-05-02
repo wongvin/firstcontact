@@ -58,6 +58,11 @@ When implementation is complete and the diff is ready for commit:
 3. Move status from In progress → **In review**.
 4. Pause for explicit user consent before staging, committing, or pushing (see Commit hygiene below).
 
+When an issue is rejected (declined outright, or implementation tried but not merged):
+
+5. Move status to **Rejected**.
+6. Prefix the issue title with `[Rejected] ` (e.g. `[Rejected] Add pull-to-refresh to iOS app`) so the rejection is visible outside the board view — `gh issue list`, cross-references, and the issues page.
+
 Both the status transition and the Start date can be set from the GitHub UI (project board → click the item → fields panel on the right) or via the `gh` CLI:
 
 ```bash

@@ -2,6 +2,11 @@
 
 ## 2026-04-30
 
+### docs: require `[Rejected]` title prefix on rejected issues
+
+- Add steps 5–6 to root `CLAUDE.md` § Tracking active work: when an issue is rejected, move status to **Rejected** *and* prefix the title with `[Rejected] ` so the rejection shows in `gh issue list`, cross-references, and the issues page (not just the board)
+- Retroactively prefix the three existing Rejected issues (#12, #14, #15) via `gh issue edit --title`
+
 ### chore: add Rejected status column to project board (issues #16, #17)
 
 - Add a new Status option **Rejected** (red) to the project board via GraphQL `updateProjectV2Field`, alongside the existing Backlog / Ready / In progress / In review / Done (#16)
