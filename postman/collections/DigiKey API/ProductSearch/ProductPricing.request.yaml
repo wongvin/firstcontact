@@ -1,0 +1,12 @@
+$kind: http-request
+url: https://api.digikey.com/products/v4/search/productpricing?PartNumber={{part_number}}
+method: GET
+headers:
+  Authorization: Bearer {{access_token}}
+  X-DIGIKEY-Client-Id: "{{client_id}}"
+  X-DIGIKEY-Locale-Language: "{{locale_language}}"
+  X-DIGIKEY-Locale-Site: "{{locale_site}}"
+  X-DIGIKEY-Locale-Currency: "{{locale_currency}}"
+queryParams:
+  PartNumber: "{{part_number}}"
+order: 2000

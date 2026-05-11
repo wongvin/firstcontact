@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-10
+
+### feat: add DigiKey API Postman collection (issue #19)
+
+- Add `api/digikey/digikey.postman_collection.json` and `api/digikey/digikey.postman_environment.json` — OAuth2 (Client Credentials + Authorization Code) and ProductSearch endpoints (KeywordSearch, ProductPricing, ProductDetails, Manufacturers, Categories) against `api.digikey.com`
+- Add `postman/collections/DigiKey API/` — Postman's YAML resource layout for the same collection (one `.request.yaml` per endpoint, `.resources/definition.yaml` per folder)
+- Add `postman/environments/DigiKey API Environment.environment.yaml` — placeholder credentials, locale settings, token URL
+- Ignore `.DS_Store` and `.postman/` (Postman's local workspace-link state) in root `.gitignore`
+- Verified: JSON syntax via `python -m json.tool`; production OAuth2 token acquisition and ProductSearch KeywordSearch confirmed working from Postman
+
 ## 2026-04-30
 
 ### docs: require `[Rejected]` title prefix on rejected issues

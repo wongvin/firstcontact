@@ -1,0 +1,26 @@
+name: DigiKey API Environment
+values:
+  - key: client_id
+    value: ''
+  - key: client_secret
+    value: ''
+  - key: token_url
+    value: 'https://api.digikey.com/v1/oauth2/token'
+  - key: redirect_uri
+    value: 'https://example.com/callback'
+  - key: auth_code
+    value: ''
+  - key: access_token
+    value: ''
+  - key: refresh_token
+    value: ''
+  - key: locale_language
+    value: en
+  - key: locale_site
+    value: US
+  - key: locale_currency
+    value: USD
+  - key: keywords
+    value: microcontroller
+  - key: part_number
+    value: ''

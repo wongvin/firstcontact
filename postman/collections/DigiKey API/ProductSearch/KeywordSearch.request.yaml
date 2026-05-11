@@ -1,0 +1,19 @@
+$kind: http-request
+url: https://api.digikey.com/products/v4/search/keyword
+method: POST
+headers:
+  Authorization: Bearer {{access_token}}
+  X-DIGIKEY-Client-Id: "{{client_id}}"
+  X-DIGIKEY-Locale-Language: "{{locale_language}}"
+  X-DIGIKEY-Locale-Site: "{{locale_site}}"
+  X-DIGIKEY-Locale-Currency: "{{locale_currency}}"
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "Keywords": "{{keywords}}",
+      "Limit": 10,
+      "Offset": 0
+    }
+order: 1000

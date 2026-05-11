@@ -1,0 +1,183 @@
+{
+  "info": {
+    "name": "DigiKey API",
+    "description": "Postman collection for DigiKey Product Information V4 ProductSearch APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Get Access Token (Authorization Code)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "authorization_code" },
+                { "key": "code", "value": "{{auth_code}}" },
+                { "key": "redirect_uri", "value": "{{redirect_uri}}" },
+                { "key": "client_id", "value": "{{client_id}}" },
+                { "key": "client_secret", "value": "{{client_secret}}" }
+              ]
+            },
+            "url": {
+              "raw": "{{token_url}}",
+              "host": ["{{token_url}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Access Token (Client Credentials)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "client_credentials" },
+                { "key": "client_id", "value": "{{client_id}}" },
+                { "key": "client_secret", "value": "{{client_secret}}" }
+              ]
+            },
+            "url": {
+              "raw": "{{token_url}}",
+              "host": ["{{token_url}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "ProductSearch",
+      "item": [
+        {
+          "name": "KeywordSearch",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-DIGIKEY-Client-Id", "value": "{{client_id}}" },
+              { "key": "X-DIGIKEY-Locale-Language", "value": "{{locale_language}}" },
+              { "key": "X-DIGIKEY-Locale-Site", "value": "{{locale_site}}" },
+              { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Keywords\": \"{{keywords}}\",\n  \"Limit\": 10,\n  \"Offset\": 0\n}"
+            },
+            "url": {
+              "raw": "https://api.digikey.com/products/v4/search/keyword",
+              "protocol": "https",
+              "host": ["api", "digikey", "com"],
+              "path": ["products", "v4", "search", "keyword"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ProductPricing",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-DIGIKEY-Client-Id", "value": "{{client_id}}" },
+              { "key": "X-DIGIKEY-Locale-Language", "value": "{{locale_language}}" },
+              { "key": "X-DIGIKEY-Locale-Site", "value": "{{locale_site}}" },
+              { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
+            ],
+            "url": {
+              "raw": "https://api.digikey.com/products/v4/search/productpricing?PartNumber={{part_number}}",
+              "protocol": "https",
+              "host": ["api", "digikey", "com"],
+              "path": ["products", "v4", "search", "productpricing"],
+              "query": [
+                { "key": "PartNumber", "value": "{{part_number}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ProductDetails",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-DIGIKEY-Client-Id", "value": "{{client_id}}" },
+              { "key": "X-DIGIKEY-Locale-Language", "value": "{{locale_language}}" },
+              { "key": "X-DIGIKEY-Locale-Site", "value": "{{locale_site}}" },
+              { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
+            ],
+            "url": {
+              "raw": "https://api.digikey.com/products/v4/search/productdetails?PartNumber={{part_number}}",
+              "protocol": "https",
+              "host": ["api", "digikey", "com"],
+              "path": ["products", "v4", "search", "productdetails"],
+              "query": [
+                { "key": "PartNumber", "value": "{{part_number}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Manufacturers",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-DIGIKEY-Client-Id", "value": "{{client_id}}" },
+              { "key": "X-DIGIKEY-Locale-Language", "value": "{{locale_language}}" },
+              { "key": "X-DIGIKEY-Locale-Site", "value": "{{locale_site}}" },
+              { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
+            ],
+            "url": {
+              "raw": "https://api.digikey.com/products/v4/search/manufacturers",
+              "protocol": "https",
+              "host": ["api", "digikey", "com"],
+              "path": ["products", "v4", "search", "manufacturers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-DIGIKEY-Client-Id", "value": "{{client_id}}" },
+              { "key": "X-DIGIKEY-Locale-Language", "value": "{{locale_language}}" },
+              { "key": "X-DIGIKEY-Locale-Site", "value": "{{locale_site}}" },
+              { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
+            ],
+            "url": {
+              "raw": "https://api.digikey.com/products/v4/search/categories",
+              "protocol": "https",
+              "host": ["api", "digikey", "com"],
+              "path": ["products", "v4", "search", "categories"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
