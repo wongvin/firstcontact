@@ -1,5 +1,5 @@
 $kind: http-request
-url: https://api.digikey.com/products/v4/search/productdetails?PartNumber={{part_number}}
+url: https://api.digikey.com/products/v4/search/{{part_number}}/productdetails
 method: GET
 headers:
   Authorization: Bearer {{access_token}}
@@ -7,6 +7,4 @@ headers:
   X-DIGIKEY-Locale-Language: "{{locale_language}}"
   X-DIGIKEY-Locale-Site: "{{locale_site}}"
   X-DIGIKEY-Locale-Currency: "{{locale_currency}}"
-queryParams:
-  PartNumber: "{{part_number}}"
 order: 3000

@@ -115,6 +115,40 @@ This feature was originally a static day-of-year-rotating array (issue #2) and w
 | 5.4 | DevTools → Elements → select the `<aside id="recent-tasks">` node → switch the right pane to **Accessibility** (Appendix H). | "Computed Properties" shows `name: Changes made this week` and `role: complementary`. The `<h2>` is also reachable via the Accessibility tree as a Heading landmark. |
 | 5.5 | Run a Lighthouse Accessibility audit (Appendix I). | Score ≥ 90. Investigate any flagged item (e.g. contrast warnings on translucent panel text). |
 
+## 6. Product search (issue #20)
+
+The `web/search.html` page is a static frontend that calls a **local** Python FastAPI backend at `http://localhost:8000` (`api/digikey/server/`). The live deployed page exists but is non-functional unless the user has the backend running with their own DigiKey credentials.
+
+### 6a. Homepage link
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6a.1 | Open `https://wongvin.github.io/firstcontact/`. | Bottom-right shows a "Product search →" link in the glass-card style; does not overlap the "Changes made this week" panel. |
+| 6a.2 | Click the link. | Navigates to `/firstcontact/search.html`. New page loads with same gradient background, a "← Home" link top-left, an `<h1>Product Search</h1>`, a subtitle, and an MPN input form. |
+
+### 6b. Backend unreachable (live site, no local server)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6b.1 | On the live `/search.html` with no local backend running, type `STM32F407VGT6` and submit. | After a brief "Loading…", an error message appears: "Backend unreachable at `http://localhost:8000` — start the local server (see `api/digikey/server/README.md`)." Form re-enables; no console crash. |
+
+### 6c. Local backend smoke (developer-only)
+
+Prerequisite: backend up per `api/digikey/server/README.md` with real `DIGIKEY_CLIENT_ID` / `DIGIKEY_CLIENT_SECRET`.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6c.1 | `curl http://localhost:8000/health` | Returns `{"status":"ok"}`. |
+| 6c.2 | `curl 'http://localhost:8000/pricing?manufacturer_part_number=STM32F407VGT6'` | HTTP 200 with JSON containing `manufacturer_part_number`, `digikey_part_number`, `currency: "USD"`, non-empty `tiers` array (sorted ascending by `quantity`), and a `unit_price` / `tier_quantity` pair matching `tiers[-2]` (or `tiers[0]` if fewer than 2 entries). |
+| 6c.3 | Serve `web/` locally (`cd web && python -m http.server 8080`), open `http://localhost:8080/search.html`, type a known MPN, submit. | Headline renders as `Qty <N> → $<P> USD / unit` with both numbers in the same large font weight/size. A muted line below shows `<MPN>  ·  DK: <DigiKey-PN>`. No tier table appears. |
+| 6c.4 | Submit a bogus MPN like `NOTAPART_xyz`. | After "Loading…", an error message renders (DigiKey 404 surfaced as a 502 from the proxy with a "Part not found" detail), not the headline. |
+
+### 6d. Defense-in-depth
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6d.1 | DevTools → Elements → after a successful search, inspect the `.headline` and `.part-line` nodes. | Inner content is Text nodes only — no nested `<a>`, `<span>` (except the deliberate ones), and certainly no markup injected from the backend response. (Confirms `document.createElement` + `textContent` / `createTextNode` rendering path.) |
+
 ## Exit criteria
 
 A change ships when:

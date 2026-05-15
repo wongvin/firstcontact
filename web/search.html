@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Search</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      text-align: center;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+      box-sizing: border-box;
+    }
+    a.home-link {
+      position: fixed;
+      top: 1rem;
+      left: 1rem;
+      color: rgba(255, 255, 255, 0.85);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.4rem;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    a.home-link:hover { color: white; }
+    h1 {
+      font-size: 2.25rem;
+      margin: 0 0 0.5rem;
+    }
+    p.subtitle {
+      font-size: 1rem;
+      opacity: 0.85;
+      margin: 0 0 2rem;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.75rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 1.5rem;
+      width: min(28rem, 100%);
+      box-sizing: border-box;
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      width: min(28rem, 100%);
+      box-sizing: border-box;
+    }
+    label {
+      text-align: left;
+      font-size: 0.85rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.85;
+    }
+    input[type="text"] {
+      font-size: 1rem;
+      padding: 0.65rem 0.8rem;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 0.4rem;
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      outline: none;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    input[type="text"]::placeholder { color: rgba(255, 255, 255, 0.55); }
+    input[type="text"]:focus { border-color: rgba(255, 255, 255, 0.7); }
+    button {
+      font-size: 1rem;
+      padding: 0.65rem 1rem;
+      border: none;
+      border-radius: 0.4rem;
+      background: rgba(255, 255, 255, 0.85);
+      color: #4a3a6c;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: white; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    #result {
+      margin-top: 1.5rem;
+      min-height: 5rem;
+    }
+    .headline {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      font-size: 2.25rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .headline .sep { opacity: 0.7; font-weight: 400; }
+    .part-line {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      opacity: 0.8;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .muted {
+      opacity: 0.75;
+      font-size: 0.95rem;
+    }
+    .error { color: #ffd6d6; }
+  </style>
+</head>
+<body>
+  <a class="home-link" href="index.html">← Home</a>
+
+  <h1>Product Search</h1>
+  <p class="subtitle">Volume unit pricing from DigiKey, by manufacturer part number.</p>
+
+  <form id="search-form" autocomplete="off">
+    <label for="mpn">Manufacturer Part Number</label>
+    <input id="mpn" type="text" name="mpn" placeholder="STM32F407VGT6" required />
+    <button id="submit-btn" type="submit">Search</button>
+  </form>
+
+  <div id="result" aria-live="polite"></div>
+
+  <script>
+    const BACKEND_URL = "http://localhost:8000";
+
+    const form = document.getElementById('search-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const input = document.getElementById('mpn');
+    const result = document.getElementById('result');
+
+    function setMessage(text, className) {
+      result.replaceChildren();
+      const p = document.createElement('p');
+      if (className) p.className = className;
+      p.textContent = text;
+      result.appendChild(p);
+    }
+
+    function renderResult(data) {
+      result.replaceChildren();
+
+      const headline = document.createElement('div');
+      headline.className = 'headline';
+
+      const qtySpan = document.createElement('span');
+      qtySpan.textContent = 'Qty ' + data.tier_quantity.toLocaleString();
+      headline.appendChild(qtySpan);
+
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '→';
+      headline.appendChild(sep);
+
+      const priceSpan = document.createElement('span');
+      const unitPrice = Number(data.unit_price).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+      priceSpan.textContent = '$' + unitPrice + ' ' + data.currency + ' / unit';
+      headline.appendChild(priceSpan);
+
+      result.appendChild(headline);
+
+      const partLine = document.createElement('p');
+      partLine.className = 'part-line';
+      const mpnText = document.createTextNode(data.manufacturer_part_number);
+      partLine.appendChild(mpnText);
+      if (data.digikey_part_number) {
+        const sepNode = document.createElement('span');
+        sepNode.textContent = '  ·  DK: ';
+        partLine.appendChild(sepNode);
+        const dkText = document.createTextNode(data.digikey_part_number);
+        partLine.appendChild(dkText);
+      }
+      result.appendChild(partLine);
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const mpn = input.value.trim();
+      if (!mpn) return;
+      submitBtn.disabled = true;
+      setMessage('Loading…', 'muted');
+      try {
+        const url = BACKEND_URL + '/pricing?manufacturer_part_number=' + encodeURIComponent(mpn);
+        const res = await fetch(url);
+        if (!res.ok) {
+          let detail = 'HTTP ' + res.status;
+          try {
+            const body = await res.json();
+            if (body && body.detail) detail = body.detail;
+          } catch (_) {}
+          throw new Error(detail);
+        }
+        const data = await res.json();
+        renderResult(data);
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+          setMessage('Backend unreachable at ' + BACKEND_URL + ' — start the local server (see api/digikey/server/README.md).', 'error');
+        } else {
+          setMessage(msg, 'error');
+        }
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

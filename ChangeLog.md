@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-05-13
+
+### feat: DigiKey product search in web app (issue #20)
+
+- Add local FastAPI backend at `api/digikey/server/` — proxies DigiKey's ProductPricing API with OAuth2 client-credentials, caching the access token in-memory until 60s before expiry; CORS allows `localhost:5500/8080` and `https://wongvin.github.io`
+- New `GET /pricing?manufacturer_part_number=<MPN>` returns the resolved DigiKey part number, all normalized tiers (ascending by quantity), and a chosen tier (`tiers[-2]`, i.e. second-to-last) flattened to top-level `unit_price` + `tier_quantity`
+- Add new static page `web/search.html` — gradient + glass-card aesthetic, manufacturer-part-number input, displays only the selected tier as `Qty <N> → $<P> USD / unit` (no full tier table)
+- Add `Product search →` link bottom-right on `web/index.html`
+- Document the new page + backend smoke + defense-in-depth test cases in `web/TEST-PLAN.md` § 6
+- Credentials live in `api/digikey/server/.env` (already covered by `.gitignore` Python template); `.env.example` shipped with empty placeholders
+- The backend is intended for local development today; the frontend's `BACKEND_URL` is a single JS constant for a future migration to a hosted serverless function (no code rewrite needed)
+- Fix DigiKey Postman collection URLs — `ProductPricing` and `ProductDetails` were shipped speculatively in #19 as `?PartNumber=…` query-param requests that return 404. Corrected (both `api/digikey/digikey.postman_collection.json` and `postman/collections/DigiKey API/ProductSearch/*.yaml`) to the verified path-param form `/products/v4/search/{{part_number}}/pricing` and `…/productdetails`
+
 ## 2026-05-10
 
 ### feat: add DigiKey API Postman collection (issue #19)

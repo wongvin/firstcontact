@@ -103,13 +103,10 @@
               { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
             ],
             "url": {
-              "raw": "https://api.digikey.com/products/v4/search/productpricing?PartNumber={{part_number}}",
+              "raw": "https://api.digikey.com/products/v4/search/{{part_number}}/pricing",
               "protocol": "https",
               "host": ["api", "digikey", "com"],
-              "path": ["products", "v4", "search", "productpricing"],
-              "query": [
-                { "key": "PartNumber", "value": "{{part_number}}" }
-              ]
+              "path": ["products", "v4", "search", "{{part_number}}", "pricing"]
             }
           },
           "response": []
@@ -126,13 +123,10 @@
               { "key": "X-DIGIKEY-Locale-Currency", "value": "{{locale_currency}}" }
             ],
             "url": {
-              "raw": "https://api.digikey.com/products/v4/search/productdetails?PartNumber={{part_number}}",
+              "raw": "https://api.digikey.com/products/v4/search/{{part_number}}/productdetails",
               "protocol": "https",
               "host": ["api", "digikey", "com"],
-              "path": ["products", "v4", "search", "productdetails"],
-              "query": [
-                { "key": "PartNumber", "value": "{{part_number}}" }
-              ]
+              "path": ["products", "v4", "search", "{{part_number}}", "productdetails"]
             }
           },
           "response": []
