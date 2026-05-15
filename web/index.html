@@ -72,6 +72,21 @@
       margin-left: -1.25rem;
       opacity: 0.7;
     }
+    a.tool-link {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      color: rgba(255, 255, 255, 0.85);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.4rem;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    a.tool-link:hover { color: white; }
   </style>
 </head>
 <body>
@@ -87,6 +102,7 @@
     <h2>Changes made this week</h2>
     <ol id="recent-tasks-list"><li class="empty">Loading…</li></ol>
   </aside>
+  <a class="tool-link" href="search.html">Product search →</a>
   <script>
     document.getElementById('device').textContent =
       'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];
