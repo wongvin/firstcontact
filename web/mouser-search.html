@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Product Search</title>
+  <title>Mouser Product Search</title>
   <style>
     html, body {
       margin: 0;
@@ -43,16 +43,6 @@
       font-size: 1rem;
       opacity: 0.85;
       margin: 0 0 2rem;
-    }
-    .card {
-      background: rgba(255, 255, 255, 0.12);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      border-radius: 0.75rem;
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      padding: 1.5rem;
-      width: min(28rem, 100%);
-      box-sizing: border-box;
     }
     form {
       display: flex;
@@ -123,19 +113,19 @@
 <body>
   <a class="home-link" href="index.html">← Home</a>
 
-  <h1>Product Search</h1>
-  <p class="subtitle">Volume unit pricing from DigiKey, by manufacturer part number.</p>
+  <h1>Mouser Product Search</h1>
+  <p class="subtitle">Volume unit pricing from Mouser, by manufacturer part number.</p>
 
   <form id="search-form" autocomplete="off">
     <label for="mpn">Manufacturer Part Number</label>
-    <input id="mpn" type="text" name="mpn" placeholder="STM32F407VGT6" required />
+    <input id="mpn" type="text" name="mpn" placeholder="NE555P" required />
     <button id="submit-btn" type="submit">Search</button>
   </form>
 
   <div id="result" aria-live="polite"></div>
 
   <script>
-    const BACKEND_URL = "http://localhost:8000";
+    const BACKEND_URL = "http://localhost:8001";
 
     const form = document.getElementById('search-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -176,12 +166,12 @@
       partLine.className = 'part-line';
       const mpnText = document.createTextNode(data.manufacturer_part_number);
       partLine.appendChild(mpnText);
-      if (data.digikey_part_number) {
+      if (data.mouser_part_number) {
         const sepNode = document.createElement('span');
-        sepNode.textContent = '  ·  DK: ';
+        sepNode.textContent = '  ·  Mouser: ';
         partLine.appendChild(sepNode);
-        const dkText = document.createTextNode(data.digikey_part_number);
-        partLine.appendChild(dkText);
+        const mouserText = document.createTextNode(data.mouser_part_number);
+        partLine.appendChild(mouserText);
       }
       result.appendChild(partLine);
     }
@@ -208,7 +198,7 @@
       } catch (err) {
         const msg = err && err.message ? err.message : String(err);
         if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-          setMessage('Backend unreachable at ' + BACKEND_URL + ' — start the local server (see api/digikey/server/README.md).', 'error');
+          setMessage('Backend unreachable at ' + BACKEND_URL + ' — start the local server (see api/mouser/server/README.md).', 'error');
         } else {
           setMessage(msg, 'error');
         }

@@ -72,10 +72,16 @@
       margin-left: -1.25rem;
       opacity: 0.7;
     }
-    a.tool-link {
+    .tool-links {
       position: fixed;
       bottom: 1rem;
       right: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      align-items: stretch;
+    }
+    a.tool-link {
       color: rgba(255, 255, 255, 0.85);
       text-decoration: none;
       font-size: 0.9rem;
@@ -85,6 +91,7 @@
       background: rgba(255, 255, 255, 0.08);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
+      text-align: right;
     }
     a.tool-link:hover { color: white; }
   </style>
@@ -102,7 +109,10 @@
     <h2>Changes made this week</h2>
     <ol id="recent-tasks-list"><li class="empty">Loading…</li></ol>
   </aside>
-  <a class="tool-link" href="search.html">Product search →</a>
+  <nav class="tool-links" aria-label="Product search tools">
+    <a class="tool-link" href="digikey-search.html">DigiKey search →</a>
+    <a class="tool-link" href="mouser-search.html">Mouser search →</a>
+  </nav>
   <script>
     document.getElementById('device').textContent =
       'You are on: ' + navigator.userAgent.split('(')[1].split(')')[0];

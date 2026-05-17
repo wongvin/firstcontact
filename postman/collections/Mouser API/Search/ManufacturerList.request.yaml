@@ -1,0 +1,4 @@
+$kind: http-request
+url: https://api.mouser.com/api/v2/search/manufacturerlist?apiKey={{api_key}}
+method: GET
+order: 3000
