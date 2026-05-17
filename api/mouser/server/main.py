@@ -1,4 +1,4 @@
-"""FastAPI app exposing GET /pricing for web/digikey-search.html."""
+"""FastAPI app exposing GET /pricing for web/mouser-search.html."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from digikey_client import DigiKeyError, get_pricing
+from mouser_client import MouserError, get_pricing
 
 
 load_dotenv()
 
-app = FastAPI(title="DigiKey pricing proxy", version="0.1.0")
+app = FastAPI(title="Mouser pricing proxy", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,9 +32,9 @@ async def health() -> dict[str, str]:
 
 @app.get("/pricing")
 async def pricing(
-    manufacturer_part_number: str = Query(..., min_length=1, description="Manufacturer part number, e.g. STM32F407VGT6"),
+    manufacturer_part_number: str = Query(..., min_length=1, description="Manufacturer part number, e.g. NE555P"),
 ):
     try:
         return await get_pricing(manufacturer_part_number)
-    except DigiKeyError as err:
+    except MouserError as err:
         raise HTTPException(status_code=502, detail=str(err))

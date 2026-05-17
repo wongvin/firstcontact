@@ -117,20 +117,20 @@ This feature was originally a static day-of-year-rotating array (issue #2) and w
 
 ## 6. Product search (issue #20)
 
-The `web/search.html` page is a static frontend that calls a **local** Python FastAPI backend at `http://localhost:8000` (`api/digikey/server/`). The live deployed page exists but is non-functional unless the user has the backend running with their own DigiKey credentials.
+The `web/digikey-search.html` page is a static frontend that calls a **local** Python FastAPI backend at `http://localhost:8000` (`api/digikey/server/`). The live deployed page exists but is non-functional unless the user has the backend running with their own DigiKey credentials.
 
 ### 6a. Homepage link
 
 | ID | Steps | Expected |
 |---|---|---|
 | 6a.1 | Open `https://wongvin.github.io/firstcontact/`. | Bottom-right shows a "Product search →" link in the glass-card style; does not overlap the "Changes made this week" panel. |
-| 6a.2 | Click the link. | Navigates to `/firstcontact/search.html`. New page loads with same gradient background, a "← Home" link top-left, an `<h1>Product Search</h1>`, a subtitle, and an MPN input form. |
+| 6a.2 | Click the link. | Navigates to `/firstcontact/digikey-search.html`. New page loads with same gradient background, a "← Home" link top-left, an `<h1>DigiKey Product Search</h1>`, a subtitle, and an MPN input form. |
 
 ### 6b. Backend unreachable (live site, no local server)
 
 | ID | Steps | Expected |
 |---|---|---|
-| 6b.1 | On the live `/search.html` with no local backend running, type `STM32F407VGT6` and submit. | After a brief "Loading…", an error message appears: "Backend unreachable at `http://localhost:8000` — start the local server (see `api/digikey/server/README.md`)." Form re-enables; no console crash. |
+| 6b.1 | On the live `/digikey-search.html` with no local backend running, type `STM32F407VGT6` and submit. | After a brief "Loading…", an error message appears: "Backend unreachable at `http://localhost:8000` — start the local server (see `api/digikey/server/README.md`)." Form re-enables; no console crash. |
 
 ### 6c. Local backend smoke (developer-only)
 
@@ -140,7 +140,7 @@ Prerequisite: backend up per `api/digikey/server/README.md` with real `DIGIKEY_C
 |---|---|---|
 | 6c.1 | `curl http://localhost:8000/health` | Returns `{"status":"ok"}`. |
 | 6c.2 | `curl 'http://localhost:8000/pricing?manufacturer_part_number=STM32F407VGT6'` | HTTP 200 with JSON containing `manufacturer_part_number`, `digikey_part_number`, `currency: "USD"`, non-empty `tiers` array (sorted ascending by `quantity`), and a `unit_price` / `tier_quantity` pair matching `tiers[-2]` (or `tiers[0]` if fewer than 2 entries). |
-| 6c.3 | Serve `web/` locally (`cd web && python -m http.server 8080`), open `http://localhost:8080/search.html`, type a known MPN, submit. | Headline renders as `Qty <N> → $<P> USD / unit` with both numbers in the same large font weight/size. A muted line below shows `<MPN>  ·  DK: <DigiKey-PN>`. No tier table appears. |
+| 6c.3 | Serve `web/` locally (`cd web && python -m http.server 8080`), open `http://localhost:8080/digikey-search.html`, type a known MPN, submit. | Headline renders as `Qty <N> → $<P> USD / unit` with both numbers in the same large font weight/size. A muted line below shows `<MPN>  ·  DK: <DigiKey-PN>`. No tier table appears. |
 | 6c.4 | Submit a bogus MPN like `NOTAPART_xyz`. | After "Loading…", an error message renders (DigiKey 404 surfaced as a 502 from the proxy with a "Part not found" detail), not the headline. |
 
 ### 6d. Defense-in-depth
@@ -148,6 +148,41 @@ Prerequisite: backend up per `api/digikey/server/README.md` with real `DIGIKEY_C
 | ID | Steps | Expected |
 |---|---|---|
 | 6d.1 | DevTools → Elements → after a successful search, inspect the `.headline` and `.part-line` nodes. | Inner content is Text nodes only — no nested `<a>`, `<span>` (except the deliberate ones), and certainly no markup injected from the backend response. (Confirms `document.createElement` + `textContent` / `createTextNode` rendering path.) |
+
+## 7. Mouser product search (issue #24)
+
+The `web/mouser-search.html` page is a static frontend that calls a **local** Python FastAPI backend at `http://localhost:8001` (`api/mouser/server/`). Same shape as § 6 but for Mouser instead of DigiKey, and on a different port so both backends can run side by side.
+
+### 7a. Homepage link
+
+| ID | Steps | Expected |
+|---|---|---|
+| 7a.1 | Open `https://wongvin.github.io/firstcontact/`. | Bottom-right shows two stacked glass-card links: "DigiKey search →" (top) and "Mouser search →" (bottom). Neither overlaps the "Changes made this week" panel. |
+| 7a.2 | Click the Mouser link. | Navigates to `/firstcontact/mouser-search.html`. New page loads with same gradient background, a "← Home" link top-left, an `<h1>Mouser Product Search</h1>`, a subtitle, and an MPN input form (placeholder `NE555P`). |
+
+### 7b. Backend unreachable (live site, no local server)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 7b.1 | On the live `/mouser-search.html` with no local backend running, type `NE555P` and submit. | After a brief "Loading…", an error message appears: "Backend unreachable at `http://localhost:8001` — start the local server (see `api/mouser/server/README.md`)." Form re-enables; no console crash. |
+
+### 7c. Local backend smoke (developer-only)
+
+Prerequisite: backend up per `api/mouser/server/README.md` with a real `MOUSER_API_KEY`.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 7c.1 | `curl http://localhost:8001/health` | Returns `{"status":"ok"}`. |
+| 7c.2 | `curl 'http://localhost:8001/pricing?manufacturer_part_number=NE555P'` | HTTP 200 with JSON containing `manufacturer_part_number`, `mouser_part_number`, `currency`, non-empty `tiers` array (sorted ascending by `quantity`), and a `unit_price` / `tier_quantity` pair matching `tiers[-2]` (or `tiers[0]` if fewer than 2 entries). |
+| 7c.3 | Serve `web/` locally (`cd web && python3 -m http.server 8080`), open `http://localhost:8080/mouser-search.html`, type a known MPN, submit. | Headline renders as `Qty <N> → $<P> USD / unit` with both numbers in the same large font weight/size. A muted line below shows `<MPN>  ·  Mouser: <Mouser-PN>`. No tier table appears. |
+| 7c.4 | Submit a bogus MPN like `NOTAPART_xyz`. | After "Loading…", an error message renders ("Part not found" surfaced as a 502 from the proxy), not the headline. |
+| 7c.5 | Run both backends side by side: `uvicorn main:app --port 8000` from `api/digikey/server` and `--port 8001` from `api/mouser/server`. Open both `digikey-search.html` and `mouser-search.html` in two tabs. | Each page only talks to its own backend; searches in one tab don't affect the other. |
+
+### 7d. Defense-in-depth
+
+| ID | Steps | Expected |
+|---|---|---|
+| 7d.1 | DevTools → Elements → after a successful search, inspect the `.headline` and `.part-line` nodes. | Inner content is Text nodes only — no nested markup injected from the backend response. (Confirms `document.createElement` + `textContent` / `createTextNode` rendering path, mirroring the DigiKey page.) |
 
 ## Exit criteria
 

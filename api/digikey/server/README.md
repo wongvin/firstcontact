@@ -1,6 +1,6 @@
 # DigiKey pricing proxy
 
-Local FastAPI backend that proxies DigiKey ProductPricing API calls for [`web/search.html`](../../../web/search.html). Holds OAuth2 client credentials in a local `.env` so the static frontend never sees them.
+Local FastAPI backend that proxies DigiKey ProductPricing API calls for [`web/digikey-search.html`](../../../web/digikey-search.html). Holds OAuth2 client credentials in a local `.env` so the static frontend never sees them.
 
 ## Setup
 

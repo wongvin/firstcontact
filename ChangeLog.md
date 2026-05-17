@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-05-17
+
+### feat: Mouser product search in web app (issue #24)
+
+- Add local FastAPI backend at `api/mouser/server/` on **port 8001** (alongside the DigiKey backend on 8000 — both can run simultaneously) — reads `MOUSER_API_KEY` from `.env`, no OAuth2 token flow needed (Mouser auth is a per-request `?apiKey=` query string)
+- New `GET /pricing?manufacturer_part_number=<MPN>` calls `POST https://api.mouser.com/api/v1/search/partnumber` and normalizes the response to match the DigiKey backend's shape: top-level `unit_price` / `tier_quantity` from `tiers[-2]` (second-to-last tier; same selection rule as DigiKey for UX parity), plus `tiers[]` sorted ascending and a `mouser_part_number` echo for reference
+- Mouser-specific quirks handled: `Parts[]` can contain multiple matches → pick by exact `ManufacturerPartNumber` (case-insensitive), else first; `PriceBreaks[].Price` arrives as a string ("$0.51" or "0.51") → strip currency symbol and `float()`, tolerating comma-as-decimal locales; surfaces body-level `Errors[]` as 502s
+- Add new static page `web/mouser-search.html` — near-clone of `web/search.html` with port 8001 and Mouser-specific labels (placeholder `NE555P`, `Mouser:` caption); displays only the selected tier as `Qty <N> → $<P> USD / unit`
+- Restructure `web/index.html` bottom-right link area into a stacked two-link nav: rename the existing "Product search →" to "DigiKey search →" for clarity, add new "Mouser search →" beneath
+- Document the new page in `web/TEST-PLAN.md` § 7 (homepage link, backend-unreachable, local-backend smoke including a "both backends side by side" case, defense-in-depth)
+- Both backends remain intended for local development; the frontend's `BACKEND_URL` constant is the only edit needed to migrate to a hosted serverless function later
+- Followed by issue #27 (sub-issue) entry below: `web/search.html` → `web/digikey-search.html` rename for naming symmetry
+
+### refactor: rename web/search.html to web/digikey-search.html (issue #27, sub-issue of #24)
+
+- `git mv web/search.html web/digikey-search.html` (preserves history)
+- Inside the renamed file, update `<title>` and `<h1>` from "Product Search" to "DigiKey Product Search" for symmetry with `web/mouser-search.html`'s `<h1>Mouser Product Search</h1>`
+- Update references: `web/index.html` anchor target; `web/TEST-PLAN.md` § 6 page name + URL examples; `api/digikey/server/main.py` module docstring; `api/digikey/server/README.md` relative link in the header
+- Deployed URL `https://wongvin.github.io/firstcontact/search.html` will 404 after merge — the only known link was the homepage anchor (now updated); no redirect added since GH Pages doesn't support server-side redirects without a build step
+
 ## 2026-05-16
 
 ### feat: add Mouser API Postman collection (issue #25)
