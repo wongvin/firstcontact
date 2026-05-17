@@ -1,0 +1,8 @@
+name: Mouser API Environment
+values:
+  - key: api_key
+    value: ''
+  - key: keyword
+    value: NE555
+  - key: part_number
+    value: 595-NE555P

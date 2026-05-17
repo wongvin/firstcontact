@@ -1,0 +1,2 @@
+$kind: collection
+description: Postman collection for Mouser Search API V2 (https://api.mouser.com/api/docs/V2). Auth is a per-request `?apiKey={{api_key}}` query parameter — no OAuth2 token flow.

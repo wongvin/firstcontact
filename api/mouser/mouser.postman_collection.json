@@ -1,0 +1,78 @@
+{
+  "info": {
+    "name": "Mouser API",
+    "description": "Postman collection for Mouser Search API (https://api.mouser.com/api/docs/V2). Auth is a per-request `?apiKey={{api_key}}` query parameter — no OAuth2 token flow. Uses V1 endpoints for simple keyword/part-number searches (no required manufacturer filter) and V2 for ManufacturerList.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "item": [
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "KeywordSearch",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SearchByKeywordRequest\": {\n    \"keyword\": \"{{keyword}}\",\n    \"records\": 25,\n    \"startingRecord\": 0,\n    \"searchOptions\": \"\",\n    \"searchWithYourSignUpLanguage\": \"\"\n  }\n}"
+            },
+            "url": {
+              "raw": "https://api.mouser.com/api/v1/search/keyword?apiKey={{api_key}}",
+              "protocol": "https",
+              "host": ["api", "mouser", "com"],
+              "path": ["api", "v1", "search", "keyword"],
+              "query": [
+                { "key": "apiKey", "value": "{{api_key}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PartNumberSearch",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"SearchByPartRequest\": {\n    \"mouserPartNumber\": \"{{part_number}}\",\n    \"partSearchOptions\": \"\"\n  }\n}"
+            },
+            "url": {
+              "raw": "https://api.mouser.com/api/v1/search/partnumber?apiKey={{api_key}}",
+              "protocol": "https",
+              "host": ["api", "mouser", "com"],
+              "path": ["api", "v1", "search", "partnumber"],
+              "query": [
+                { "key": "apiKey", "value": "{{api_key}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ManufacturerList",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://api.mouser.com/api/v2/search/manufacturerlist?apiKey={{api_key}}",
+              "protocol": "https",
+              "host": ["api", "mouser", "com"],
+              "path": ["api", "v2", "search", "manufacturerlist"],
+              "query": [
+                { "key": "apiKey", "value": "{{api_key}}" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

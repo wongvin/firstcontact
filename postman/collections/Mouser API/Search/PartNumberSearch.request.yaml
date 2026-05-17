@@ -1,0 +1,15 @@
+$kind: http-request
+url: https://api.mouser.com/api/v1/search/partnumber?apiKey={{api_key}}
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "SearchByPartRequest": {
+        "mouserPartNumber": "{{part_number}}",
+        "partSearchOptions": ""
+      }
+    }
+order: 2000

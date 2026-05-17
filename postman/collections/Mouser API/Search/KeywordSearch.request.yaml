@@ -1,0 +1,18 @@
+$kind: http-request
+url: https://api.mouser.com/api/v1/search/keyword?apiKey={{api_key}}
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "SearchByKeywordRequest": {
+        "keyword": "{{keyword}}",
+        "records": 25,
+        "startingRecord": 0,
+        "searchOptions": "",
+        "searchWithYourSignUpLanguage": ""
+      }
+    }
+order: 1000

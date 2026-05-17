@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-16
+
+### feat: add Mouser API Postman collection (issue #25)
+
+- Add `api/mouser/mouser.postman_collection.json` + `api/mouser/mouser.postman_environment.json` — Postman v2.1.0 collection covering Mouser Search API (`KeywordSearch`, `PartNumberSearch`, `ManufacturerList`); auth via `?apiKey={{api_key}}` query param (no OAuth2 token flow needed)
+- Add `postman/collections/Mouser API/` YAML mirror (`Search/{KeywordSearch,PartNumberSearch,ManufacturerList}.request.yaml`) and `postman/environments/Mouser API Environment.environment.yaml` to match the dual-format layout established for DigiKey
+- Endpoint selection: V1 `/api/v1/search/keyword` + `/api/v1/search/partnumber` (no required-manufacturer-name complication) and V2 `/api/v2/search/manufacturerlist` (clean api-key smoke test)
+- Smoke-tested every URL with `curl` + a bogus `apiKey=PROBE` before committing — all three return HTTP 200 with a clean body-level error, confirming the paths exist and accept the expected body shape (no repeat of the #19 speculative-URL trap)
+
 ## 2026-05-13
 
 ### feat: DigiKey product search in web app (issue #20)
