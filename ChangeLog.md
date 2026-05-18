@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-18
+
+### refactor: combine DigiKey + Mouser API servers into one (issue #26)
+
+- Consolidate `api/digikey/server/` and `api/mouser/server/` into a single `api/server/` FastAPI app — one process, one port (8000), one `.env`, one venv, one CORS middleware block, one `/health`
+- Routing namespaced by distributor: `GET /digikey/pricing?manufacturer_part_number=<MPN>` and `GET /mouser/pricing?manufacturer_part_number=<MPN>` (same `?manufacturer_part_number=` param, same response shape as before)
+- `digikey_client.py` and `mouser_client.py` move unchanged via `git mv` (history preserved); the routing layer is the only new code (`api/server/main.py` is ~50 lines with two `APIRouter`s)
+- `.env.example` now lists all three vars: `DIGIKEY_CLIENT_ID`, `DIGIKEY_CLIENT_SECRET`, `MOUSER_API_KEY`
+- `README.md` rewritten to cover both routes; `api/digikey/digikey.postman_collection.json` and `api/mouser/mouser.postman_collection.json` stay (reference docs, not server code)
+- Frontends: `web/mouser-search.html` port 8001 → 8000; both pages now fetch `/digikey/pricing` or `/mouser/pricing` instead of bare `/pricing`; error-message README pointers updated
+- `web/TEST-PLAN.md` §§ 6 and 7 updated: §§ 6c, 7c hit the single port-8000 backend at different path prefixes; § 7c.5 reframed from "two backends side by side" to "one backend serving both"
+
 ## 2026-05-17
 
 ### feat: Mouser product search in web app (issue #24)
