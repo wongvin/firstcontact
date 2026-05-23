@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-05-22
+
+### feat: Claude Code transcript viewer (issue #33)
+
+- Add `api/server/claudecode_client.py` — JSONL parser that walks `~/.claude/projects/**/*.jsonl`, groups each session's events into `(user_prompt, assistant_response)` pairs (dropping `thinking` blocks, collapsing `tool_use` blocks, skipping `queue-operation` / `ai-title` / `attachment` / `file-history-snapshot` / `last-prompt` / `pr-link` noise), and merges every session into one flat timeline sorted by `timestamp`
+- Add a third `APIRouter(prefix="/claudecode")` on `api/server/main.py`. One endpoint: `GET /claudecode/timeline` returns `{prompts: [{index, day, timestamp, session_id, user_text, response_text}], days: [{date, first_prompt_index, last_prompt_index}]}`
+- Add new static page `web/transcripts-viewer.html` — response card on top (no `Response` label, minimal padding), datetime line, read-only `<textarea>` prompt editbox at the bottom; no sidebar, no session dropdown, no session-id chip, no "Prompt #N of M"
+- Arrow-key navigation operates on the global timeline across session boundaries: ↑↓ moves prompts, ←→ jumps days. `document.activeElement` exemption keeps the textarea's own cursor navigation intact when focused inside it
+- **Tool-call rendering tweaks:**
+  - Consecutive `tool_use` blocks collapse onto a single line — `🔧 tool_call: Read... Bash... Edit...` — instead of one line per call
+  - If the first line of a response (after grouping) is a tool-call line, it's dropped — the viewer leads with the assistant's first user-facing text rather than operational noise
+- **Day-position memory** (in-memory only): when navigating away from a day via ←/→ and back, the viewer restores the last prompt you viewed within that day instead of jumping to the day's first prompt
+- URL state: `?prompt=<N>` for deep-linking by global prompt index (default = newest prompt)
+- Restructure `web/index.html` bottom-right nav into three stacked links: `DigiKey search →`, `Mouser search →`, `Transcripts viewer →`
+- Document the new page in `web/TEST-PLAN.md` § 8 (homepage link, backend-unreachable, local-backend smoke including keyboard navigation across session boundaries, defense-in-depth on both response and prompt rendering)
+- No new Python dependencies (stdlib `json`, `pathlib` only)
+
 ## 2026-05-18
 
 ### refactor: combine DigiKey + Mouser API servers into one (issue #26)

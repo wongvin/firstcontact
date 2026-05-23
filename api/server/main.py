@@ -1,12 +1,11 @@
-"""Combined FastAPI app exposing /digikey/pricing and /mouser/pricing.
+"""Combined FastAPI app exposing /digikey/pricing, /mouser/pricing, and /claudecode/timeline.
 
-Replaces the previous two per-distributor servers (api/digikey/server/ and
-api/mouser/server/). One process, one port, one .env with both sets of
-credentials, one CORS middleware block, one venv to manage.
+One process, one port, one .env (DigiKey + Mouser credentials), one CORS middleware block.
 
 Frontends:
-- web/digikey-search.html → GET /digikey/pricing
-- web/mouser-search.html  → GET /mouser/pricing
+- web/digikey-search.html  → GET /digikey/pricing
+- web/mouser-search.html   → GET /mouser/pricing
+- web/transcripts-viewer.html → GET /claudecode/timeline
 """
 
 from __future__ import annotations
@@ -15,13 +14,14 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from claudecode_client import build_timeline
 from digikey_client import DigiKeyError, get_pricing as get_digikey_pricing
 from mouser_client import MouserError, get_pricing as get_mouser_pricing
 
 
 load_dotenv()
 
-app = FastAPI(title="Part-pricing proxy (DigiKey + Mouser)", version="0.2.0")
+app = FastAPI(title="Part-pricing proxy + Claude Code transcript viewer", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,6 +37,7 @@ app.add_middleware(
 
 digikey_router = APIRouter(prefix="/digikey", tags=["digikey"])
 mouser_router = APIRouter(prefix="/mouser", tags=["mouser"])
+claudecode_router = APIRouter(prefix="/claudecode", tags=["claudecode"])
 
 
 @digikey_router.get("/pricing")
@@ -59,8 +60,15 @@ async def mouser_pricing(
         raise HTTPException(status_code=502, detail=str(err))
 
 
+@claudecode_router.get("/timeline")
+async def claudecode_timeline():
+    """Flat globally-sorted timeline of (user_prompt, assistant_response) pairs across all sessions."""
+    return build_timeline()
+
+
 app.include_router(digikey_router)
 app.include_router(mouser_router)
+app.include_router(claudecode_router)
 
 
 @app.get("/health")

@@ -184,6 +184,45 @@ Prerequisite: combined backend up per `api/server/README.md` with a real `MOUSER
 |---|---|---|
 | 7d.1 | DevTools → Elements → after a successful search, inspect the `.headline` and `.part-line` nodes. | Inner content is Text nodes only — no nested markup injected from the backend response. (Confirms `document.createElement` + `textContent` / `createTextNode` rendering path, mirroring the DigiKey page.) |
 
+## 8. Claude Code transcript viewer (issue #33)
+
+The `web/transcripts-viewer.html` page is a static frontend that calls the combined backend at `http://localhost:8000/claudecode/timeline` (`api/server/`). The backend reads JSONL files from `~/.claude/projects/**/*.jsonl` and returns a globally-sorted timeline of `(user_prompt, assistant_response)` pairs with per-day buckets. No external API, no credentials — purely local file read.
+
+### 8a. Homepage link
+
+| ID | Steps | Expected |
+|---|---|---|
+| 8a.1 | Open `https://wongvin.github.io/firstcontact/`. | Bottom-right shows three stacked glass-card links: `DigiKey search →`, `Mouser search →`, `Transcripts viewer →`. |
+| 8a.2 | Click the Transcripts-viewer link. | Navigates to `/firstcontact/transcripts-viewer.html`. Page loads with the same gradient background, a "← Home" link top-left, a "Response" card occupying most of the page, a datetime line beneath it, a `<textarea readonly>` prompt editbox, and a `↑↓ prompts · ←→ days` help line. |
+
+### 8b. Backend unreachable (live site, no local server)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 8b.1 | On the live `/transcripts-viewer.html` with no local backend running, wait for the initial load. | Response card shows: "Backend unreachable at `http://localhost:8000` — start the local server (see `api/server/README.md`)." No console crash. |
+
+### 8c. Local-backend smoke (developer-only)
+
+Prerequisite: combined backend up per `api/server/README.md` (`.env` doesn't need credentials for this endpoint — the timeline parser only reads local JSONL files).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 8c.1 | `curl http://localhost:8000/health` | Returns `{"status":"ok"}`. |
+| 8c.2 | `curl -s 'http://localhost:8000/claudecode/timeline' \| jq '{prompts: (.prompts\|length), days: (.days\|length), first: .prompts[0]}'` | Returns JSON with non-empty `prompts` and `days` counts; the first prompt has `user_text`, `response_text`, `timestamp`, `session_id` strings. |
+| 8c.3 | Serve `web/` locally (`cd web && python3 -m http.server 8080`), open `http://localhost:8080/transcripts-viewer.html`. | Latest prompt's response renders in the top card; datetime label shows above the prompt editbox; the prompt textarea contains the user's prompt text. No "Prompt #N of M" line, no session-id chip, no sidebar, no session dropdown. |
+| 8c.4 | Press ↓ a few times. | The response card and prompt textarea update. The prompt index increments — may cross into a different session_id (verify by reading the timeline payload's `session_id` for the displayed prompt; it can change). |
+| 8c.5 | Press ←. | Jumps back to the previous day's first prompt. May cross session boundaries cleanly (the days array is global). |
+| 8c.6 | Press → from the same prompt. | Jumps to the next day's first prompt. |
+| 8c.7 | Click into the prompt `<textarea>`, then press ↑ or ↓. | Cursor moves *within* the textarea (text-select navigation); the page does NOT advance to a different prompt. Click outside to resume global navigation. |
+| 8c.8 | Refresh the page with `?prompt=5` appended. | The viewer loads with the 5th prompt (global index) shown. |
+
+### 8d. Defense-in-depth
+
+| ID | Steps | Expected |
+|---|---|---|
+| 8d.1 | DevTools → Elements → inspect the response card's body span. | Inner content is Text nodes only — no nested markup injected from the JSONL response (confirms `textContent` rendering path). |
+| 8d.2 | Inspect the prompt textarea. | Element is `<textarea readonly>` with a `.value` property set; no inner HTML. Even if a JSONL line contained `<script>...</script>`, it would appear as literal text in the textarea. |
+
 ## Exit criteria
 
 A change ships when:
