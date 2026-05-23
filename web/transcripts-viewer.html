@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude Code Transcript Viewer</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 1rem;
+      box-sizing: border-box;
+      gap: 0.75rem;
+    }
+    a.home-link {
+      position: fixed;
+      top: 1rem;
+      left: 1rem;
+      color: rgba(255, 255, 255, 0.85);
+      text-decoration: none;
+      font-size: 0.9rem;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.4rem;
+      background: rgba(255, 255, 255, 0.08);
+      z-index: 10;
+    }
+    a.home-link:hover { color: white; }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 3.5rem;
+      min-height: 0;
+    }
+    .response-card {
+      flex: 1;
+      min-height: 0;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.75rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 0.4rem 0.75rem;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+    .response-card .body { display: block; }
+    .datetime {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85rem;
+      opacity: 0.75;
+      padding-left: 0.5rem;
+    }
+    textarea.prompt {
+      width: 100%;
+      min-height: 5rem;
+      max-height: 30vh;
+      box-sizing: border-box;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.75rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: white;
+      padding: 1rem 1.25rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      resize: vertical;
+      outline: none;
+    }
+    textarea.prompt:focus { border-color: rgba(255, 255, 255, 0.55); }
+    .help {
+      text-align: center;
+      font-size: 0.8rem;
+      opacity: 0.7;
+      letter-spacing: 0.04em;
+    }
+    .muted { opacity: 0.75; font-size: 0.95rem; }
+    .error { color: #ffd6d6; }
+  </style>
+</head>
+<body>
+  <a class="home-link" href="index.html">← Home</a>
+
+  <main>
+    <section class="response-card" id="response-card" aria-live="polite">
+      <span class="body" id="response-body">Loading…</span>
+    </section>
+
+    <div class="datetime" id="datetime"></div>
+
+    <textarea class="prompt" id="prompt" readonly aria-label="User prompt"></textarea>
+
+    <div class="help">↑↓ prompts &nbsp;·&nbsp; ←→ days</div>
+  </main>
+
+  <script>
+    const BACKEND_URL = "http://localhost:8000";
+
+    const responseBody = document.getElementById('response-body');
+    const datetimeEl = document.getElementById('datetime');
+    const promptEl = document.getElementById('prompt');
+
+    let prompts = [];
+    let days = [];
+    let currentIndex = 0;
+    const lastIndexByDay = {};  // remembers last viewed prompt index within each day
+
+    function setMessage(text, className) {
+      responseBody.textContent = text;
+      responseBody.className = 'body' + (className ? ' ' + className : '');
+      datetimeEl.textContent = '';
+      promptEl.value = '';
+    }
+
+    function formatDatetime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return iso;
+      const pad = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + '  ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function render(index) {
+      if (!prompts.length) {
+        setMessage('No prompts found in ~/.claude/projects/.', 'muted');
+        return;
+      }
+      const clamped = Math.max(0, Math.min(prompts.length - 1, index));
+      currentIndex = clamped;
+      const p = prompts[clamped];
+      responseBody.className = 'body';
+      responseBody.textContent = p.response_text || '(no response captured)';
+      datetimeEl.textContent = formatDatetime(p.timestamp);
+      promptEl.value = p.user_text || '';
+
+      if (p.day) lastIndexByDay[p.day] = clamped;
+
+      const url = new URL(window.location.href);
+      url.searchParams.set('prompt', String(clamped));
+      window.history.replaceState(null, '', url.toString());
+    }
+
+    function dayIndexOf(currentDay) {
+      for (let i = 0; i < days.length; i++) {
+        if (days[i].date === currentDay) return i;
+      }
+      return -1;
+    }
+
+    function targetForDay(day) {
+      const remembered = lastIndexByDay[day.date];
+      if (remembered != null
+          && remembered >= day.first_prompt_index
+          && remembered <= day.last_prompt_index) {
+        return remembered;
+      }
+      return day.first_prompt_index;
+    }
+
+    function goToPrevDay() {
+      if (!prompts.length || !days.length) return;
+      const di = dayIndexOf(prompts[currentIndex].day);
+      if (di > 0) {
+        render(targetForDay(days[di - 1]));
+      } else if (di === -1 && days.length) {
+        // current prompt's day not in days[] — fall back to first day
+        render(targetForDay(days[0]));
+      }
+    }
+
+    function goToNextDay() {
+      if (!prompts.length || !days.length) return;
+      const di = dayIndexOf(prompts[currentIndex].day);
+      if (di >= 0 && di < days.length - 1) {
+        render(targetForDay(days[di + 1]));
+      }
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (document.activeElement === promptEl) return;  // textarea owns its arrow keys
+      const key = event.key;
+      if (key === 'ArrowUp') {
+        event.preventDefault();
+        render(currentIndex - 1);
+      } else if (key === 'ArrowDown') {
+        event.preventDefault();
+        render(currentIndex + 1);
+      } else if (key === 'ArrowLeft') {
+        event.preventDefault();
+        goToPrevDay();
+      } else if (key === 'ArrowRight') {
+        event.preventDefault();
+        goToNextDay();
+      }
+    });
+
+    (async function load() {
+      try {
+        const res = await fetch(BACKEND_URL + '/claudecode/timeline');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        prompts = Array.isArray(data.prompts) ? data.prompts : [];
+        days = Array.isArray(data.days) ? data.days : [];
+        const urlParams = new URLSearchParams(window.location.search);
+        const requested = parseInt(urlParams.get('prompt') || '', 10);
+        const startIndex = Number.isFinite(requested)
+          ? requested
+          : Math.max(0, prompts.length - 1);
+        render(startIndex);
+      } catch (err) {
+        const msg = err && err.message ? err.message : String(err);
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+          setMessage('Backend unreachable at ' + BACKEND_URL + ' — start the local server (see api/server/README.md).', 'error');
+        } else {
+          setMessage(msg, 'error');
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
