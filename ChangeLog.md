@@ -2,6 +2,10 @@
 
 ## 2026-05-23
 
+### fix: /cleanup-branches handles current-branch delete (issue #40)
+
+- `.claude/skills/cleanup-branches/SKILL.md` step 4: when a candidate is the currently-checked-out branch, switch to `main` and fast-forward via `git merge --ff-only origin/main` (or equivalently `git pull origin main`) before the delete. Documented why bare `git pull` / `git pull --ff-only` fails here — the step-1 `git fetch --prune` leaves `.git/FETCH_HEAD` with multiple for-merge entries, so `pull` aborts with `fatal: Cannot fast-forward to multiple branches`; specifying the source explicitly bypasses FETCH_HEAD.
+
 ### docs(infra): refine /ship skill conventions (issue #38)
 
 - `.claude/skills/ship/SKILL.md` subject convention: template now `<prefix>: <summary> (#N)` with a ≤50-char total budget so the issue tag stays visible in narrow UIs (`git log --oneline`, GitHub PR titles); body must not contain `Closes #N` or other `#N` refs; implementation-summary comment trigger derives the issue number from the branch name (`<N>-<slug>`) instead of scanning the commit body for `Closes #N`.
