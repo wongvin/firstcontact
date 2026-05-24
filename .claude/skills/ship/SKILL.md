@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Commit staged changes, push to origin, and close any "Closes #N" issues with an implementation summary. The user invoking /ship IS the explicit commit consent CLAUDE.md normally gates on.
+description: Commit staged changes, push to origin, and post an implementation-summary comment on the branch's issue. The user invoking /ship IS the explicit commit consent CLAUDE.md normally gates on.
 ---
 
 `/ship` is the explicit user consent for the commit+push step that CLAUDE.md
@@ -11,19 +11,24 @@ normally gates on. Run this sequence:
    summary and add an entry under today's date heading with the matching
    conventional prefix (`feat:`, `fix:`, `docs:`, …).
 3. Write the commit using a HEREDOC commit message — never inline — so backticks
-   and parentheses parse correctly:
+   and parentheses parse correctly. Append `(#N)` to the subject (for
+   multi-issue commits: `(#N, #M)`); do **not** add `Closes #N` or any other
+   `#N` reference in the body. **Keep the whole subject ≤50 chars** so the
+   trailing `(#N)` stays visible in `git log --oneline`, GitHub PR-title
+   fields, and other narrow UIs — if the summary is running long, tighten
+   the wording rather than letting the issue tag get clipped:
    ```bash
    git commit -m "$(cat <<'EOF'
-   <conventional prefix>: <summary>
+   <conventional prefix>: <summary> (#N)
 
    <body>
-
-   Closes #N
    EOF
    )"
    ```
+   If a heredoc fails to parse (rare, with certain shell environments),
+   fall back to `git commit -F <file>` after writing the message to a file.
 4. `git push` to origin.
-5. For each `Closes #N` referenced in the commit body, post an
+5. Derive the issue number from the branch name (`<N>-<slug>`) and post an
    implementation-summary comment via heredoc stdin:
    ```bash
    gh issue comment N --body-file - <<'EOF'
@@ -31,16 +36,21 @@ normally gates on. Run this sequence:
    Skip ChangeLog noise — focus on the functional change.>
    EOF
    ```
-   The issue itself closes automatically because of the `Closes #N` in the
-   commit (GitHub's "linked PR/commit closes issue" behavior). Project board
-   automation moves it to Done.
-6. Report the commit SHA, push result, and which issues were closed.
+   If the branch name doesn't match `<N>-<slug>`, or the commit addresses
+   multiple issues, ask the user which issues to comment on before posting.
+   Closing the issue itself is handled separately (PR merge, or manual
+   `gh issue close`) — `/ship` only posts the summary.
+6. Report the commit SHA, push result, and which issue(s) received a summary
+   comment.
 
 Rules:
 
 - Never `--no-verify`.
+- Never write `Closes #N` in the commit message. The subject's `(#N)` suffix
+  is the only `#N` reference; the body stays free of issue numbers. Closing
+  the issue happens elsewhere (PR body, manual `gh issue close`).
+- Subject budget ≤50 chars total (including the `(#N)` suffix) — if it spills,
+  shorten the summary, not the suffix.
 - Never bypass the heredoc commit-message path — inline `-m` mangles
   backticks/parens.
 - Don't delete branches as part of `/ship` — that's `/cleanup-branches`.
-- If `Closes #N` references the wrong issue or there are none, ask the user
-  before posting anything to issues.

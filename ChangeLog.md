@@ -2,6 +2,10 @@
 
 ## 2026-05-23
 
+### docs(infra): refine /ship commit-subject convention (issue #38)
+
+- `.claude/skills/ship/SKILL.md`: subject template now `<prefix>: <summary> (#N)` with a ≤50-char total budget so the issue tag stays visible in narrow UIs (`git log --oneline`, GitHub PR titles); body must not contain `Closes #N` or other `#N` refs; implementation-summary comment trigger derives the issue number from the branch name (`<N>-<slug>`) instead of scanning the commit body for `Closes #N`.
+
 ### fix: /cleanup-branches checks origin/main instead of stale local main (issue #38)
 
 - `.claude/skills/cleanup-branches/SKILL.md` step 2: `git branch --merged origin/main` (was `--merged main`). Local `main` lags `origin/main` between a PR merge and the next `git pull`, so the previous form undercounted candidates immediately after a merge — hit during the #36 cleanup itself.
