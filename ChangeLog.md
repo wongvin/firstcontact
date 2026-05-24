@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-23
+
+### docs/infra: adopt Claude insights suggestions (issue #36)
+
+- `CLAUDE.md`: add `### Branching` section (feature branch before first edit, `<N>-<slug>` naming); add `### Git branch cleanup` section (delete local + remote after merge, preserve Rejected branches, ask before force-deleting unmerged); add duplicate-issue close rule to `### Closing issues`; add step 4 to `### Tracking active work` requiring a pre-commit implementation-summary issue comment for review on github.com
+- `.claude/skills/cleanup-branches/SKILL.md` — new `/cleanup-branches` skill: fetch-prune, list merged branches, cross-check against `[Rejected]` issues, pause before deletion
+- `.claude/skills/ship/SKILL.md` — new `/ship` skill: invocation is the explicit commit consent gate; runs status/diff review, ChangeLog check, heredoc commit, push, then heredoc implementation-summary close comments for `Closes #N` refs
+- `.claude/settings.json` — new committed post-edit hook: `markdownlint-cli2 --fix` runs only on the touched `.md` file via `$CLAUDE_FILE_PATHS`, not the whole tree
+- GitHub MCP server installed at user scope (run-once setup; auth via `gh auth token`)
+
 ## 2026-05-22
 
 ### feat: Claude Code transcript viewer (issue #33)

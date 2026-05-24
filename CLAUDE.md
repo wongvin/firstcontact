@@ -56,12 +56,13 @@ When implementation begins on an issue:
 When implementation is complete and the diff is ready for commit:
 
 3. Move status from In progress → **In review**.
-4. Pause for explicit user consent before staging, committing, or pushing (see Commit hygiene below).
+4. Post an **implementation-summary comment on the issue** (via `gh issue comment N --body-file -` heredoc) so the user can review it on github.com — covering files changed, key code pieces, and verification done. Same content as the eventual close comment, posted earlier for review.
+5. Pause for explicit user consent before staging, committing, or pushing (see Commit hygiene below). The user reviews the comment on the issue, not just in chat.
 
 When an issue is rejected (declined outright, or implementation tried but not merged):
 
-5. Move status to **Rejected**.
-6. Prefix the issue title with `[Rejected] ` (e.g. `[Rejected] Add pull-to-refresh to iOS app`) so the rejection is visible outside the board view — `gh issue list`, cross-references, and the issues page.
+6. Move status to **Rejected**.
+7. Prefix the issue title with `[Rejected] ` (e.g. `[Rejected] Add pull-to-refresh to iOS app`) so the rejection is visible outside the board view — `gh issue list`, cross-references, and the issues page.
 
 Both the status transition and the Start date can be set from the GitHub UI (project board → click the item → fields panel on the right) or via the `gh` CLI:
 
@@ -88,6 +89,21 @@ gh project item-edit --id "$ITEM_ID" --field-id "$START_DATE_FIELD" \
 The CLI path requires the `project` scope on your `gh` token. The default
 `read:project` scope is read-only and insufficient for writes; refresh with
 `gh auth refresh -s project` once if you hit a scope error.
+
+### Branching
+
+Every issue's implementation lives on its own feature branch — never accumulate
+feature work directly on `main`. Create the branch **before** the first edit,
+not after:
+
+```bash
+git checkout main && git pull
+git checkout -b <issue-number>-<short-slug>
+```
+
+Naming convention: `<issue-number>-<short-slug>` (e.g. `33-transcript-viewer`,
+`36-claude-insights-suggestions`). Match the existing branches in
+`git branch -a` for style.
 
 ### Commit hygiene
 
@@ -119,3 +135,23 @@ long markdown bodies, post via `gh issue comment N --body-file -` with a
 stdin heredoc (avoids bash parse errors on backticks/quotes). The same
 `-F -` heredoc pattern is the safe form for `git commit` messages that
 contain shell metacharacters like parentheses.
+
+If closing as a duplicate, reference the canonical issue (e.g. "Duplicate of #N")
+in the close comment and skip the implementation summary.
+
+### Git branch cleanup
+
+When a branch's work has fully landed on `main` (merged PR, or closed-without-merge
+with the change applied), delete the branch **both locally and remotely**:
+
+```bash
+git branch -d <name>
+git push origin --delete <name>
+```
+
+Exceptions:
+
+- Any branch tied to a **Rejected** issue is preserved (see Status table) —
+  don't delete locally or remotely.
+- If the branch is unmerged and not Rejected, ask before force-deleting
+  (`git branch -D` or remote delete). Don't silently discard work.
