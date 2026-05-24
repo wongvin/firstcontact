@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Commit staged changes, push to origin, and post an implementation-summary comment on the branch's issue. The user invoking /ship IS the explicit commit consent CLAUDE.md normally gates on.
+description: Commit staged changes, push to origin, post an implementation-summary comment on the branch's issue, and ensure a PR exists (creating one if needed). The user invoking /ship IS the explicit commit consent CLAUDE.md normally gates on.
 ---
 
 `/ship` is the explicit user consent for the commit+push step that CLAUDE.md
@@ -40,8 +40,27 @@ normally gates on. Run this sequence:
    multiple issues, ask the user which issues to comment on before posting.
    Closing the issue itself is handled separately (PR merge, or manual
    `gh issue close`) — `/ship` only posts the summary.
-6. Report the commit SHA, push result, and which issue(s) received a summary
-   comment.
+6. Ensure a PR exists for the branch and surface its URL:
+   ```bash
+   gh pr view --json url,state  # check first
+   ```
+   If no PR exists, create one against `main`. PR title follows the same
+   `<prefix>: <summary> (#N)` shape as the commit subject (single-commit
+   branch: reuse the commit subject; multi-commit branch: summarize across
+   commits). PR body should include a short summary and `Closes #N` so the
+   issue auto-closes on merge — this is the one place `Closes #N` is
+   allowed (PR body, not commit message):
+   ```bash
+   gh pr create --base main --title "<prefix>: <summary> (#N)" \
+     --body-file - <<'EOF'
+   <one-paragraph summary>
+
+   Closes #N
+   EOF
+   ```
+   Print the resulting URL so the user can click through.
+7. Report the commit SHA, push result, which issue(s) received a summary
+   comment, and the PR URL.
 
 Rules:
 

@@ -2,9 +2,10 @@
 
 ## 2026-05-23
 
-### docs(infra): refine /ship commit-subject convention (issue #38)
+### docs(infra): refine /ship skill conventions (issue #38)
 
-- `.claude/skills/ship/SKILL.md`: subject template now `<prefix>: <summary> (#N)` with a ≤50-char total budget so the issue tag stays visible in narrow UIs (`git log --oneline`, GitHub PR titles); body must not contain `Closes #N` or other `#N` refs; implementation-summary comment trigger derives the issue number from the branch name (`<N>-<slug>`) instead of scanning the commit body for `Closes #N`.
+- `.claude/skills/ship/SKILL.md` subject convention: template now `<prefix>: <summary> (#N)` with a ≤50-char total budget so the issue tag stays visible in narrow UIs (`git log --oneline`, GitHub PR titles); body must not contain `Closes #N` or other `#N` refs; implementation-summary comment trigger derives the issue number from the branch name (`<N>-<slug>`) instead of scanning the commit body for `Closes #N`.
+- `.claude/skills/ship/SKILL.md` PR step: new step 6 — after push and the issue comment, ensure a PR exists for the branch (create one with `gh pr create --base main` if missing) and surface the URL. PR body is the one place `Closes #N` is allowed, so the issue auto-closes on merge.
 
 ### fix: /cleanup-branches checks origin/main instead of stale local main (issue #38)
 
