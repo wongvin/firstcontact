@@ -188,6 +188,8 @@ Prerequisite: combined backend up per `api/server/README.md` with a real `MOUSER
 
 The `web/transcripts-viewer.html` page is a static frontend that calls the combined backend at `http://localhost:8000/claudecode/timeline` (`api/server/`). The backend reads JSONL files from `~/.claude/projects/**/*.jsonl` and returns a globally-sorted timeline of `(user_prompt, assistant_response)` pairs with per-day buckets. No external API, no credentials — purely local file read.
 
+> **Refined in #35 — see § 9 below for the new layout cases.** 8a/8b still apply unchanged. 8c.7 (textarea-focus exemption) is obsolete since the textarea is gone in #35; the replacement regression case lives in § 9f.
+
 ### 8a. Homepage link
 
 | ID | Steps | Expected |
@@ -222,6 +224,110 @@ Prerequisite: combined backend up per `api/server/README.md` (`.env` doesn't nee
 |---|---|---|
 | 8d.1 | DevTools → Elements → inspect the response card's body span. | Inner content is Text nodes only — no nested markup injected from the JSONL response (confirms `textContent` rendering path). |
 | 8d.2 | Inspect the prompt textarea. | Element is `<textarea readonly>` with a `.value` property set; no inner HTML. Even if a JSONL line contained `<script>...</script>`, it would appear as literal text in the textarea. |
+
+## 9. Claude Code transcripts viewer — layout refinement (issue #35)
+
+Issue #35 collapses the viewer to a single output box with a single prompt line above the response body. The prompt line normally reads `<date> <time> User: <prompt>`; when the previous response ends with `?`, the line is prefixed with the Claude question so it reads `<date> <time> Claude: <question> User: <prompt>` on the same line (no separate Claude row, same `User:` separator in both cases). Time renders as `hh:mm AM/PM` (zero-padded hour). The prompt line itself is a bold dark-navy text on a near-white pill for high contrast against the response body. The read-only prompt textarea is removed. The response body uses a hand-rolled markdown subset (no external dependencies; built via `createElement` + `textContent`).
+
+### 9a. Layout shape
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9a.1 | DevTools → Elements panel. | No `<textarea>` anywhere in the document. No `#claude-line` either. An `<article id="output-card">` is present, containing exactly two children in order: `<div id="prompt-line">` and `<div id="response-body">`. |
+| 9a.2 | Inspect `.output-card` computed styles. | Same glass-card look as before — `rgba(255, 255, 255, 0.12)` background, blur, rounded border, `overflow-y: auto`. |
+| 9a.3 | Inspect `#prompt-line` computed `font-family`, `color`, `font-weight`, and `background-color`. | Font family resolves to the fixed-width stack (`ui-monospace`, `SFMono-Regular`, `Menlo`, monospace). Color is the dark navy (`rgb(26, 26, 46)` / `#1a1a2e`). Font weight ≥ 700. Background is the near-white pill (`rgba(255, 255, 255, 0.88)`). |
+| 9a.4 | Inside `#prompt-line`, find the `<span class="time-chip">`. | Wraps just the time portion (`hh:mm AM\|PM`). No special styling — the span exists as a DOM hook in case future styling is added, but currently renders identically to plain text. The date prefix and the `User:` (or `Claude:` … `User:`) suffix are plain text nodes outside the chip. |
+
+### 9b. Datetime format (hh:mm AM/PM)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9b.1 | Navigate to any prompt whose previous response does NOT end with `?` (no Claude prefix). | The `#prompt-line` text reads `YYYY-MM-DD hh:mm AM\|PM User: <prompt>` — **hour zero-padded** (e.g. `01:05 PM`, `09:07 AM`), minute zero-padded; the datetime is the **prompt's** own timestamp. The `hh:mm AM\|PM` portion is inside `<span class="time-chip">` (currently unstyled). |
+| 9b.2 | Navigate to a prompt whose previous response ends with `?` (Claude prefix present). | The `#prompt-line` text reads `YYYY-MM-DD hh:mm AM\|PM Claude: <question> User: <prompt>` — and the leading datetime is the **previous** prompt's timestamp (when Claude asked the question), not the current prompt's. Same `User:` separator (with colon) as the no-prefix case, not the old `(User)` form. |
+| 9b.3 | If a prompt with a midnight (00:xx) or noon (12:xx) timestamp exists: navigate to it. | Renders as `12:xx AM` (midnight) or `12:xx PM` (noon) — not `00:xx AM` or `12:xx AM` for noon. |
+| 9b.4 | Pick a prompt timestamp known to fall in the 1–9 AM/PM range. | Hour renders zero-padded: `01:05 PM`, `09:30 AM` — not `1:05 PM` / `9:30 AM`. |
+
+### 9c. Question prefix on the prompt line
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9c.1 | Navigate to a prompt whose **previous** prompt's `response_text` ends with `?` (peek at the timeline JSON to find one). | `#prompt-line` reads `<date> <time-chip> Claude: <last-question> User: <prompt>` on a single line — no separate Claude row above. `<last-question>` is just the last sentence/line ending in `?`, not the whole previous response. |
+| 9c.2 | Navigate to a prompt whose previous response does NOT end with `?`. | `#prompt-line` reads `<date> <time-chip> User: <prompt>` — no Claude prefix, just `User:` after the time chip. |
+| 9c.3 | Set `?prompt=0` in the URL and reload. | Same as 9c.2 — no Claude prefix (no previous prompt to derive a question from). |
+| 9c.4 | If a transcript pair exists where the previous response is multi-sentence ending with `...First sentence. What about X?`: navigate to it. | The prefix portion shows just `What about X?` (between `Claude: ` and ` User: `) — not the full multi-sentence text. |
+
+### 9d. Markdown rendering
+
+Seed a response (DevTools Local Overrides on `/claudecode/timeline`, Appendix E) that contains all of:
+- a markdown link `[example](https://example.com)`
+- a bare URL `https://example.org`
+- a fenced code block (triple backticks, `js` language tag, a couple of lines)
+- inline code: `` `inlineCode` ``
+- an `## h2 heading`
+- an unordered list (two `- item` lines)
+- an ordered list (two `1. item` / `2. item` lines)
+- `**bold**` and `*italic*` text
+- a GFM table (header row, `|---|---|` separator, two body rows; at least one cell containing inline markdown like `` `code` ``, `[link](url)`, `**bold**`)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9d.1 | Navigate to the seeded prompt. | Every markdown construct renders with the appropriate element: `<a>` for both link forms, `<pre><code>` for the fenced block, inline `<code>` for the inline span, `<h2>` for the heading, `<ul><li>` / `<ol><li>` for the lists, `<strong>` and `<em>` for bold/italic. |
+| 9d.2 | Click the rendered `[example](https://example.com)` link. | Opens `https://example.com` in a **new tab** (the rendered `<a>` carries `target="_blank"` and `rel="noopener noreferrer"`). The original transcripts-viewer tab stays where it was. |
+| 9d.3 | Inspect the fenced-code `<pre>` element. | `background` is the dim translucent block style; `overflow-x: auto` so wide code scrolls horizontally inside the block (page itself doesn't gain a horizontal scrollbar). |
+| 9d.4 | Inspect the rendered GFM table in the Elements panel. | DOM is `<table><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr>...</tbody></table>`. Each cell's inline markdown renders as its own child element — the inline tokenizer is run per cell. |
+| 9d.5 | A response containing a single line with a `\|` character but NO `\|---\|---\|` separator line below it. | The line renders as a paragraph, not a table. (The table detector requires both the header pipes AND the separator on the next line.) |
+| 9d.6 | Seed a response with inline code containing an absolute plan-file path, e.g. `` `/Users/vwong/.claude/plans/plan-foo.md` `` (with and without a `:42` line suffix). Inspect each in Elements. | DOM is `<a class="plan-path" href="vscode://file/Users/vwong/.claude/plans/plan-foo.md" target="_blank" rel="noopener noreferrer"><code>…</code></a>`. The trailing `:LINE` (and optional `:COL`) is preserved in the href. |
+| 9d.7 | Seed a response with inline code that is NOT a plan path: `` `ChangeLog.md` ``, `` `web/transcripts-viewer.html` ``, `` `/Users/vwong/repos/firstcontact/api/server/main.py` ``, `` `~/.claude/plans/foo.md` ``, `` `/Users/vwong/.claude/skills/foo.md` ``, `` `42-foo` ``. | Each renders as a plain `<code>` element — no `<a>` wrapper. Only absolute paths matching `<root>/.claude/plans/<name>.md` are wrapped. |
+| 9d.8 | Click a rendered plan-path link. | Browser hands off to the `vscode:` URI handler — VS Code is invoked and opens the plan file at the absolute path. |
+
+### 9e. Defense-in-depth (no `innerHTML` on API strings)
+
+Seed a response (Appendix E) where `response_text` contains all of:
+- `<script>alert('xss-1')</script>`
+- `<img src=x onerror="alert('xss-2')">`
+- A markdown link with a `javascript:` URL: `[evil](javascript:alert('xss-3'))`
+- A markdown link with a `data:` URL: `[evil](data:text/html,<script>alert(1)</script>)`
+
+And edit a `user_text` to `<b>raw</b>`.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9e.1 | Hard-refresh on the seeded prompt. | No alert dialog opens. Console shows no XSS errors. |
+| 9e.2 | DevTools Elements → inspect `#response-body`. | No `<script>` element, no `<img>` element. The raw `<script>...</script>` and `<img ...>` strings appear as literal text nodes (visible angle brackets in the rendered text). |
+| 9e.3 | Inspect the rendered `[evil](javascript:...)` markdown. | Renders as literal text `[evil](javascript:alert('xss-3'))` — no `<a>` element created. Same for the `data:` URL. |
+| 9e.4 | Inspect `#user-line`. | Text content includes the literal string `<b>raw</b>` — no `<b>` element created. |
+
+### 9f. State preservation (regression — replaces obsolete 8c.7)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9f.1 | Repeat 8c.4 (press ↓ several times). | Each press advances one prompt — output card swaps content. URL `?prompt=N` updates each time. |
+| 9f.2 | Repeat 8c.5 (press ←). | Jumps to previous day's remembered prompt (or first if none remembered). |
+| 9f.3 | Repeat 8c.6 (press →). | Symmetric forward jump. |
+| 9f.4 | Repeat 8c.8 (`?prompt=5` reload). | Viewer loads with global prompt index 5. |
+| 9f.5 | **(Replaces obsolete 8c.7.)** Click anywhere inside `#response-body`, then press ↓. | Page advances to the next prompt — no focus trap (the textarea exemption is gone with the textarea). |
+| 9f.6 | Navigate forward through a day boundary via ↓ until you land on the first prompt of a new day. Press ← back into the previous day, then → again. | Returns to the same prompt index you were on (day-position memory still works). |
+
+### 9g. Cross-browser
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9g.1 | Repeat 9a.1, 9d.1, 9f.5 in Safari (desktop). | All pass. `backdrop-filter` still renders the card as translucent. Markdown children render the same. |
+
+### 9h. CSS polish (visual fidelity check)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 9h.1 | Eyeball the `#prompt-line`. | Renders as a near-white pill (`rgba(255,255,255,0.88)` background) with bold (`font-weight: 700`) dark navy text (`#1a1a2e`), padded `0.4rem 0.7rem`, rounded `0.4rem` corners. Stands out clearly against the response body's white-on-purple text below it. |
+| 9h.2 | Inspect `.response-body` computed `font-family` and `font-weight`. Inspect inline `<code>` computed `font-family` and `font-weight`. | Body prose: sans-serif system stack (`-apple-system`, `BlinkMacSystemFont`, …, inherited from `body`) at `font-weight: 300` (light). Inline `<code>`: `ui-monospace, SFMono-Regular, Menlo, monospace` at `font-weight: 700`. **The visual distinction between body prose and inline code is light-sans-serif vs bold-monospace — typography only, no background tint.** |
+| 9h.3 | Inspect inline `<code>` computed `font-weight`. | Resolves to `700` (bold). Inline code's visual cues: monospace family + bold weight. No `background-color`, no `border`. Dark backgrounds are reserved for hyperlinks (9h.5). |
+| 9h.4 | Inspect a fenced `<pre>` block and its inner `<code>`. | `<pre>` has a thin translucent border (`rgba(255,255,255,0.18)`) and rounded corners — no dark fill. Inner `<code>` inherits `font-weight: 700` from the `.response-body code` rule, so multi-line code blocks render in bold monospace. Wide content scrolls horizontally inside the block (`overflow-x: auto`); the page doesn't gain a horizontal scrollbar. |
+| 9h.5 | On a response containing a markdown link, eyeball the rendered `<a>`. | The link is a clearly marked dark pill — `color: #cfe0ff` over `background: rgba(0, 0, 0, 0.32)` with `border-radius: 4px` and `padding: 0.05rem 0.3rem`. Underline at faint `rgba(207, 224, 255, 0.5)`. Hyperlinks are the *only* element type with a dark background on the page. |
+| 9h.6 | Hover over the rendered `<a>`. | Background darkens to `rgba(0, 0, 0, 0.5)`; underline brightens to `#cfe0ff`. Cursor is the pointer. |
+| 9h.7 | On a response containing `**bold**` text, inspect the rendered `<strong>`. | Computed `font-weight` is `700`. No background, no border. Boldness comes from weight alone. |
+| 9h.8 | On a response containing a plan-path inline code, inspect it. | The outer `<a class="plan-path">` carries the dark pill (inherits from the general `<a>` rule); the inner `<code>` inherits its color and font from the link — so the visual is a single dark pill with monospace link-colored text. No stacked layers. |
+| 9h.9 | On a response with a rendered table, eyeball it. | The table has visible cell borders (`rgba(255,255,255,0.2)`); the header row has a slightly lighter (not dark) background (`rgba(255,255,255,0.08)`); header text is bold (`font-weight: 600`). Cell padding `0.3rem 0.6rem`. |
+| 9h.10 | Side-by-side: open the same response in a Claude.ai chat window AND in the transcripts viewer. | Visual structure matches — sans-serif body prose, monospace code without background tint, bold text via weight, hyperlinks clearly marked as dark pills, tables look like tables. Exact colors differ (Claude.ai light theme vs the viewer's purple gradient) but structural fidelity holds. |
 
 ## Exit criteria
 
