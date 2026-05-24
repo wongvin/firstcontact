@@ -2,6 +2,15 @@
 
 ## 2026-05-23
 
+### docs(infra): refine /ship skill conventions (issue #38)
+
+- `.claude/skills/ship/SKILL.md` subject convention: template now `<prefix>: <summary> (#N)` with a ≤50-char total budget so the issue tag stays visible in narrow UIs (`git log --oneline`, GitHub PR titles); body must not contain `Closes #N` or other `#N` refs; implementation-summary comment trigger derives the issue number from the branch name (`<N>-<slug>`) instead of scanning the commit body for `Closes #N`.
+- `.claude/skills/ship/SKILL.md` PR step: new step 6 — after push and the issue comment, ensure a PR exists for the branch (create one with `gh pr create --base main` if missing) and surface the URL. PR body is the one place `Closes #N` is allowed, so the issue auto-closes on merge.
+
+### fix: /cleanup-branches checks origin/main instead of stale local main (issue #38)
+
+- `.claude/skills/cleanup-branches/SKILL.md` step 2: `git branch --merged origin/main` (was `--merged main`). Local `main` lags `origin/main` between a PR merge and the next `git pull`, so the previous form undercounted candidates immediately after a merge — hit during the #36 cleanup itself.
+
 ### docs/infra: adopt Claude insights suggestions (issue #36)
 
 - `CLAUDE.md`: add `### Branching` section (feature branch before first edit, `<N>-<slug>` naming); add `### Git branch cleanup` section (delete local + remote after merge, preserve Rejected branches, ask before force-deleting unmerged); add duplicate-issue close rule to `### Closing issues`; add step 4 to `### Tracking active work` requiring a pre-commit implementation-summary issue comment for review on github.com

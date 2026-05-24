@@ -6,7 +6,7 @@ description: Find merged local branches and delete both local + remote copies, p
 Follow this sequence to clean up branches:
 
 1. Run `git fetch --prune` to drop stale remote refs.
-2. Run `git branch --merged main` to list local branches fully merged into main; exclude `main` itself from the candidate set.
+2. Run `git branch --merged origin/main` to list local branches fully merged into the canonical remote main; exclude `main` itself from the candidate set. (Query the remote ref, not local `main`, because a PR merged on github.com doesn't fast-forward local `main` until the user runs `git pull` — checking local `main` would undercount candidates.)
 3. For each candidate, check whether it is tied to a Rejected issue. The convention is that rejected branch names start with the issue number (e.g. `12-add-pull-to-refresh`) and the corresponding issue title is prefixed with `[Rejected] `. Cross-check with:
    ```bash
    gh issue list --state all --search '[Rejected] in:title' --json number,title
