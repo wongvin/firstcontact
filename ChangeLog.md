@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-05-24
+
+### chore(infra): auto-allow gh project item-edit in committed settings (issue #42)
+
+- `.claude/settings.json`: added `Bash(gh project item-edit *)` to `permissions.allow`. The wildcard covers all four project-board transitions (Status → In progress / In review / Done, plus Start date), all of which run the same `gh project item-edit ...` shape with different `--single-select-option-id` or `--date` values. The rule already existed in the gitignored `.claude/settings.local.json` — promoting it makes the auto-allow apply for every contributor and every fresh checkout without manual local-settings tweaks.
+
 ## 2026-05-23
 
 ### fix: /cleanup-branches handles current-branch delete (issue #40)
