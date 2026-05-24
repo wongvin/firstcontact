@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(gh project item-edit *)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
