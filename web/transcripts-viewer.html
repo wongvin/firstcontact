@@ -66,6 +66,7 @@
       border-radius: 0.4rem;
     }
     .response-body { white-space: pre-wrap; font-weight: 300; }
+    .response-body .block-separator { display: none; }
     .response-body > :first-child { margin-top: 0.5rem; }
     .response-body p { margin: 0.5rem 0; white-space: pre-wrap; }
     .response-body h1,
@@ -109,6 +110,13 @@
     .response-body a.plan-path code { color: inherit; }
     .response-body a.plan-path:hover code { color: #ffffff; }
     .response-body strong { font-weight: 700; }
+    .response-body .cursor {
+      background: rgba(0, 0, 0, 0.55);
+      color: inherit;
+      border-radius: 1px;
+      animation: cursor-blink 1s steps(2, start) infinite;
+    }
+    @keyframes cursor-blink { to { background: transparent; } }
     .response-body table {
       border-collapse: collapse;
       margin: 0.5rem 0;
@@ -124,6 +132,30 @@
     .response-body th {
       background: rgba(255, 255, 255, 0.08);
       font-weight: 600;
+    }
+    .bottom-bar {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 1rem;
+    }
+    .search-bar {
+      justify-self: start;
+      min-width: 20ch;
+      min-height: 1.4em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: rgba(255, 255, 255, 0.88);
+      color: #1a1a2e;
+      padding: 0.2rem 0.55rem;
+      border-radius: 0.3rem;
+      font-weight: 700;
+      white-space: pre;
+      text-align: left;
+    }
+    .search-bar.empty { visibility: hidden; }
+    .search-bar.error {
+      background: rgba(140, 20, 20, 0.9);
+      color: #ffffff;
     }
     .help {
       text-align: center;
@@ -143,7 +175,10 @@
       <div class="prompt-line" id="prompt-line"></div>
       <div class="response-body" id="response-body">Loading…</div>
     </article>
-    <div class="help">↑↓ prompts &nbsp;·&nbsp; ←→ days</div>
+    <div class="bottom-bar">
+      <div class="search-bar empty" id="search-bar" aria-live="polite"></div>
+      <div class="help">↑↓ prompts &nbsp;·&nbsp; ←→ days &nbsp;·&nbsp; hjklG/nN vim keybind</div>
+    </div>
   </main>
 
   <script>
@@ -158,11 +193,19 @@
 
     const promptLineEl   = document.getElementById('prompt-line');
     const responseBodyEl = document.getElementById('response-body');
+    const searchBarEl    = document.getElementById('search-bar');
 
     let prompts = [];
     let days = [];
     let currentIndex = 0;
-    const lastIndexByDay = {};  // remembers last viewed prompt index within each day
+    const lastIndexByDay = {};       // last viewed prompt index within each day
+    const cursorByPromptIndex = {};  // remembered cursor position per prompt index
+    let cursor = { line: 1, col: 1 };// current cursor source-line/col (1-indexed)
+    let numberPrefix = '';           // accumulates digits for <num>G
+    let searchMode = false;
+    let searchString = '';
+    let lastSearch = '';
+    let errorClearTimer = null;
 
     function setMessage(text, className) {
       responseBodyEl.replaceChildren();
@@ -233,7 +276,22 @@
     function renderMarkdownInto(root, mdText) {
       if (!mdText) return;
       const blocks = parseBlocks(mdText);
-      for (const block of blocks) renderBlock(root, block);
+      for (let i = 0; i < blocks.length; i++) {
+        // Insert a hidden block-separator carrying a `\n` between siblings.
+        // The `\n` is in textContent (so j/k cursor counting still treats
+        // each block boundary as a line break) but doesn't render visually
+        // (the wrapping span has display: none) — keeps inter-block spacing
+        // tight, especially for list items and code blocks.
+        if (i > 0) root.appendChild(createBlockSeparator());
+        renderBlock(root, blocks[i]);
+      }
+    }
+
+    function createBlockSeparator() {
+      const span = document.createElement('span');
+      span.className = 'block-separator';
+      span.textContent = '\n';
+      return span;
     }
 
     function parseBlocks(text) {
@@ -241,6 +299,7 @@
       const blocks = [];
       let i = 0;
       while (i < lines.length) {
+        const blockStart = i + 1;   // 1-indexed source line where this block begins
         const line = lines[i];
         const fence = line.match(/^```(\w*)\s*$/);
         if (fence) {
@@ -251,13 +310,19 @@
             i++;
           }
           i++;  // skip closing fence (or EOF)
-          blocks.push({ type: 'code', body: bodyLines.join('\n') });
+          blocks.push({
+            type: 'code', body: bodyLines.join('\n'),
+            sourceLineStart: blockStart, sourceLineEnd: i,
+          });
           continue;
         }
         if (line.trim() === '') { i++; continue; }
         const heading = line.match(/^(#{1,6})\s+(.*)$/);
         if (heading) {
-          blocks.push({ type: 'heading', level: heading[1].length, text: heading[2] });
+          blocks.push({
+            type: 'heading', level: heading[1].length, text: heading[2],
+            sourceLineStart: blockStart, sourceLineEnd: blockStart,
+          });
           i++;
           continue;
         }
@@ -266,14 +331,24 @@
         // then body rows. Recognised only when the line *after* a pipe header
         // is a valid separator — otherwise the line is a paragraph.
         if (line.includes('|') && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+          const headerLine = blockStart;       // header row source line
           const header = parseTableRow(line);
-          i += 2;  // skip header + separator
+          i += 2;  // skip header + separator (separator at headerLine+1)
           const rows = [];
+          const rowSourceLines = [];
           while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
             rows.push(parseTableRow(lines[i]));
+            rowSourceLines.push(i + 1);
             i++;
           }
-          blocks.push({ type: 'table', header, rows });
+          blocks.push({
+            type: 'table', header, rows,
+            headerSourceLine: headerLine,
+            separatorSourceLine: headerLine + 1,
+            rowSourceLines,
+            sourceLineStart: headerLine,
+            sourceLineEnd: rowSourceLines.length ? rowSourceLines[rowSourceLines.length - 1] : headerLine + 1,
+          });
           continue;
         }
         const ul = /^[-*]\s+(.*)$/;
@@ -281,14 +356,21 @@
         if (ul.test(line) || ol.test(line)) {
           const re = ul.test(line) ? ul : ol;
           const items = [];
+          const itemSourceLines = [];
           while (i < lines.length && re.test(lines[i])) {
             items.push(lines[i].match(re)[1]);
+            itemSourceLines.push(i + 1);
             i++;
           }
-          blocks.push({ type: re === ul ? 'ul' : 'ol', items });
+          blocks.push({
+            type: re === ul ? 'ul' : 'ol', items, itemSourceLines,
+            sourceLineStart: itemSourceLines[0],
+            sourceLineEnd: itemSourceLines[itemSourceLines.length - 1],
+          });
           continue;
         }
         const paraLines = [];
+        const paraStart = blockStart;
         while (i < lines.length && lines[i].trim() !== '' &&
                !/^```/.test(lines[i]) &&
                !/^#{1,6}\s/.test(lines[i]) &&
@@ -297,7 +379,12 @@
           paraLines.push(lines[i]);
           i++;
         }
-        if (paraLines.length) blocks.push({ type: 'p', text: paraLines.join('\n') });
+        if (paraLines.length) {
+          blocks.push({
+            type: 'p', text: paraLines.join('\n'),
+            sourceLineStart: paraStart, sourceLineEnd: paraStart + paraLines.length - 1,
+          });
+        }
       }
       return blocks;
     }
@@ -318,28 +405,39 @@
       return trimmed.split('|').map(c => c.trim());
     }
 
+    // Helper: tag a DOM element with source-line attrs for cursor mapping.
+    function tagSource(el, start, end) {
+      el.dataset.sourceLineStart = String(start);
+      el.dataset.sourceLineEnd = String(end);
+    }
+
     function renderBlock(parent, block) {
       if (block.type === 'code') {
         const pre = document.createElement('pre');
         const code = document.createElement('code');
         code.textContent = block.body;
         pre.appendChild(code);
+        tagSource(pre, block.sourceLineStart, block.sourceLineEnd);
         parent.appendChild(pre);
         return;
       }
       if (block.type === 'heading') {
         const h = document.createElement('h' + block.level);
         renderInlineInto(h, block.text);
+        tagSource(h, block.sourceLineStart, block.sourceLineEnd);
         parent.appendChild(h);
         return;
       }
       if (block.type === 'ul' || block.type === 'ol') {
         const list = document.createElement(block.type);
-        for (const item of block.items) {
+        for (let idx = 0; idx < block.items.length; idx++) {
+          if (idx > 0) list.appendChild(createBlockSeparator());
           const li = document.createElement('li');
-          renderInlineInto(li, item);
+          renderInlineInto(li, block.items[idx]);
+          tagSource(li, block.itemSourceLines[idx], block.itemSourceLines[idx]);
           list.appendChild(li);
         }
+        tagSource(list, block.sourceLineStart, block.sourceLineEnd);
         parent.appendChild(list);
         return;
       }
@@ -352,28 +450,359 @@
           renderInlineInto(th, cell);
           headerRow.appendChild(th);
         }
+        tagSource(headerRow, block.headerSourceLine, block.headerSourceLine);
         thead.appendChild(headerRow);
         table.appendChild(thead);
         const tbody = document.createElement('tbody');
-        for (const row of block.rows) {
+        for (let r = 0; r < block.rows.length; r++) {
           const tr = document.createElement('tr');
-          for (const cell of row) {
+          for (const cell of block.rows[r]) {
             const td = document.createElement('td');
             renderInlineInto(td, cell);
             tr.appendChild(td);
           }
+          tagSource(tr, block.rowSourceLines[r], block.rowSourceLines[r]);
           tbody.appendChild(tr);
         }
         table.appendChild(tbody);
+        tagSource(table, block.sourceLineStart, block.sourceLineEnd);
         parent.appendChild(table);
         return;
       }
       if (block.type === 'p') {
         const p = document.createElement('p');
         renderInlineInto(p, block.text);
+        tagSource(p, block.sourceLineStart, block.sourceLineEnd);
         parent.appendChild(p);
       }
     }
+
+    // ---- Cursor placement ---------------------------------------------------
+    // Cursor coordinates are 1-indexed (line, col) in the RENDERED text of
+    // #response-body (markdown-rendered output, NOT the raw source). This is
+    // what the user sees on screen, so search results and h/j/k/l navigation
+    // both operate in the same visual coordinate space.
+
+    function currentRenderedText() {
+      // Caller must ensure no cursor span is in the DOM (or accept that the
+      // cursor's own character/placeholder will be included).
+      return responseBodyEl.textContent;
+    }
+
+    function totalLines() {
+      return currentRenderedText().split('\n').length;
+    }
+
+    function lineLength(line) {
+      const lines = currentRenderedText().split('\n');
+      if (line < 1 || line > lines.length) return 0;
+      return lines[line - 1].length;
+    }
+
+    function removeCursorSpan() {
+      const old = responseBodyEl.querySelector('.cursor');
+      if (!old || !old.parentNode) return;
+      const parent = old.parentNode;
+      if (old.dataset.placeholder === '1') {
+        // The span's content (a space) was synthetic — don't restore it.
+        parent.removeChild(old);
+      } else {
+        // Put the wrapped character back into the DOM as a plain text node.
+        const tn = document.createTextNode(old.textContent);
+        parent.replaceChild(tn, old);
+      }
+      // Merge adjacent text nodes so subsequent placements don't accumulate
+      // fragmentation from repeated splitText calls.
+      parent.normalize();
+    }
+
+    function placeCursorAt(line, col) {
+      removeCursorSpan();
+      if (!prompts.length) return;
+      const text = currentRenderedText();
+      if (!text) return;
+
+      const lines = text.split('\n');
+      // Clamp line/col into the rendered text's range.
+      let L = Math.max(1, Math.min(lines.length, line));
+      let llen = lines[L - 1].length;
+      let C = Math.max(1, Math.min(Math.max(1, llen), col | 0));
+
+      // Compute the target character offset in rendered text.
+      let targetOffset = 0;
+      for (let i = 0; i < L - 1; i++) targetOffset += lines[i].length + 1;  // +1 for the `\n`
+      targetOffset += C - 1;
+
+      // Walk #response-body text nodes in DOM order, sum lengths until the
+      // running total exceeds the target. Insert the cursor at the local
+      // offset within the spanning text node.
+      const walker = document.createTreeWalker(responseBodyEl, NodeFilter.SHOW_TEXT, null);
+      let walked = 0;
+      let lastNode = null;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentNode && node.parentNode.classList && node.parentNode.classList.contains('cursor')) continue;
+        lastNode = node;
+        const len = node.nodeValue.length;
+        if (walked + len > targetOffset) {
+          insertCursorAtTextOffset(node, targetOffset - walked);
+          cursor = { line: L, col: C };
+          scrollCursorIntoView();
+          return;
+        }
+        walked += len;
+      }
+      // Target offset is at the very end of the rendered text — anchor cursor
+      // at end of the last text node (or fall back to the body element).
+      if (lastNode) {
+        insertCursorAtTextOffset(lastNode, lastNode.nodeValue.length);
+      } else {
+        responseBodyEl.appendChild(makeCursorSpan(' ', true));
+      }
+      cursor = { line: L, col: C };
+      scrollCursorIntoView();
+    }
+
+    function makeCursorSpan(charContent, isPlaceholder) {
+      const c = document.createElement('span');
+      c.className = 'cursor';
+      c.textContent = charContent;
+      if (isPlaceholder) c.dataset.placeholder = '1';
+      return c;
+    }
+
+    // Wraps the single character at `offset` in a cursor span (so the
+    // character stays visible with a darker tint behind it). If `offset` is
+    // past the end of the text node, or lands on a `\n`, insert a span with a
+    // non-breaking space so the cursor block has visible width.
+    function insertCursorAtTextOffset(textNode, offset) {
+      const text = textNode.nodeValue;
+      if (offset >= text.length) {
+        const span = makeCursorSpan(' ', true);
+        textNode.parentNode.insertBefore(span, textNode.nextSibling);
+        return;
+      }
+      if (text[offset] === '\n') {
+        const span = makeCursorSpan(' ', true);
+        const parentEl = textNode.parentNode;
+        // If the `\n` is inside a hidden block-separator span, the cursor
+        // would render invisibly. Anchor it just before the separator span so
+        // it appears in the document flow.
+        if (parentEl && parentEl.classList && parentEl.classList.contains('block-separator')) {
+          parentEl.parentNode.insertBefore(span, parentEl);
+          return;
+        }
+        const after = textNode.splitText(offset);
+        parentEl.insertBefore(span, after);
+        return;
+      }
+      // Split off the prefix (offset > 0), then peel a single-char node off
+      // the remainder and replace it with a cursor span containing that char.
+      const remainder = offset === 0 ? textNode : textNode.splitText(offset);
+      remainder.splitText(1);   // sets remainder.length === 1
+      const span = makeCursorSpan(remainder.nodeValue, false);
+      remainder.parentNode.replaceChild(span, remainder);
+    }
+
+    function scrollCursorIntoView() {
+      // When the cursor lands on the first rendered line, scroll the output
+      // card to scrollTop = 0 so the prompt-line above the response body
+      // becomes visible again. Otherwise just nudge the cursor into view via
+      // the nearest-scroll heuristic.
+      if (cursor && cursor.line === 1) {
+        const card = document.getElementById('output-card');
+        if (card) card.scrollTop = 0;
+        return;
+      }
+      const el = responseBodyEl.querySelector('.cursor');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    function moveCursor(dLine, dCol) {
+      let L = cursor.line + dLine;
+      let C = cursor.col + dCol;
+      const total = totalLines();
+      if (L < 1) L = 1;
+      if (L > total) L = total;
+      const llen = lineLength(L);
+      const maxCol = Math.max(1, llen);
+      if (C < 1) C = 1;
+      if (C > maxCol) C = maxCol;
+      placeCursorAt(L, C);
+    }
+
+    function moveCursorAbs(line, col) {
+      placeCursorAt(line, col);
+    }
+    // ---- end cursor placement ----------------------------------------------
+
+    // ---- Search ------------------------------------------------------------
+    // Search scope: response_text across ALL prompts in the global timeline.
+    // user_text is NOT searched. Modal: after `/`, all keys are captured into
+    // the search string until Enter (execute) or Escape (cancel). VIM keys
+    // (h/j/k/l/n/N/G) become literal text while in search mode.
+
+    function setSearchBar(text, error) {
+      searchBarEl.textContent = text;
+      if (error) {
+        searchBarEl.classList.add('error');
+        searchBarEl.classList.remove('empty');
+      } else if (text === '') {
+        searchBarEl.classList.add('empty');
+        searchBarEl.classList.remove('error');
+      } else {
+        searchBarEl.classList.remove('empty', 'error');
+      }
+    }
+
+    function enterSearchMode() {
+      if (errorClearTimer) { clearTimeout(errorClearTimer); errorClearTimer = null; }
+      searchMode = true;
+      searchString = '';
+      setSearchBar('/', false);
+    }
+
+    function exitSearchMode(clearBar) {
+      searchMode = false;
+      searchString = '';
+      if (clearBar) setSearchBar('', false);
+    }
+
+    function handleSearchKey(event) {
+      event.preventDefault();
+      const key = event.key;
+      if (key === 'Escape') { exitSearchMode(true); return; }
+      if (key === 'Enter')  { const s = searchString; exitSearchMode(false); executeSearch(s); return; }
+      if (key === 'Backspace') {
+        if (searchString.length > 0) {
+          searchString = searchString.slice(0, -1);
+          setSearchBar('/' + searchString, false);
+        } else {
+          exitSearchMode(true);
+        }
+        return;
+      }
+      // Printable single character.
+      if (key.length === 1) {
+        searchString += key;
+        setSearchBar('/' + searchString, false);
+      }
+    }
+
+    // Translate a character offset within response_text to (line, col).
+    function offsetToLineCol(text, offset) {
+      let line = 1;
+      let lastNl = -1;
+      for (let i = 0; i < offset; i++) {
+        if (text[i] === '\n') { line++; lastNl = i; }
+      }
+      const col = offset - lastNl;   // (offset - (lastNl+1)) + 1 = offset - lastNl
+      return { line, col };
+    }
+
+    // Returns the rendered text content for the response of prompt `idx`.
+    // For the currently displayed prompt, reads `responseBodyEl.textContent`
+    // directly. For other prompts, renders the markdown into an off-DOM
+    // container and returns its textContent. This is what search operates on,
+    // so a match's offset is in rendered-text coordinates (the same space the
+    // user sees on screen and the same space the cursor lives in).
+    function renderedTextFor(idx) {
+      if (idx === currentIndex) {
+        // Live DOM may currently contain the cursor span; its content is
+        // either a real character (already in source) or a placeholder space.
+        // Real-character case is harmless (the char would be in textContent
+        // either way). Placeholder case adds a single fake space — accept it
+        // as a tiny imprecision rather than DOM-mutating to compute.
+        return responseBodyEl.textContent;
+      }
+      const temp = document.createElement('div');
+      renderMarkdownInto(temp, prompts[idx].response_text || '');
+      return temp.textContent;
+    }
+
+    // Search the global timeline for `s` in RENDERED text. Direction +1 =
+    // forward (n / first execute), -1 = backward (N). Returns
+    // { promptIdx, offset } where offset is in rendered-text coordinates, or
+    // null if not found anywhere in the timeline.
+    function findMatchGlobal(s, direction) {
+      if (!s || !prompts.length) return null;
+      const N = prompts.length;
+      const startIdx = currentIndex;
+      const curText = renderedTextFor(startIdx);
+      const curLines = curText.split('\n');
+      let cursorOffset = 0;
+      for (let L = 0; L < cursor.line - 1; L++) cursorOffset += curLines[L].length + 1;
+      cursorOffset += (cursor.col - 1);
+      if (cursorOffset > curText.length) cursorOffset = curText.length;
+
+      if (direction > 0) {
+        const hitCur = curText.indexOf(s, cursorOffset + 1);
+        if (hitCur !== -1) return { promptIdx: startIdx, offset: hitCur };
+        for (let step = 1; step <= N; step++) {
+          const idx = (startIdx + step) % N;
+          if (idx === startIdx) break;
+          const hit = renderedTextFor(idx).indexOf(s);
+          if (hit !== -1) return { promptIdx: idx, offset: hit };
+        }
+        const wrapHit = curText.indexOf(s);
+        if (wrapHit !== -1 && wrapHit <= cursorOffset) return { promptIdx: startIdx, offset: wrapHit };
+        return null;
+      } else {
+        const upper = Math.max(0, cursorOffset - 1);
+        const hitCur = curText.lastIndexOf(s, upper - 1);
+        if (hitCur !== -1) return { promptIdx: startIdx, offset: hitCur };
+        for (let step = 1; step <= N; step++) {
+          const idx = (startIdx - step + N) % N;
+          if (idx === startIdx) break;
+          const hit = renderedTextFor(idx).lastIndexOf(s);
+          if (hit !== -1) return { promptIdx: idx, offset: hit };
+        }
+        const wrapHit = curText.lastIndexOf(s);
+        if (wrapHit !== -1 && wrapHit >= cursorOffset) return { promptIdx: startIdx, offset: wrapHit };
+        return null;
+      }
+    }
+
+    function applyMatch(s, match) {
+      lastSearch = s;
+      if (match.promptIdx !== currentIndex) {
+        render(match.promptIdx);    // resets/restores cursor to (1,1) or remembered
+      }
+      // Translate the rendered-text offset to (line, col) in the now-current
+      // rendered text and position the cursor there.
+      const text = currentRenderedText();
+      const lc = offsetToLineCol(text, match.offset);
+      placeCursorAt(lc.line, lc.col);
+    }
+
+    function executeSearch(s) {
+      if (!s) return;
+      const match = findMatchGlobal(s, +1);
+      if (match) { applyMatch(s, match); return; }
+      // Not found — show error in the search bar.
+      if (errorClearTimer) clearTimeout(errorClearTimer);
+      setSearchBar('Pattern not found: ' + s, true);
+      errorClearTimer = setTimeout(() => {
+        setSearchBar('', false);
+        errorClearTimer = null;
+      }, 2000);
+    }
+
+    function jumpToMatch(direction) {
+      if (!lastSearch) return;
+      // Surface the previous search in the bar so the user sees what they're
+      // cycling through with n / N.
+      setSearchBar('/' + lastSearch, false);
+      const match = findMatchGlobal(lastSearch, direction);
+      if (match) { applyMatch(lastSearch, match); return; }
+      if (errorClearTimer) clearTimeout(errorClearTimer);
+      setSearchBar('Pattern not found: ' + lastSearch, true);
+      errorClearTimer = setTimeout(() => {
+        setSearchBar('', false);
+        errorClearTimer = null;
+      }, 2000);
+    }
+    // ---- end search --------------------------------------------------------
 
     function renderInlineInto(parent, text) {
       let i = 0;
@@ -475,6 +904,13 @@
         return;
       }
       const clamped = Math.max(0, Math.min(prompts.length - 1, index));
+
+      // Save the OLD prompt's cursor before swapping, so a return-trip via
+      // arrow keys (or search) restores it.
+      if (prompts.length && currentIndex !== clamped) {
+        cursorByPromptIndex[currentIndex] = { line: cursor.line, col: cursor.col };
+      }
+
       currentIndex = clamped;
       const p = prompts[clamped];
 
@@ -510,6 +946,15 @@
       const url = new URL(window.location.href);
       url.searchParams.set('prompt', String(clamped));
       window.history.replaceState(null, '', url.toString());
+
+      // Restore the NEW prompt's cursor (or start at 1,1 if no memory).
+      const remembered = cursorByPromptIndex[clamped];
+      if (remembered) {
+        cursor = { line: remembered.line, col: remembered.col };
+      } else {
+        cursor = { line: 1, col: 1 };
+      }
+      placeCursorAt(cursor.line, cursor.col);
     }
 
     function dayIndexOf(currentDay) {
@@ -548,19 +993,71 @@
     }
 
     document.addEventListener('keydown', (event) => {
+      // Don't hijack browser shortcuts (Cmd-R, Ctrl-C, etc.).
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
       const key = event.key;
-      if (key === 'ArrowUp') {
+
+      // Modifier-only keydowns (Shift before `G` is the common case) must not
+      // fall through to the "any other key clears numberPrefix" branch below
+      // — otherwise typing `1G` clears the accumulator on the Shift event and
+      // `G` then jumps to the last line instead of line 1.
+      if (key === 'Shift' || key === 'Control' || key === 'Alt' ||
+          key === 'Meta' || key === 'CapsLock') return;
+
+      // Arrow keys preserve their existing behavior in BOTH normal mode AND
+      // search mode (user can still browse prompts/days while a search box is
+      // open — keeping symmetric with the existing behavior).
+      if (key === 'ArrowUp')    { event.preventDefault(); render(currentIndex - 1); return; }
+      if (key === 'ArrowDown')  { event.preventDefault(); render(currentIndex + 1); return; }
+      if (key === 'ArrowLeft')  { event.preventDefault(); goToPrevDay(); return; }
+      if (key === 'ArrowRight') { event.preventDefault(); goToNextDay(); return; }
+
+      // Search mode: all printable keys are captured into the search string.
+      if (searchMode) { handleSearchKey(event); return; }
+
+      // Escape (in normal mode) hides the search bar — symmetric with the
+      // in-search-mode Escape that cancels typing. Also clears any pending
+      // number prefix.
+      if (key === 'Escape') {
         event.preventDefault();
-        render(currentIndex - 1);
-      } else if (key === 'ArrowDown') {
+        if (errorClearTimer) { clearTimeout(errorClearTimer); errorClearTimer = null; }
+        setSearchBar('', false);
+        numberPrefix = '';
+        return;
+      }
+
+      // Number-prefix accumulator for <num>G.
+      if (key.length === 1 && key >= '0' && key <= '9') {
+        numberPrefix += key;
         event.preventDefault();
-        render(currentIndex + 1);
-      } else if (key === 'ArrowLeft') {
+        return;
+      }
+
+      if (key === 'h') { event.preventDefault(); moveCursor(0, -1); numberPrefix = ''; }
+      else if (key === 'l') { event.preventDefault(); moveCursor(0, +1); numberPrefix = ''; }
+      else if (key === 'j') { event.preventDefault(); moveCursor(+1, 0); numberPrefix = ''; }
+      else if (key === 'k') { event.preventDefault(); moveCursor(-1, 0); numberPrefix = ''; }
+      else if (key === 'G') {
         event.preventDefault();
-        goToPrevDay();
-      } else if (key === 'ArrowRight') {
+        const target = numberPrefix === '' ? totalLines() : parseInt(numberPrefix, 10);
+        numberPrefix = '';
+        moveCursorAbs(target, 1);
+      } else if (key === '/') {
         event.preventDefault();
-        goToNextDay();
+        numberPrefix = '';
+        enterSearchMode();
+      } else if (key === 'n') {
+        event.preventDefault();
+        numberPrefix = '';
+        jumpToMatch(+1);
+      } else if (key === 'N') {
+        event.preventDefault();
+        numberPrefix = '';
+        jumpToMatch(-1);
+      } else {
+        // Any other key clears the digit accumulator.
+        numberPrefix = '';
       }
     });
 
