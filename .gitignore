@@ -211,3 +211,6 @@ __marimo__/
 
 # Postman local state
 .postman/
+
+# graphify outputs
+graphify-out/

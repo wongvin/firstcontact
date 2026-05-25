@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-05-25
+
+### chore(infra): gitignore graphify-out (issue #46)
+
+- `.gitignore`: added `graphify-out/` so the local graph artifacts (`graph.html`, `graph.json`, `GRAPH_REPORT.md`, `cache/`, `manifest.json`, `cost.json`) produced by the `/graphify` skill stay out of the repo. Verified with `git check-ignore -v graphify-out/graph.html`.
+
 ## 2026-05-24
 
 ### feat: VIM search + cursor navigation in transcripts viewer (issue #45)
