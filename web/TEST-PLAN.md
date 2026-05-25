@@ -329,6 +329,193 @@ And edit a `user_text` to `<b>raw</b>`.
 | 9h.9 | On a response with a rendered table, eyeball it. | The table has visible cell borders (`rgba(255,255,255,0.2)`); the header row has a slightly lighter (not dark) background (`rgba(255,255,255,0.08)`); header text is bold (`font-weight: 600`). Cell padding `0.3rem 0.6rem`. |
 | 9h.10 | Side-by-side: open the same response in a Claude.ai chat window AND in the transcripts viewer. | Visual structure matches — sans-serif body prose, monospace code without background tint, bold text via weight, hyperlinks clearly marked as dark pills, tables look like tables. Exact colors differ (Claude.ai light theme vs the viewer's purple gradient) but structural fidelity holds. |
 
+## 10. Claude Code transcripts viewer — VIM search and navigation (issue #45)
+
+Issue #45 layers VIM-style cursor navigation and search on top of the #35 layout. The cursor is a `<span class="cursor">` that WRAPS the character at the cursor position (darker translucent-black background pill), inserted into `#response-body`. All movement and search operates in **rendered-text** coordinates — i.e. `responseBodyEl.textContent` split by `\n`. The renderer inserts synthetic `\n` text nodes between sibling blocks (between paragraphs, headings, code blocks, tables, etc.) and between list items, so block boundaries become real `\n`s in textContent — `j/k/G` see paragraph and list-item breaks as line separators. These `\n` text nodes are visually inert (browsers collapse whitespace between block-level siblings). Search runs over rendered text across **all prompts in the global timeline**; `user_text` is NOT searched. Existing arrow keys (↑↓ prompts, ←→ days) are unchanged. The new search-input textbox sits between `#output-card` and the help line, left-aligned, ~20 chars wide.
+
+### 10a. Cursor on load
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10a.1 | Open the viewer (initial render). | A blinking darker-tint block is visible at the start of the response body, WRAPPING the first character of the first source line (the character stays visible, with a `rgba(0, 0, 0, 0.55)` background pill behind it). DevTools Elements: a `<span class="cursor">` containing exactly one character (or a space for an empty line) exists inside the first tagged block of `#response-body`. |
+| 10a.2-bis | Move cursor to a position past the end of the displayed character (e.g. on a line with one char, press `l`). | The cursor block wraps the last character or, if at end-of-line, displays a space inside the span (visible block with no character beneath). |
+| 10a.2 | DevTools Elements → inspect any block child of `#response-body`. | Each block has `data-source-line-start` and `data-source-line-end` attributes (positive integers, 1-indexed). For `<li>` and `<tr>`, the start and end are equal (one source line per item/row). |
+
+### 10b. h/j/k/l motion
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10b.1 | Press `l` repeatedly. | Cursor advances one column right per press. At end of line, stops (does not wrap). |
+| 10b.2 | Press `h` repeatedly. | Cursor moves one column left. At column 1, stops. |
+| 10b.3 | Press `j`. | Cursor moves to the next source line. If the new line is shorter than the previous col, cursor lands at end of line. |
+| 10b.4 | Press `k`. | Symmetric — cursor moves to the previous source line. |
+| 10b.5 | At the last source line, press `j`. | Cursor stays put (no error). |
+| 10b.6 | At line 1 col 1, press `k`. | Cursor stays put. |
+| 10b.7 | On a response with multiple paragraphs (e.g. two `<p>` blocks). From the last character of the first paragraph, press `j`. | Cursor advances to the first character of the second paragraph — block boundaries count as line breaks. (Without the synthetic `\n` between blocks, `j` would have been a no-op.) |
+| 10b.8 | On a response with a list (`- a\n- b\n- c`). From the cursor on "a", press `j`. | Cursor advances to "b". Press `j` again → "c". |
+
+### 10c. `<optional line number>G`
+
+**Feature semantics.** If no line number is entered before `G`, the cursor moves to the **first character of the last rendered line**. If a line number is entered, the cursor moves to the **first character of the line with that number** (1-indexed; rendered-text lines, where block boundaries are real `\n`s). `G` always sets col to 1; the previous column is discarded.
+
+Implementation: a `numberPrefix` accumulator collects digit keydowns. The `G` keydown reads `parseInt(numberPrefix, 10)` (or `totalLines()` if empty), then clears the accumulator. Any non-digit non-`G` "vim-relevant" key also clears the accumulator. Modifier-only keydowns (Shift, Control, Alt, Meta, CapsLock) short-circuit at the top of the handler and do NOT clear the accumulator — so typing `1` `Shift` `G` (= `1G`) works.
+
+#### 10c.A — Basic behavior
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.A.1 | Press `G` (no prefix). | Cursor wraps the **first character** of the **last rendered line** of the current response. Cursor col is 1. |
+| 10c.A.2 | Press `1` then `G`. | Cursor wraps the first character of rendered line 1. (This is the smallest valid line number and the most common test of the prefix path.) |
+| 10c.A.3 | Press `2` then `G` on a response with ≥ 2 rendered lines. | Cursor wraps the first character of rendered line 2. |
+| 10c.A.4 | Press `5` then `G` on a response with ≥ 5 rendered lines. | Cursor wraps the first character of rendered line 5. |
+| 10c.A.5 | After 10c.A.4, press `G` again (no prefix). | Cursor moves to the last rendered line, col 1. The number-prefix accumulator was cleared by the previous `G`, so this second `G` falls into the no-prefix branch. |
+
+#### 10c.B — Multi-digit numbers
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.B.1 | Press `1`, `0`, `G` on a response with ≥ 10 rendered lines. | Cursor wraps the first character of rendered line 10. (Two-digit accumulator.) |
+| 10c.B.2 | Press `1`, `2`, `3`, `G` on a response with ≥ 123 rendered lines. | Cursor wraps the first character of rendered line 123. |
+| 10c.B.3 | Press `0`, `5`, `G`. | Per `parseInt('05', 10) === 5`, cursor moves to line 5. (Leading zeros are accepted.) |
+
+#### 10c.C — Bounds and clamping
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.C.1 | Press `9`, `9`, `9`, `G` on a response with fewer than 999 lines. | Cursor clamps to the last rendered line. No error in the console; cursor is at last-line col 1. |
+| 10c.C.2 | Press `0`, `G` on any response. | Cursor clamps to line 1, col 1. (`placeCursorAt(0, 1)` clamps to `Math.max(1, …) === 1`.) |
+| 10c.C.3 | `G` on a single-line response. | Cursor stays/lands at line 1, col 1 (last line is also line 1). |
+| 10c.C.4 | `1G` on a single-line response. | Cursor stays/lands at line 1, col 1. |
+| 10c.C.5 | `G` on the `(no response captured)` placeholder response. | Cursor wraps the first character `(` of `(no response captured)`. |
+
+#### 10c.D — Accumulator clearing
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.D.1 | Press `7`, then `j` (not `G`), then `G`. | The `j` advances the cursor by one line AND clears `numberPrefix`. The following `G` then jumps to the **last** line (not line 7). |
+| 10c.D.2 | Press `3`, then `/`, type `foo`, press `Escape`, then `G`. | Entering search mode (`/`) clears the accumulator; the trailing `G` jumps to the last line. |
+| 10c.D.3 | Press `4`, then `h`, then `G`. | `h` moves col -1 AND clears the accumulator; the trailing `G` jumps to the last line. |
+| 10c.D.4 | Press `1`, `2`, then `↓` (arrow key), then `G`. | Arrow keys re-render a different prompt (and reset/restore cursor) BEFORE the digit branch could reach the accumulator. After ↓, `numberPrefix` is still `'12'` from before — but the active prompt is different. Pressing `G` afterward jumps to line 12 of the NEW prompt (or clamps to last if the new prompt has fewer lines). This is a slight surprise; documented but not considered a bug. |
+
+#### 10c.E — Modifier interaction
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.E.1 | Press `1`, then hold Shift, then press `G` (the natural way to type `1G`). | Cursor moves to line 1, col 1. The Shift keydown short-circuits at the top of the handler so it does NOT clear the accumulator. |
+| 10c.E.2 | Press `1`, `2`, then hold Shift, then press `G`. | Cursor moves to line 12 col 1. |
+| 10c.E.3 | Press `1`, then Ctrl+T (or Cmd+R, any modifier+key shortcut). | The modifier-key branch at the top of the handler returns early on the Ctrl/Meta down. The browser handles the shortcut. `numberPrefix` retains `'1'`. Pressing `G` after still jumps to line 1. (Optional verification — relies on browser-specific shortcut behavior.) |
+
+#### 10c.F — Cross-block navigation
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.F.1 | On a response with two paragraphs (`First.\n\nSecond.`), press `2G`. | Cursor wraps `S` (first character of `"Second."`). |
+| 10c.F.2 | On a response with a heading + a paragraph, press `2G`. | Cursor wraps the first character of the paragraph (heading is line 1, paragraph is line 2). |
+| 10c.F.3 | On a response with a 3-item list `- a / - b / - c`, press `1G`, then `2G`, then `3G`. | Cursor wraps `a`, then `b`, then `c` in turn. |
+| 10c.F.4 | On a response that begins with a fenced code block of 4 lines, press `1G` through `4G`. | Cursor wraps the first character of each rendered code line in turn (the rendered code preserves source `\n`s as visible line breaks). |
+
+#### 10c.G — Visual + state side-effects
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.G.1 | Pre-position cursor at (5, 10) via h/j/k/l, then press `1G`. | Cursor col is reset to 1 (G always sets col to 1, regardless of previous col). |
+| 10c.G.2 | After `1G`, inspect `responseBodyEl.querySelectorAll('.cursor')` in DevTools. | Exactly ONE `<span class="cursor">` exists. |
+| 10c.G.3 | On a response taller than the viewport so the last line is off-screen, press `G`. | The output card auto-scrolls so the cursor (on the last line) is visible. |
+| 10c.G.4 | Navigate to prompt B, then back to A, then press `1G`. | Cursor lands on (1, 1) of A. A's per-prompt cursor memory may have stored a different position from the navigate-away — `1G` overrides it. |
+| 10c.G.5 | Press `5G` on prompt A, then navigate ↓ to B, then back ↑ to A. | A's cursor restored to (5, 1) — `cursorByPromptIndex` saved it on the navigate-away. |
+
+#### 10c.H — Defense-in-depth + safety
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10c.H.1 | Inspect the cursor span in DevTools after each `G` action. | Span is `<span class="cursor">…</span>` (one character of real content, or a space with `data-placeholder="1"` for an empty line). Class list contains only `cursor` (possibly with `data-placeholder`). No script execution. |
+| 10c.H.2 | `numberPrefix` state after various sequences (verify in console via test harness). | After `1G`: `''`. After `12 / 3 G`: `''`. After `1 then j`: `''`. After `1 then Shift`: `'1'`. After raw `G` (no prefix): `''`. |
+
+### 10d. Search entry and execution (current response)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10d.1 | Press `/`. | Search bar appears (was hidden) with `/` left-aligned. Cursor stops responding to vim keys; pressing any printable key appends to the search string. |
+| 10d.2 | Type `foo`. | Bar shows `/foo`. |
+| 10d.3 | Press `Backspace`. | Bar shows `/fo`. Backspace at empty string (`/` only) exits search mode and clears the bar. |
+| 10d.4 | Press `Enter`. | Search executes. If `foo` exists in the current response, cursor moves to its first occurrence (source-line/col mapped). Search bar clears (back to hidden). |
+
+### 10e. Search across prompts
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10e.1 | From a prompt whose response does NOT contain "baz", press `/`, type `baz`, press `Enter` — where some LATER prompt's response contains "baz". | Viewer auto-jumps to that later prompt (the prompt-line at top updates to show the new prompt's metadata). Cursor lands on the match in the new response body. |
+
+### 10f. Search wraps the timeline
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10f.1 | Navigate to the LAST prompt (or any prompt after which no further matches exist). Search for a string that appears only in an EARLIER prompt. | The search wraps to the start of the timeline and finds the match in the earlier prompt; viewer auto-jumps there. |
+
+### 10g. Pattern not found
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10g.1 | Search for a string that doesn't exist in any response (e.g. a long random UUID). | Search bar background turns dark red (`rgba(140, 20, 20, 0.9)`), text shows `Pattern not found: <s>` in white. After 2 seconds, bar clears and returns to the hidden state. Cursor does not move. |
+
+### 10h. n / N navigation
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10h.1 | After a successful search, press `n`. | Cursor moves to the next match (in the current response if any exists past current cursor; else jumps to the next prompt containing a match; else wraps). |
+| 10h.2 | Press `N`. | Symmetric backward navigation. Wraps from the first match to the last. |
+| 10h.3 | Press `n` with no prior search. | No-op (no error). |
+
+### 10i. `user_text` is NOT searched
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10i.1 | Find a transcript where a unique string appears only in a user prompt (`user_text`), never in any `response_text`. Search for it. | `Pattern not found: <s>` — even though the string is visible on screen in the prompt line at the top of the matching prompt(s). |
+| 10i.2 | Search for a string that exists in the source markdown ONLY inside markup characters (e.g. search for a triple-backtick `\`\`\`` literal). | `Pattern not found` — the markdown markup is stripped during rendering, so the rendered text doesn't contain literal backticks delimiting code fences. |
+| 10i.3 | Search for a string that appears inside an inline-code span (e.g. `` `Contents.json` `` in source). | Match found. Cursor lands on the FIRST CHARACTER of the rendered string (the `C` of `Contents.json` in the rendered `<code>`), not on the backtick or anywhere else. |
+
+### 10j. Escape cancels search
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10j.1 | Press `/`, type `foo`, press `Escape`. | Search bar clears (hidden state). Search does NOT execute. Cursor unchanged. |
+
+### 10k. Modal interaction
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10k.1 | Press `/`, type `j`, then `Enter`. | Bar shows `/j` during typing. Enter executes a search for the literal character `j`. The cursor does NOT move down a line — `j` was captured as search input, not a vim command. |
+| 10k.2 | Press `/`, type `42G`, then `Enter`. | Bar shows `/42G`. Search executes for the literal string `42G`. The `G` did NOT trigger a line-jump. |
+
+### 10l. Arrow keys still work
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10l.1 | Press ↓. | Advances to next prompt (existing behavior). Cursor on the new prompt starts at (1, 1) on first visit. |
+| 10l.2 | Press ←. | Jumps to previous day's remembered prompt (existing behavior). |
+| 10l.3 | Press ↑↓ while in search mode (search bar visible). | Still navigates prompts — arrow keys are not captured by search mode. (Search bar may persist visually until Enter/Escape; that's expected.) |
+
+### 10m. Cursor memory across prompts
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10m.1 | On prompt A, press `5G` (cursor at line 5 col 1). Press ↓ to prompt B. Press `3G` on B. Press ↑ back to A. | Cursor on A restored to line 5 col 1. |
+| 10m.2 | From the previous test, press ↓ again to B. | Cursor on B restored to line 3 col 1. |
+| 10m.3 | Hard-refresh the page. | Cursor memory cleared. The loaded prompt's cursor starts at (1, 1). |
+
+### 10n. Cursor memory + search auto-jump
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10n.1 | On prompt A at (5, 1), `/foo<Enter>` matches in prompt B at line 10. | Viewer jumps to B, cursor lands at the match (line 10 col matching the string position). NOT B's previously-remembered position (the match override wins). |
+| 10n.2 | After 10n.1, press ↑ back to A. | Cursor on A restored to (5, 1) (A's saved position when it was left). |
+
+### 10o. Defense-in-depth
+
+| ID | Steps | Expected |
+|---|---|---|
+| 10o.1 | Search for a string like `<script>alert(1)</script>` (won't be found in normal transcripts). | Search bar displays the literal string in the "Pattern not found: …" error — no `<script>` element created, no alert fires (search-bar uses `textContent`). |
+
 ## Exit criteria
 
 A change ships when:
