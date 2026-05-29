@@ -2,6 +2,11 @@
 
 ## 2026-05-25
 
+### feat: vim cross-response navigation (issue #50)
+
+- `web/transcripts-viewer.html` `moveCursor(dLine, dCol)`: four new branches at the top of the function detect cursor-at-extreme-boundary cases and cross to the adjacent prompt instead of clamping. `j` at the last line crosses to line 1 of the next response, col preserved (clamped to new line's length). `k` at the first line crosses to the last line of the previous response, col preserved. `h` at `(1, 1)` crosses to the last line / last col of the previous response. `l` at `(lastLine, lastCol)` crosses to `(1, 1)` of the next response. Implementation pattern mirrors search auto-jump: `render(newIdx)` (which auto-saves the leaving cursor and restores any remembered cursor for the destination) followed by an explicit `placeCursorAt(...)` that overrides with the cross-response target. At timeline boundaries (first prompt's `k`/`h`, last prompt's `j`/`l`), the `currentIndex ± 1 < N` / `>= 0` checks fail and the existing intra-response clamp keeps the cursor put.
+- `web/TEST-PLAN.md`: new § 11 (sub-sections 11a–11g, 36 test cases) covering basic cross cases for each direction, column preservation under `j`/`k`, timeline boundaries, cursor-memory save/restore interaction, interaction with arrow keys / search / `G`, edge cases (empty destinations, placeholder responses, repeated forward walks), and visual + state side-effects (`#prompt-line` text update, `?prompt=N` URL update, single cursor span in DOM). Automated jsdom runner pass: 35 PASS, 0 FAIL, 0 SKIPPED (one initial 11f.2 mismatch was a test-plan wording error that has been corrected — the case is now consistent with the column-preservation rule for `k`).
+
 ### chore(infra): gitignore graphify-out (issue #46)
 
 - `.gitignore`: added `graphify-out/` so the local graph artifacts (`graph.html`, `graph.json`, `GRAPH_REPORT.md`, `cache/`, `manifest.json`, `cost.json`) produced by the `/graphify` skill stay out of the repo. Verified with `git check-ignore -v graphify-out/graph.html`.

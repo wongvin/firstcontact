@@ -619,9 +619,49 @@
     }
 
     function moveCursor(dLine, dCol) {
+      const total = totalLines();
+      const N = prompts.length;
+      const curLineLen = lineLength(cursor.line);
+      const curMaxCol = Math.max(1, curLineLen);
+
+      // Cross-response motion at extreme cursor positions (issue #50):
+      //   `j` at last line     → next response, line 1, col preserved
+      //   `k` at first line    → prev response, last line, col preserved
+      //   `h` at (1, 1)        → prev response, last line, last col
+      //   `l` at (last, lastCol) → next response, line 1, col 1
+      // Col is "preserved" but clamped to the new line's length where shorter.
+
+      if (dLine === +1 && cursor.line === total && currentIndex + 1 < N) {
+        const desiredCol = cursor.col;
+        render(currentIndex + 1);
+        const newLLen = lineLength(1);
+        placeCursorAt(1, Math.max(1, Math.min(Math.max(1, newLLen), desiredCol)));
+        return;
+      }
+      if (dLine === -1 && cursor.line === 1 && currentIndex - 1 >= 0) {
+        const desiredCol = cursor.col;
+        render(currentIndex - 1);
+        const newTotal = totalLines();
+        const newLLen = lineLength(newTotal);
+        placeCursorAt(newTotal, Math.max(1, Math.min(Math.max(1, newLLen), desiredCol)));
+        return;
+      }
+      if (dCol === -1 && cursor.line === 1 && cursor.col === 1 && currentIndex - 1 >= 0) {
+        render(currentIndex - 1);
+        const newTotal = totalLines();
+        const newLLen = lineLength(newTotal);
+        placeCursorAt(newTotal, Math.max(1, newLLen));
+        return;
+      }
+      if (dCol === +1 && cursor.line === total && cursor.col === curMaxCol && currentIndex + 1 < N) {
+        render(currentIndex + 1);
+        placeCursorAt(1, 1);
+        return;
+      }
+
+      // Intra-response motion (existing behavior).
       let L = cursor.line + dLine;
       let C = cursor.col + dCol;
-      const total = totalLines();
       if (L < 1) L = 1;
       if (L > total) L = total;
       const llen = lineLength(L);
