@@ -516,6 +516,81 @@ Implementation: a `numberPrefix` accumulator collects digit keydowns. The `G` ke
 |---|---|---|
 | 10o.1 | Search for a string like `<script>alert(1)</script>` (won't be found in normal transcripts). | Search bar displays the literal string in the "Pattern not found: …" error — no `<script>` element created, no alert fires (search-bar uses `textContent`). |
 
+## 11. VIM cross-response navigation (issue #50)
+
+Issue #50 extends the `h/j/k/l` motion from § 10b so that the cursor can cross the boundary between adjacent prompts in the global timeline. At the trailing edge of a response, `j` (from the last source line) or `l` (from the last character of the last line) advances to the first line / `(1, 1)` of the next prompt's response. At the leading edge, `k` (from the first line) or `h` (from `(1, 1)`) retreats to the last line / last character of the previous prompt's response. Column position is preserved across `j`/`k` cross-response moves, clamping down to the new line's length when shorter (or to col 1 when the new line is empty). The cross-response branches are gated by `currentIndex ± 1` bounds, so timeline boundaries (first prompt's `k`/`h`, last prompt's `j`/`l`) fall through to the existing intra-response clamp and the cursor stays put. Cross-response motion calls `render(newIndex)` (which auto-saves the leaving prompt's cursor into `cursorByPromptIndex`) and then `placeCursorAt(...)` to OVERRIDE the destination prompt's remembered cursor with the cross-response target — mirroring the search auto-jump behavior in § 10n.
+
+### 11a. Basic cross-response cases (one per direction)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11a.1 | On prompt A (not the last), position cursor at the **last** source line of A's response (`G` then any column via `l`). Press `j`. | Viewer auto-jumps to prompt A+1. Cursor wraps a character at line 1 of A+1's response body. Prompt-line at top updates to A+1's metadata. URL `?prompt=` reflects A+1. |
+| 11a.2 | On prompt B (not the first), position cursor at line 1 of B's response (`1G`). Press `k`. | Viewer auto-jumps to prompt B-1. Cursor wraps a character at the **last** rendered line of B-1's response body. Prompt-line updates; URL reflects B-1. |
+| 11a.3 | On prompt A (not the first), position cursor at `(1, 1)` of A's response (`1G`). Press `h`. | Viewer jumps to prompt A-1. Cursor wraps the **last character of the last rendered line** of A-1's response body. |
+| 11a.4 | On prompt A (not the last), position cursor at the last character of the last rendered line of A's response (`G` then `l` until at end-of-line). Press `l`. | Viewer jumps to prompt A+1. Cursor wraps the first character of line 1 of A+1's response body (i.e. `(1, 1)`). |
+
+### 11b. Column preservation under `j` / `k`
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11b.1 | Choose a prompt pair A → A+1 where line 1 of A+1's response is **at least as long** as A's last line, then position cursor at `(lastLine(A), 4)` in A. Press `j`. | Cursor lands at `(1, 4)` of A+1. The column 4 is preserved exactly. |
+| 11b.2 | Choose A → A+1 where line 1 of A+1 has length `L` and pick a column in A's last line with `col > L` (e.g. A ends with a long line, A+1 starts with a short heading). Position at `(lastLine(A), col)` then press `j`. | Cursor lands at `(1, L)` of A+1 — clamped to the new line's length. |
+| 11b.3 | Choose A → A+1 where line 1 of A+1's response is an **empty** rendered line (e.g. starts with a blank synthetic line) and position at any column > 1 in A's last line. Press `j`. | Cursor lands at `(1, 1)` of A+1 — clamped to 1 because the destination line has zero characters. The `<span class="cursor">` wraps a space placeholder (see § 10a.2-bis). |
+| 11b.4 | Mirror of 11b.1 with `k`: position at `(1, 4)` of B where last line of B-1 is ≥ 4 chars. Press `k`. | Cursor lands at `(lastLine(B-1), 4)` of B-1. |
+| 11b.5 | Mirror of 11b.2 with `k`: B's line 1 col `col` where last line of B-1 has length `L < col`. Press `k`. | Cursor lands at `(lastLine(B-1), L)` of B-1 — clamped down. |
+| 11b.6 | Mirror of 11b.3 with `k`: last line of B-1 is empty. Press `k` from `(1, col>1)` of B. | Cursor lands at `(lastLine(B-1), 1)` of B-1. |
+
+### 11c. Timeline boundaries
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11c.1 | Navigate to the **first** prompt (e.g. `?prompt=0`). Position cursor at line 1 col 1. Press `k`. | Cursor stays at `(1, 1)`. No re-render. No console error. `currentIndex` unchanged; URL unchanged. |
+| 11c.2 | Same first prompt, cursor at `(1, 1)`. Press `h`. | Cursor stays at `(1, 1)`. No re-render. |
+| 11c.3 | Navigate to the **last** prompt. Position cursor at the last rendered line (any column). Press `j`. | Cursor stays put — intra-response clamp keeps it on the last line. No re-render; `currentIndex` unchanged. |
+| 11c.4 | Same last prompt, cursor at `(lastLine, lastCol)`. Press `l`. | Cursor stays at `(lastLine, lastCol)`. No re-render. |
+
+### 11d. Cursor memory interaction with cross-response motion
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11d.1 | On prompt A, position cursor at `(lastLine(A), 7)`. Press `j` to cross into A+1. Inspect `cursorByPromptIndex[A]` in the console (via the test harness or a debug accessor). | A's entry stores `{ line: lastLine(A), col: 7 }` (the leaving cursor). |
+| 11d.2 | After 11d.1, press `k` to return to A. | Cursor on A restored to `(lastLine(A), 7)` — the position you crossed FROM. |
+| 11d.3 | Pre-seed prompt B with a remembered cursor by visiting B first (e.g. press `5G` then ↑ away). Then go to A (B-1) and cross forward via `j` from A's last line. | Cursor on B lands at the **cross-response target** (`(1, col)` clamped), NOT at B's previously-remembered `(5, 1)`. The cross-motion overrides the remembered cursor. |
+| 11d.4 | After 11d.3, press ↑ (arrow) back to A, then ↓ back to B. | Cursor on B is now restored to the cross-response target from 11d.3 (since that became the most-recently-saved cursor on the leave from B). |
+| 11d.5 | On prompt A at `(1, 1)`, press `h` to cross to A-1. Then press `l`. | `l` at `(lastLine(A-1), lastCol(A-1))` crosses forward into A — cursor lands at `(1, 1)` of A (the cross-response forward target), not at A-1's prior `(1, 1)` memory of A. |
+
+### 11e. Interaction with existing keys
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11e.1 | After a cross-response `j` from A to A+1, press ↑. | Arrow key swaps back to prompt A, restoring A's remembered cursor (the `(lastLine(A), col)` from before the cross — saved in 11d.1). Arrow-key behavior from § 9f / § 10l unchanged. |
+| 11e.2 | Cross forward via `j`, then press `/`, type a string present in the new prompt, press Enter. | Search behaves exactly as in § 10d / § 10e — no interaction with cross-response motion. |
+| 11e.3 | On prompt A, position at `(2, 3)`. Press `n` (with no prior search) — no-op. Then press `G`. | `G` jumps to the last line of A (col 1). It does **not** cross into A+1 even if A is non-last — `G` only operates within the current response. § 10c.A.1 semantics unchanged. |
+| 11e.4 | Press `5G` on the last prompt where line 5 exists. | Cursor at `(5, 1)` of the last prompt. Does not cross into a non-existent prompt+1. |
+
+### 11f. Edge cases
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11f.1 | Choose a prompt pair A → A+1 where A+1's response is the `(no response captured)` placeholder. From A's last line, press `j`. | Viewer jumps to A+1. Cursor wraps the first character `(` of `(no response captured)`. |
+| 11f.2 | Mirror of 11f.1: from `(1, 1)` of A+1 (the placeholder prompt), press `k`. | Viewer jumps to A. Cursor lands on A's last rendered line at col 1 — col is preserved from the outgoing cursor's col 1 (`k` is column-preserving per the 11b column rule, NOT `h`-style "last character of last line"). |
+| 11f.3 | Choose A → A+1 where A+1's first rendered line is empty (zero-length). Cross via `j` from any column of A's last line. | Cursor lands at `(1, 1)` of A+1, span renders a space placeholder. (Same as 11b.3.) |
+| 11f.4 | Choose A → A+1 where A's last rendered line is empty. Position cursor at `(lastLine(A), 1)` (the only valid col on an empty line). Press `l`. | The intra-response clamp keeps the cursor on the empty line (col 1 is also `curMaxCol` of `Math.max(1, 0) = 1`), so the `l`-cross branch fires and jumps to `(1, 1)` of A+1. |
+| 11f.5 | Navigate to the first prompt (`?prompt=0`). Position cursor at `(1, 1)`. Press `h`. | No-op (stays put — same as 11c.2). |
+| 11f.6 | Navigate to the last prompt. Position cursor at `(lastLine, lastCol)`. Press `l`. | No-op (stays put — same as 11c.4). |
+| 11f.7 | From the first prompt, press `j` repeatedly (each time landing on the last line of the current prompt, then crossing). Continue until reaching the last prompt. From the last prompt's last line, press `j` one more time. | The walk advances one prompt per cross (after each cross, the cursor is on line 1 of the new prompt; subsequent `j` presses walk down within that prompt until hitting its last line and crossing again). The final `j` on the last prompt's last line is a no-op (11c.3). |
+| 11f.8 | Same shape as 11f.7 but with `l` from `(last, lastCol)` after each cross-forward (manually re-positioning to `(last, lastCol)` of each new prompt with `G` + `l`-until-clamped, then pressing `l`). | Each `l` at `(last, lastCol)` jumps forward to the next prompt's `(1, 1)`. The final `l` on the last prompt is a no-op (11c.4). |
+
+### 11g. Visual + state side-effects
+
+| ID | Steps | Expected |
+|---|---|---|
+| 11g.1 | Before cross-response `j`/`k`/`h`/`l`, note the `#prompt-line` text (date, time, `User:` prefix, prompt text). Cross to a neighbouring prompt. Re-read `#prompt-line`. | After the cross, `#prompt-line` reflects the new prompt's user_text and timestamp per § 9b / § 9c (including any `Claude:` prefix when the previous response ended with `?`). |
+| 11g.2 | Note the URL's `?prompt=N` value before a cross. Cross forward via `j` from the last line. Re-read the URL. | `?prompt=` now reads `N+1`. (Cross via `k`/`h` decrements to `N-1`; non-crossing keypresses leave it unchanged.) |
+| 11g.3 | After any cross-response motion, `document.querySelectorAll('#response-body .cursor')` in the Console. | Returns exactly ONE `<span class="cursor">` — inside the newly rendered response body. (No stale cursor from the previous prompt's DOM.) |
+| 11g.4 | After cross-response `j` from A at col 4 (where A+1's line 1 has length ≥ 4), inspect the cursor span and the surrounding text. | The cursor span wraps the 4th character of the rendered line-1 text of A+1's response body. The character beneath the cursor matches A+1's source line 1 at col 4. |
+| 11g.5 | After cross-response `h` from `(1, 1)` of A to A-1's last line last col, inspect the cursor span. | The cursor span wraps the last character of the last rendered line of A-1's response body. |
+
 ## Exit criteria
 
 A change ships when:
