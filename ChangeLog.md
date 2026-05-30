@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-30
+
+### chore(infra): generic test-plan + jsdom-runner agents (issue #60)
+
+- `.claude/agents/test-plan-writer.md`: project-scoped subagent that authors a `## N. <Feature>` section in any project's test-plan markdown file (`TEST-PLAN.md`, `TESTS.md`, etc.) from a feature spec + impl reference. Generic — no firstcontact-specific patterns. System prompt describes the general shape (preamble → sub-sections lettered `a`/`b`/`c` → `| ID | Steps | Expected |` tables, IDs `N<letter>.<number>`), the typical coverage areas (happy path / edge / state / interaction / visual / defense), and the process (read existing file for style, find next section number, draft, verify uniqueness). Tools: `Read, Edit, Write, Bash, Grep, Glob`.
+- `.claude/agents/test-runner-jsdom.md`: project-scoped subagent that executes a test-plan section against a project's client-side code (HTML + inline `<script>` or a standalone JS module) in a jsdom harness under `/tmp/test-runner-XYZ/`. Generic — describes the PATTERN (install jsdom, extract inline script via `awk`, strip network-call IIFEs, append a `window.__test = { setState, get, call, … }` closure-state shim with names matching the actual impl, build a minimal DOM matching the impl's expectations, dispatch synthesized keyboard events, assert observables) without referring to any specific impl's variable names. Known-skip categories enumerated (`scrollIntoView`, browser-chrome shortcuts, computed styles, real network I/O). Reports as a markdown table with FAIL rows including smallest repro. Tools: `Read, Write, Edit, Bash, Grep, Glob`.
+- Both agents stay project-scoped (`.claude/agents/`) so they're versioned with the repo and available to anyone cloning it; their generic content is also copy-paste-portable to other projects' `.claude/agents/` directories. Invocable via `Agent({subagent_type: "test-plan-writer", prompt: …})` and `Agent({subagent_type: "test-runner-jsdom", prompt: …})`.
+
 ## 2026-05-29
 
 ### chore(infra): move local backend port 8000 → 8001 (issue #58)
