@@ -21,10 +21,10 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-uvicorn main:app --port 8000
+uvicorn main:app --port 8001
 ```
 
-The server listens on `http://localhost:8000`. CORS is allowed for:
+The server listens on `http://localhost:8001`. CORS is allowed for:
 - `http://localhost:5500` (VS Code Live Server default)
 - `http://localhost:8080` (e.g. `python -m http.server 8080` from `web/`)
 - `https://wongvin.github.io` (the deployed GH Pages origin)
@@ -40,7 +40,7 @@ The server listens on `http://localhost:8000`. CORS is allowed for:
 ### `GET /digikey/pricing?manufacturer_part_number=<MPN>`
 
 ```bash
-curl 'http://localhost:8000/digikey/pricing?manufacturer_part_number=STM32F407VGT6'
+curl 'http://localhost:8001/digikey/pricing?manufacturer_part_number=STM32F407VGT6'
 ```
 
 Returns volume-tier pricing from DigiKey's ProductPricing v4 API. Picks the second-to-last tier as the headline.
@@ -48,7 +48,7 @@ Returns volume-tier pricing from DigiKey's ProductPricing v4 API. Picks the seco
 ### `GET /mouser/pricing?manufacturer_part_number=<MPN>`
 
 ```bash
-curl 'http://localhost:8000/mouser/pricing?manufacturer_part_number=NE555P'
+curl 'http://localhost:8001/mouser/pricing?manufacturer_part_number=NE555P'
 ```
 
 Returns volume-tier pricing from Mouser's V1 PartNumberSearch API. Same headline tier selection rule (`tiers[-2]`) for UX parity with the DigiKey route.

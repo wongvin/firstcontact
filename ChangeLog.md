@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-29
+
+### chore(infra): move local backend port 8000 → 8001 (issue #58)
+
+- `web/transcripts-viewer.html`, `web/digikey-search.html`, `web/mouser-search.html`: `BACKEND_URL` constant updated from `http://localhost:8000` to `http://localhost:8001`. Port 8000 falls within Windows' WSL excluded-port range, so it isn't bindable for local development on a WSL host. 8001 is adjacent (easy to remember) and doesn't collide with 8080 used by the static `python -m http.server`.
+- `api/server/README.md`: `uvicorn main:app --port 8001` example + the "listens on http://localhost:8001" line + the two `curl` examples updated.
+- `web/TEST-PLAN.md`: 13 occurrences across § 6 (DigiKey), § 7 (Mouser), § 8 (Transcripts viewer) updated — curl examples, `Backend unreachable at http://localhost:8001` error-message expectations, and the `uvicorn main:app --port 8001` example in 7c.5.
+- No code changes in `api/server/main.py` — the backend reads its port from the uvicorn command-line flag; CORS `allow_origins` lists FRONTEND origins (5500 / 8080 / GH Pages), none of which are 8000.
+
 ## 2026-05-25
 
 ### feat: vim cross-response navigation (issue #50)
