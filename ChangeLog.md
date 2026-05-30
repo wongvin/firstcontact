@@ -2,6 +2,10 @@
 
 ## 2026-05-30
 
+### chore(infra): auto-allow `gh issue comment` + `gh pr create`
+
+- `.claude/settings.json`: added `Bash(gh issue comment *)` and `Bash(gh pr create *)` to `permissions.allow` so the `/ship` workflow's "post implementation-summary comment" and "open PR" steps no longer prompt. Promoted from `.claude/settings.local.json` (where they applied only to this checkout) into the committed project settings so they apply for every contributor. Sits alongside the previously-promoted `Bash(gh project item-edit *)` (status transitions). Other `gh pr` and `gh issue` subcommands (`gh pr merge`, `gh issue close`, `gh issue create`) remain gated as separate deliberate decisions.
+
 ### chore(infra): generic test-plan + jsdom-runner agents (issue #60)
 
 - `.claude/agents/test-plan-writer.md`: project-scoped subagent that authors a `## N. <Feature>` section in any project's test-plan markdown file (`TEST-PLAN.md`, `TESTS.md`, etc.) from a feature spec + impl reference. Generic — no firstcontact-specific patterns. System prompt describes the general shape (preamble → sub-sections lettered `a`/`b`/`c` → `| ID | Steps | Expected |` tables, IDs `N<letter>.<number>`), the typical coverage areas (happy path / edge / state / interaction / visual / defense), and the process (read existing file for style, find next section number, draft, verify uniqueness). Tools: `Read, Edit, Write, Bash, Grep, Glob`.

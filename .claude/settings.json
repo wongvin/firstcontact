@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh project item-edit *)"
+      "Bash(gh project item-edit *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh pr create *)"
     ]
   },
   "hooks": {
