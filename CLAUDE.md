@@ -127,7 +127,8 @@ not a bare "shipped in `<sha>`" line. Cover:
 
 - what files changed (or note that the change was infra-only);
 - the key code, markup, CSS, and script pieces;
-- any verification done.
+- any verification done;
+- the PR link (e.g. `Shipped in #N`) if a PR was created for the work.
 
 For infra-only work, describe the commands / API calls made and how they were
 verified. Exclude `ChangeLog.md` noise — focus on the functional change. For
