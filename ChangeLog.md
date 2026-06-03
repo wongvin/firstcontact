@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-02
+
+### feat: VIM screen-position motions H / M / L (issue #54)
+
+- `web/transcripts-viewer.html`: added three VIM-style "screen position" motions on top of the existing `hjklG/nN` keybinds. `H` jumps the cursor to the first rendered line whose top is at or below the `#output-card` viewport top ("High"); `M` jumps to the rendered line whose vertical center is closest to the viewport midpoint; `L` jumps to the last rendered line whose bottom is at or above the viewport bottom ("Low"). Cursor column resets to `1` on each motion (per issue spec — "cursor column position will be reset to beginning of the new line"). New helpers: `rectForLineStart(line)` builds a non-mutating `Range` over a single character to read its `getBoundingClientRect`; `findVisibleLineRange()` iterates over `1..totalLines()` to find top/mid/bot relative to the viewport, with sensible fallbacks (first / `ceil((1+total)/2)` / last) when the entire response fits inside the viewport. Keyboard handler dispatches `H`/`M`/`L` via `moveCursorAbs(target, 1)` and clears `numberPrefix` (no `<num>H` support). Shift's modifier-only keydown still short-circuits at the existing guard so the capital letters compose with the digit accumulator the same way `G` already does. The issue's note that `gg (top of file) will be implemented with other "g" functions` is out of scope for this commit — it will land in a separate `g`-family issue.
+- Help text: `↑↓ prompts · ←→ days · hjklG/nN vim keybind` → `↑↓ prompts · ←→ days · hjklHMLG/nN vim keybind` (added `HML` between `hjkl` and `G`).
+- `web/TEST-PLAN.md`: new § 12 (sub-sections 12a–12g, ~24 cases) covering each motion individually, the col-reset requirement, interaction with the number accumulator / search / arrows / G, visual + state side-effects (single cursor span invariant, `cursorByPromptIndex` save, help-text substring), and edge cases (placeholder responses, single-line responses, viewport-sized responses, window resize, cursor-position non-interference with measurement).
+
 ## 2026-05-30
 
 ### chore(infra): auto-allow `gh issue comment` + `gh pr create`

@@ -591,6 +591,95 @@ Issue #50 extends the `h/j/k/l` motion from § 10b so that the cursor can cross 
 | 11g.4 | After cross-response `j` from A at col 4 (where A+1's line 1 has length ≥ 4), inspect the cursor span and the surrounding text. | The cursor span wraps the 4th character of the rendered line-1 text of A+1's response body. The character beneath the cursor matches A+1's source line 1 at col 4. |
 | 11g.5 | After cross-response `h` from `(1, 1)` of A to A-1's last line last col, inspect the cursor span. | The cursor span wraps the last character of the last rendered line of A-1's response body. |
 
+## 12. VIM screen-position motions H / M / L (issue #54)
+
+Issue #54 adds three VIM-style "screen position" motions to the existing `hjklG/nN` keybinds in `web/transcripts-viewer.html`:
+
+| Key | Move |
+| --- | --- |
+| `H` | top of screen ("High") — first rendered line whose top is at or below the `#output-card` viewport top |
+| `M` | middle of screen — rendered line whose vertical center is closest to the viewport midpoint |
+| `L` | bottom of screen ("Low") — last rendered line whose bottom is at or above the viewport bottom |
+
+Cursor column position resets to `1` after H / M / L (per the issue's `cursor column position will be reset to beginning of the new line` requirement — the cursor lands at the start of the new line, not at the previously-held column).
+
+Implementation:
+- New `rectForLineStart(line)` helper builds a `Range` over the first character of the given rendered line and returns its `getBoundingClientRect()`. The Range API doesn't mutate the DOM (no `splitText`), so this is a cheap measurement primitive distinct from `placeCursorAt`.
+- New `findVisibleLineRange()` iterates over `1..totalLines()`, calls `rectForLineStart` on each, and tracks: the first line fully inside the viewport (→ `top`), the last line fully inside the viewport (→ `bot`), and the line whose center is closest to the viewport midpoint (→ `mid`). Fallbacks: short content where the entire response fits inside the viewport returns first / mid / last line.
+- Keyboard handler: `H`, `M`, `L` (each capital — Shift + h/m/l) call `findVisibleLineRange()` and dispatch `moveCursorAbs(target, 1)`. `numberPrefix` is cleared (no `<num>H` support — H/M/L take no count). Shift's own keydown short-circuits at the existing modifier-only guard so Shift before capital H/M/L doesn't clobber `numberPrefix`.
+- Help text updated: `hjklG/nN vim keybind` → `hjklHMLG/nN vim keybind`.
+
+The issue also notes `gg (top of file) will be implemented with other "g" functions` — that is **out of scope** for #54 and will land in a separate issue covering the `g` family.
+
+### 12a. H motion — top of screen
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12a.1 | Load a long response (≥ 50 rendered lines, e.g. a code-heavy reply that overflows the viewport). Scroll the `#output-card` so several lines are above the viewport top. Press `H`. | Cursor jumps to the first rendered line whose top is at or below the viewport top. Cursor column is `1`. The `<span class="cursor">` wraps the first character of that line (or a placeholder space if the line is empty). |
+| 12a.2 | After 12a.1, press `H` again without scrolling. | No effective movement — cursor is already on the H line. (`placeCursorAt(top, 1)` re-fires but is a DOM-equivalent no-op; no console error.) |
+| 12a.3 | On a SHORT response that fits entirely inside the viewport (e.g. a 3-line reply). Press `H`. | Cursor lands at line 1, col 1 — the fallback when no line is "fully inside" the viewport (the entire response is). |
+| 12a.4 | Press `H` while the cursor is mid-line at `(N, 7)` where line N is below the H line. | Cursor moves to `(H_line, 1)`. Column 7 is **not** preserved — col is reset to 1 (issue #54 spec). |
+| 12a.5 | Press `H` while the cursor is below the H line (e.g. on the L line at the bottom of the viewport). | Cursor moves up to `(H_line, 1)`. |
+
+### 12b. M motion — middle of screen
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12b.1 | Long response, scrolled so the viewport shows lines 20–40 (approximately). Press `M`. | Cursor lands on the rendered line whose vertical center is closest to the viewport midpoint — roughly line 30. Col = 1. |
+| 12b.2 | Long response with uneven block heights (mix of headings, paragraphs, fenced code blocks). Press `M` and visually note which line the cursor lands on. | The chosen line's *vertical center* should be the closest one to the viewport midpoint — i.e. a tall preceding code block can shift the M line to a smaller logical-line number than a midpoint-of-`(top, bot)` average would suggest. |
+| 12b.3 | Press `M` on a short response that fits inside the viewport. | Cursor lands at the response's middle line (`ceil((1 + total) / 2)`) — the fallback when no fully-visible range can be established. |
+| 12b.4 | Press `M` from any cursor position. | Col resets to 1 regardless of starting column. |
+
+### 12c. L motion — bottom of screen
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12c.1 | Long response, scrolled so several lines are below the viewport bottom. Press `L`. | Cursor jumps to the last rendered line whose bottom is at or above the viewport bottom. Col = 1. |
+| 12c.2 | Press `L` then `j` repeatedly. | Each `j` moves down one line; after enough presses the cursor drops below the viewport and `scrollCursorIntoView` (existing behavior) brings it into view. The `L` landing was on the *visible* bottom line, not the response's *absolute* last line. |
+| 12c.3 | Short response inside viewport. Press `L`. | Cursor lands at the response's last line, col 1 — fallback for short content. |
+| 12c.4 | Press `L` from a cursor higher in the viewport. | Cursor moves down. Col resets to 1. |
+
+### 12d. Column reset after H / M / L
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12d.1 | Position cursor at `(5, 12)` via `5G` then `l` × 11. Press `H`. | Cursor lands at `(H_line, 1)` — column 1, not 12. |
+| 12d.2 | Repeat 12d.1 with `M` instead of `H`. | Cursor at `(M_line, 1)`. Column reset. |
+| 12d.3 | Repeat with `L`. | Cursor at `(L_line, 1)`. Column reset. |
+| 12d.4 | On a long line where col 12 would exist on the H line. Set cursor at `(5, 12)`, press `H`. | Cursor at `(H_line, 1)`. The fact that col 12 IS valid on the new line is irrelevant — col is unconditionally reset. |
+
+### 12e. Interaction with existing keys
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12e.1 | Type `5` (number prefix accumulator engaged), then `H`. | `H` triggers top-of-screen and clears `numberPrefix` — there is no `<num>H` support. `5G` (with a numeric prefix) still works as before, but `5H` is just `H`. |
+| 12e.2 | Press `/`, type `H`, press Enter. | Search executes for the literal character `H`. Cursor does NOT jump to top-of-screen — `H` is captured as search input while in search mode (consistent with § 10k.1 for `j`). |
+| 12e.3 | Press `H` while inside search mode (search bar visible, partial pattern typed). | `H` appended to `searchString`. No top-of-screen motion. |
+| 12e.4 | After `H`/`M`/`L`, press `j` or `k`. | Motion continues from the new (line, 1) position — j/k operate normally from wherever H/M/L landed. |
+| 12e.5 | After `H`/`M`/`L`, press `↑` (arrow). | Page advances to the previous prompt (existing arrow-key behavior unchanged). The cursor save still records the H/M/L landing position into `cursorByPromptIndex[currentIndex]` before the swap. |
+| 12e.6 | After `H`/`M`/`L`, press `G`. | Jumps to the last source line (existing § 10c behavior). |
+| 12e.7 | Type `5`, hold Shift (Shift keydown fires — modifier-only guard short-circuits and keeps `numberPrefix = '5'`), then while still holding Shift press `H`. | `H` triggers top-of-screen with `numberPrefix` cleared in `H`'s branch — `5` is discarded (intentional: H takes no count). |
+
+### 12f. Visual + state side-effects
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12f.1 | After any H/M/L motion, `document.querySelectorAll('#response-body .cursor')` in the Console. | Returns exactly ONE `<span class="cursor">` — the previous cursor span is replaced by `removeCursorSpan` inside `placeCursorAt` before the new one is inserted (existing § 9f / § 10a invariant). |
+| 12f.2 | After H/M/L on a long response, inspect `cursor` (via console accessor if available, or trace via `placeCursorAt`'s assignment). | `cursor.line` matches the H/M/L target line; `cursor.col === 1`. |
+| 12f.3 | After H/M/L, navigate to a different prompt via ↑/↓ then back. | `cursorByPromptIndex[<original>]` stored the H/M/L position (line, col=1); returning restores cursor to that line/col. |
+| 12f.4 | Scroll the `#output-card` so the cursor is off-screen, then press `H`. | Cursor lands at the visible top line and `scrollCursorIntoView` keeps it visible (or the cursor itself is what becomes visible since H targets a line inside the current viewport). No scroll-jump to top-of-document for non-line-1 targets. |
+| 12f.5 | Help text at the bottom of the viewer reads `↑↓ prompts · ←→ days · hjklHMLG/nN vim keybind`. | Exact substring match — `HML` inserted between `hjkl` and `G`. |
+
+### 12g. Edge cases
+
+| ID | Steps | Expected |
+|---|---|---|
+| 12g.1 | Empty `(no response captured)` placeholder prompt. Press `H`, `M`, `L`. | Each lands at `(1, 1)` of the placeholder text (it has one line of content). No JS error. |
+| 12g.2 | Single-line response that fits entirely in the viewport. Press `H`. | Cursor at `(1, 1)`. Press `M`: also `(1, 1)`. Press `L`: also `(1, 1)`. |
+| 12g.3 | Viewport-sized response (exactly fills the viewport, no scroll). Press `H` / `L`. | H lands at line 1; L lands at the last line (`totalLines()`). M lands at the middle. |
+| 12g.4 | Resize the browser window so the `#output-card` shrinks vertically, putting more lines off-screen. Press `H`/`M`/`L` again. | Each motion re-measures the viewport via `getBoundingClientRect()`, so the new H/M/L targets reflect the new visible range. |
+| 12g.5 | Sanity check: set cursor at line 1, scroll, then press `H`/`M`/`L`. Verify the motion still finds the correct viewport-relative lines. | `rectForLineStart`'s tree walker skips nodes whose parent has class `cursor`, so the cursor's own position does not bias the measurement. |
+
 ## Exit criteria
 
 A change ships when:
