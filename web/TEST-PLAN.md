@@ -753,6 +753,86 @@ Memory is **in-memory only** — a page refresh clears `lastIndexByDay`. This is
 | 13g.2 | `grep -n 'targetForDay' web/transcripts-viewer.html` | At least 4 occurrences: definition + 3 call-sites (one in `goToPrevDay` for `di > 0`, one in the `di === -1` fallback, one in `goToNextDay`). Removing any reduces the day-navigation paths that respect memory. |
 | 13g.3 | Read `goToPrevDay` and `goToNextDay`. | Both call `render(targetForDay(...))`, not `render(days[...].first_prompt_index)` directly. The indirection through `targetForDay` is what makes memory honored. |
 
+## 14. Per-prompt cursor-position memory (issue #67)
+
+Issue #67 specifies three behaviors for cursor-position memory inside each prompt's response. All three are met by the existing `cursorByPromptIndex` machinery introduced in #45 (see § 10m, § 10n) and unchanged across #50 / #54 / #66 — this section is **regression coverage** for that pre-existing behavior, not a new feature.
+
+| Requirement (#67) | How it's met in `main` |
+| --- | --- |
+| Initialize cursor location of each prompt to first character of first line | `render(index)` checks `cursorByPromptIndex[clamped]`; if absent, sets `cursor = { line: 1, col: 1 }` (lines ~1058–1063). The fallback IS the initialization — no explicit pre-population. |
+| Remember last cursor location of each prompt | `render(index)` saves `cursorByPromptIndex[currentIndex] = { line: cursor.line, col: cursor.col }` *before* swapping to the new prompt (line ~1018), gated by `currentIndex !== clamped` so same-prompt renders don't pollute. |
+| Transition restores saved cursor | After the prompt swap, `render` reads `cursorByPromptIndex[clamped]` and calls `placeCursorAt(cursor.line, cursor.col)` (line ~1064). All transition entry points (↑/↓ arrows, ←/→ day jumps, search auto-jump, cross-response j/k/h/l, direct `?prompt=N` URL) route through `render` and inherit this behavior. |
+
+Memory is **in-memory only** — a page refresh clears `cursorByPromptIndex` (per § 10m.3). The localStorage-persistence companion is scoped as #68 in the backlog.
+
+Existing § 10m / § 10n / § 11d already cover much of this behavior end-to-end. § 14 below complements them by scoping cases explicitly to #67's three requirements and adding code-shape regression guards (§ 14g) that prevent silent removal of the memory machinery.
+
+### 14a. Initialization — unvisited prompts default to (1, 1)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14a.1 | Load. The initial render places the cursor at `cursor.line = 1, cursor.col = 1` for the starting prompt. Inspect `cursorByPromptIndex` in the Console. | `cursorByPromptIndex` is an empty object (well, may contain one entry for `currentIndex = 0` written by the first-render save when `startIndex !== 0` — see 14a.4). The starting prompt's cursor is `(1, 1)` regardless. |
+| 14a.2 | Navigate via ↓ to a never-visited prompt (any direction works the first time). | Cursor on the new prompt lands at `(1, 1)`. |
+| 14a.3 | Hard-refresh the page. Cursor on initial render is `(1, 1)` (per § 10a / § 10m.3). | `cursorByPromptIndex` starts empty after refresh. |
+| 14a.4 | Load with `?prompt=5` URL param. Inspect `cursorByPromptIndex[0]` in the Console immediately after load. | Entry exists with `{ line: 1, col: 1 }` — the spurious save from `render(5)` saving the default cursor for the initial `currentIndex = 0` (`if (currentIndex !== clamped)` guard fires because `0 !== 5`). This is a known minor imperfection — it doesn't observably affect navigation since prompt 0 would land at `(1, 1)` either way. |
+
+### 14b. Memory — last cursor location of each prompt is remembered
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14b.1 | On prompt A, press `5G` to land at `(5, 1)`. Press `l` × 3 to land at `(5, 4)`. Press ↓ to swap to prompt B. Console-inspect `cursorByPromptIndex[A]`. | `cursorByPromptIndex[A] === { line: 5, col: 4 }` — the cursor at the moment of leaving A. |
+| 14b.2 | After 14b.1, on prompt B press `3G` then `l` × 6 → cursor at `(3, 7)`. ↑ back to A. Inspect `cursorByPromptIndex[B]`. | Saved on leaving B: `{ line: 3, col: 7 }`. |
+| 14b.3 | After 14b.2 (cursor restored to A's `(5, 4)`), do nothing for 5 seconds, then ↓ to B. Inspect `cursorByPromptIndex[A]`. | Unchanged from 14b.1: `{ line: 5, col: 4 }` — only the leave-trigger writes, not idle time. |
+| 14b.4 | Visit prompts P0..P9 in sequence with distinct cursor positions on each. Inspect the dict's full state. | 10 entries (one per visited prompt), each mapping `index → { line, col }` of where the cursor was on leaving. |
+| 14b.5 | Save state via `JSON.stringify(cursorByPromptIndex)`. Each value is `{ line: <int>, col: <int> }`. | Schema is uniform — no nested objects, no extra fields. The shape `{ line, col }` matches what `placeCursorAt` consumes. |
+
+### 14c. Transition — entering a prompt restores saved cursor
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14c.1 | After 14b.2, ↑ back to A, then ↓ back to B. | Cursor on B restored to `(3, 7)` from `cursorByPromptIndex[B]`. |
+| 14c.2 | Visit A at `(5, 4)`, B at `(2, 1)`. From B press ←/→ to switch days then come back via ←/→ landing on A (per § 13). | Cursor on A restored to `(5, 4)`. (Both day-position memory and per-prompt cursor memory cooperate: § 13's `lastIndexByDay` chooses A as the day's saved prompt; § 14's `cursorByPromptIndex[A]` chooses `(5, 4)` as the cursor.) |
+| 14c.3 | Visit A at `(5, 4)`. Open URL `?prompt=<A>` in a new tab (different session). | Cursor at `(1, 1)` in the new tab — memory is per-session, doesn't persist across page loads (§ 10m.3 / § 14a.3). |
+| 14c.4 | Visit A at `(5, 4)`, B at `(7, 2)`. Search `/sometext<Enter>` matches in A at line 9. | Search auto-jump renders A then OVERRIDES `cursorByPromptIndex[A]`'s `(5, 4)` with `(9, <match col>)` via `placeCursorAt(matchLine, matchCol)` (§ 10n.1 behavior). |
+| 14c.5 | After 14c.4, ↑ to A's neighbor then ↓ back to A. | Cursor restored to the *match* position `(9, ...)` — the search override updated the saved memory through the next save-on-leave cycle. |
+
+### 14d. Cursor-validity sanity — restored value clamps via `placeCursorAt`
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14d.1 | Manually corrupt the memory: `cursorByPromptIndex[A] = { line: 9999, col: 9999 }`. Then ↑↓ or arrow-jump to A. | `placeCursorAt` clamps `(line, col)` to the prompt's rendered text range — `L = min(line, totalLines())`, `C = min(col, max(1, lineLength(L)))`. No JS error; cursor lands within bounds. |
+| 14d.2 | `cursorByPromptIndex[A] = { line: 0, col: 0 }`. Visit A. | `placeCursorAt` floors to `(1, 1)` via its `Math.max(1, …)` clamps. |
+| 14d.3 | `cursorByPromptIndex[A] = null`. Visit A. | The restore branch `if (remembered)` skips the null and falls through to `cursor = { line: 1, col: 1 }`. |
+| 14d.4 | `cursorByPromptIndex[A] = { line: 'foo', col: 'bar' }` (type-corrupted). Visit A. | `placeCursorAt`'s `Math.max/Math.min` against `Number(line)` short-circuits via NaN to the fallback. Cursor lands at `(1, 1)` (or the clamped boundary). No throw. |
+
+### 14e. Interaction with all motion types
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14e.1 | `h`/`j`/`k`/`l` intra-prompt motion. Inspect `cursorByPromptIndex` after each press. | Unchanged. Only prompt-swap (`currentIndex` change) writes to the dict. Intra-prompt cursor motion mutates the live `cursor` variable but not the saved memory. |
+| 14e.2 | `<num>G` and `G` intra-prompt jumps. | Same as 14e.1 — no save. |
+| 14e.3 | `H`/`M`/`L` (§ 12). | Same as 14e.1 — no save. Even though col resets to 1, no `render` call occurs and no entry is written. |
+| 14e.4 | Cross-response `j` (§ 11) — `j` from the last line of A jumps to `(1, col)` of A+1. | The save fires on leaving A (writes `{ lastLine(A), col }`), and the cross-response code then OVERRIDES the restored cursor on A+1 with the cross-target. Inspect both entries after: `cursorByPromptIndex[A]` reflects the leaving position; A+1's cursor is the cross-target (not a previously-saved value). |
+| 14e.5 | Search auto-jump (§ 10n) into a prompt with prior memory. | Save fires on leaving the source prompt. On the destination prompt, the search's `placeCursorAt(matchLine, matchCol)` overrides the restored memory (see 14c.4–14c.5). |
+| 14e.6 | Cursor-span sanity after any restore: `document.querySelectorAll('#response-body .cursor')` in Console. | Returns exactly one `<span class="cursor">` (existing § 11g.3 / § 9f / § 10a invariant). |
+
+### 14f. Boundary cases
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14f.1 | Empty response prompt (`(no response captured)` placeholder). Cursor lands somewhere via `placeCursorAt(1, 1)`. Navigate away and back. | Saved cursor for that prompt is whatever `placeCursorAt` resolved to (likely `(1, 1)`). Restore re-applies it. |
+| 14f.2 | Prompt with a single empty rendered line (`totalLines() === 1`, `lineLength(1) === 0`). Set cursor at `(1, 1)`. Navigate away and back. | Restore lands at `(1, 1)` — the only valid position. No error. |
+| 14f.3 | Visit the first prompt (`currentIndex = 0`), set cursor at `(3, 5)`. Navigate to prompt 1 then back to 0. | Cursor restored to `(3, 5)`. |
+| 14f.4 | Visit the last prompt, set cursor at the last line's last col. Navigate away and back. | Cursor restored to that position. |
+
+### 14g. Code-shape regression guards against silent removal
+
+| ID | Steps | Expected |
+|---|---|---|
+| 14g.1 | `grep -n 'cursorByPromptIndex' web/transcripts-viewer.html` | At least 3 occurrences: declaration (`const cursorByPromptIndex = {}`), write inside `render` (`cursorByPromptIndex[currentIndex] = { line, col }`), and read inside `render` (`const remembered = cursorByPromptIndex[clamped]`). Removing any breaks #67. |
+| 14g.2 | Read the `render(index)` function. | Contains both a save block (`if (prompts.length && currentIndex !== clamped) { cursorByPromptIndex[currentIndex] = …; }`) BEFORE the `currentIndex = clamped` assignment, AND a restore block (`const remembered = cursorByPromptIndex[clamped]; if (remembered) cursor = …; else cursor = { line: 1, col: 1 }; placeCursorAt(...)`) at the END. The ordering matters — saving after the swap would write to the wrong index. |
+| 14g.3 | Read the save block's guard. | `currentIndex !== clamped` — same-prompt renders (e.g. a no-op re-render) skip the save. Removing this guard would overwrite the saved cursor with the current cursor on every render, including intra-prompt motions if they ever started routing through `render`. |
+
 ## Exit criteria
 
 A change ships when:

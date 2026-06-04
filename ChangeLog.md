@@ -2,6 +2,11 @@
 
 ## 2026-06-03
 
+### docs: regression coverage for per-prompt cursor-position memory (issue #67)
+
+- `web/TEST-PLAN.md`: new § 14 (sub-sections 14a–14g, ~24 cases) locking in the existing `cursorByPromptIndex` behavior introduced in #45 and unchanged across #50 / #54 / #66. Covers each of #67's three requirements (initialize to `(1, 1)`, remember on visit, restore on transition), cursor-validity clamp safety against corrupted memory, interaction with intra-prompt motions (`h`/`j`/`k`/`l`/`G`/`<num>G`/`H`/`M`/`L`) vs prompt-swaps (↑/↓/←/→/search/cross-response), search auto-jump override behavior (§ 10n), and code-shape regression guards (greps for `cursorByPromptIndex` occurrence count, save-before-swap / restore-after-swap ordering invariant inside `render`).
+- No code change. Same shape as #66 — the behavior was already implemented; § 14 makes its preservation testable.
+
 ### docs: regression coverage for per-day prompt-position memory (issue #66)
 
 - `web/TEST-PLAN.md`: new § 13 (sub-sections 13a–13g, ~22 cases) locking in the existing `lastIndexByDay` / `targetForDay` behavior introduced in #35 and unchanged across #45 / #50 / #54. Covers each of #66's three requirements (initialize to first prompt, remember on visit, transition to saved location), clamp safety against corrupted memory, memory boundaries (refresh, single-day, day-less prompts), interaction with all other motion types (`/` search auto-jump, cross-response jk, H/M/L, `<num>G`), and code-shape regression guards against re-attempts of #63's removal (greps for `lastIndexByDay` / `targetForDay` occurrence counts).
