@@ -2,6 +2,12 @@
 
 ## 2026-06-03
 
+### feat: initial load opens first prompt of last day (issue #66 follow-up)
+
+- `web/transcripts-viewer.html`: changed the page-load default in the load IIFE so that when no `?prompt=` URL parameter is present, `startIndex = days[days.length - 1].first_prompt_index` (the **first prompt of the most-recent day**) instead of `Math.max(0, prompts.length - 1)` (most-recent prompt globally, which on a multi-prompt last day landed mid-day). This makes #66's "initialize prompt location of each day to be the first prompt of the day" apply at load time too, not only on the first ← / → visit to an unvisited day. Explicit URL override (`?prompt=N`) still wins. Empty-`days[]` payload falls through to the existing empty-state path (no crash).
+- The per-day position memory `lastIndexByDay` and the `targetForDay` indirection are **unchanged** — once you navigate around in-session, the memory is populated by `render` and used by ←/→ exactly as before. The only behavior change is which prompt is shown on the very first render.
+- `web/TEST-PLAN.md` § 13: updated preamble to call out the new load-default behavior alongside the existing in-session machinery. § 13a renamed to "Initialization — load default + unvisited-day fallback both land on first prompt of the day". § 13a.1 flipped from asserting the OLD `prompts.length - 1` landing to asserting the new `days[lastDay].first_prompt_index` landing. Added 13a.1-bis (explicit `?prompt=N` URL override still wins) and 13a.1-ter (empty-days fallback).
+
 ### docs: regression coverage for per-prompt cursor-position memory (issue #67)
 
 - `web/TEST-PLAN.md`: new § 14 (sub-sections 14a–14g, ~24 cases) locking in the existing `cursorByPromptIndex` behavior introduced in #45 and unchanged across #50 / #54 / #66. Covers each of #67's three requirements (initialize to `(1, 1)`, remember on visit, restore on transition), cursor-validity clamp safety against corrupted memory, interaction with intra-prompt motions (`h`/`j`/`k`/`l`/`G`/`<num>G`/`H`/`M`/`L`) vs prompt-swaps (↑/↓/←/→/search/cross-response), search auto-jump override behavior (§ 10n), and code-shape regression guards (greps for `cursorByPromptIndex` occurrence count, save-before-swap / restore-after-swap ordering invariant inside `render`).

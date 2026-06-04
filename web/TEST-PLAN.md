@@ -682,21 +682,23 @@ The issue also notes `gg (top of file) will be implemented with other "g" functi
 
 ## 13. Per-day prompt-position memory (issue #66)
 
-Issue #66 specifies three behaviors for `web/transcripts-viewer.html`'s day-navigation memory. All three are met by the existing `lastIndexByDay` / `targetForDay` machinery introduced in #35 and unchanged across #45 / #50 / #54 — this section is **regression coverage** for that pre-existing behavior, not a new feature. #66 was filed and accepted after #63 was rejected (which would have removed this behavior in favor of always-first-prompt-of-day landing).
+Issue #66 specifies three behaviors for `web/transcripts-viewer.html`'s day-navigation memory. The `lastIndexByDay` / `targetForDay` machinery (introduced #35, unchanged across #45 / #50 / #54) satisfies the **in-session** part of all three: per-day memory write on visit, fallback to `first_prompt_index` for unvisited days, transition reads via `targetForDay`. Per the #66 follow-up, the **initial-load default** was also changed so the viewer opens at `days[days.length - 1].first_prompt_index` (first prompt of the last day) instead of `prompts.length - 1` (most-recent prompt globally) — making the "initialize to first prompt of each day" requirement apply at load time too, not just on first ←/→ visit.
 
 | Requirement (#66) | How it's met in `main` |
 | --- | --- |
-| Initialize prompt location of each day to be the first prompt of the day | `targetForDay(day)` returns `day.first_prompt_index` whenever `lastIndexByDay[day.date]` is unset (or out of range). No explicit pre-population — the fallback path IS the initialization. |
+| Initialize prompt location of each day to be the first prompt of the day | (a) On initial load, `startIndex = days[days.length - 1].first_prompt_index` when no `?prompt=` URL param. (b) For every other day, `targetForDay(day)` returns `day.first_prompt_index` whenever `lastIndexByDay[day.date]` is unset (or out of range). |
 | If a day has been visited, remember the last visited prompt location of that day | `render(index)` writes `lastIndexByDay[p.day] = clamped` on every prompt-switch (line ~1051). "Visited" = "currently rendered". |
 | When transitioning to a day, jump to the saved prompt location of that day | `goToPrevDay` / `goToNextDay` call `render(targetForDay(days[di ± 1]))`. Arrow `←` / `→` are wired to those in the key handler. |
 
-Memory is **in-memory only** — a page refresh clears `lastIndexByDay`. This is intentional (mirrors `cursorByPromptIndex` from § 10m.3). If cross-refresh persistence is wanted later, it would need its own issue (localStorage backing) and isn't part of #66's scope.
+Memory is **in-memory only** — a page refresh clears `lastIndexByDay`. This is intentional (mirrors `cursorByPromptIndex` from § 10m.3). If cross-refresh persistence is wanted later, it would need its own issue (localStorage backing) and isn't part of #66's scope — see #68 in the backlog.
 
-### 13a. Initialization — unvisited days default to first prompt
+### 13a. Initialization — load default + unvisited-day fallback both land on first prompt of the day
 
 | ID | Steps | Expected |
 |---|---|---|
-| 13a.1 | Hard-refresh the page (no `?prompt=` URL parameter). Note the prompt index in the URL after load. | URL is rewritten to `?prompt=N` where `N === prompts.length - 1` (most-recent prompt globally — current load default; this case is asserting the load behavior is unchanged by #66, NOT first-prompt-of-last-day). |
+| 13a.1 | Hard-refresh the page (no `?prompt=` URL parameter). Note the prompt index in the URL after load and the `#prompt-line` timestamp. | URL is rewritten to `?prompt=N` where `N === days[days.length - 1].first_prompt_index` — the **first prompt of the last day**, not the most-recent prompt globally. Timestamp shown is the first prompt's `timestamp` of the last day. Verifiable against the `/claudecode/timeline` JSON payload's last `days[]` entry. |
+| 13a.1-bis | Load with `?prompt=5` in the URL. | Viewer renders prompt index 5 — the explicit URL override wins over the new load default. (§ 8c.8 / § 9f.4 regression unchanged.) |
+| 13a.1-ter | Backend returns an empty `days` array (zero prompts overall). | `lastDayFirst` evaluates to `0`; `render(0)` falls into the empty-state path inside `render` (no prompts to render) — viewer shows "No prompts found in `~/.claude/projects/`." muted message. No JS error. |
 | 13a.2 | After 13a.1, press ← (assuming there is a day before the last). | Viewer jumps to `days[lastDay - 1].first_prompt_index` — the previous day's **first** prompt, because that day has never been visited this session and `targetForDay` returns the `first_prompt_index` fallback. |
 | 13a.3 | Continue pressing ← repeatedly into older days. Each press lands on the first prompt of the destination day on the first visit. | Until a day has been visited, each ← landing is `days[di].first_prompt_index`. |
 
