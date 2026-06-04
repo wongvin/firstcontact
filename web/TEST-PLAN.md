@@ -835,6 +835,47 @@ Existing § 10m / § 10n / § 11d already cover much of this behavior end-to-end
 | 14g.2 | Read the `render(index)` function. | Contains both a save block (`if (prompts.length && currentIndex !== clamped) { cursorByPromptIndex[currentIndex] = …; }`) BEFORE the `currentIndex = clamped` assignment, AND a restore block (`const remembered = cursorByPromptIndex[clamped]; if (remembered) cursor = …; else cursor = { line: 1, col: 1 }; placeCursorAt(...)`) at the END. The ordering matters — saving after the swap would write to the wrong index. |
 | 14g.3 | Read the save block's guard. | `currentIndex !== clamped` — same-prompt renders (e.g. a no-op re-render) skip the save. Removing this guard would overwrite the saved cursor with the current cursor on every render, including intra-prompt motions if they ever started routing through `render`. |
 
+## 15. Tool-call lines removed from transcripts viewer (issue #65)
+
+Issue #65 removes the `🔧 tool_call: …` lines that used to appear inside `response_text` between prose paragraphs of assistant responses. The fix is **backend-only** in [api/server/claudecode_client.py](api/server/claudecode_client.py): `_extract_assistant_text_blocks(entry)` now collects only `text`-typed content blocks; `tool_use` blocks are dropped at parse time, alongside the already-dropped `thinking` blocks. The previous `_TOOL_CALL_PREFIX` constant, the `('text', …) | ('tool', …)` tuple shape, the `tool_buffer` / `flush_tools` grouping logic, and the leading-tool-call-line dropper are all gone — joining is now a plain `"\n\n".join(texts)` inside `_parse_session.flush`.
+
+The frontend (`web/transcripts-viewer.html`) is unchanged — the viewer just renders whatever `response_text` it receives. An assistant response that consists only of tool calls (no text blocks) now produces `response_text = ""`, which falls through to the frontend's existing `(no response captured)` placeholder.
+
+### 15a. Backend response shape — no tool_call prefix anywhere
+
+| ID | Steps | Expected |
+|---|---|---|
+| 15a.1 | `curl -s 'http://localhost:8001/claudecode/timeline' \| jq -r '.prompts[].response_text' \| grep -F '🔧 tool_call:'` | Zero matches across every prompt in the timeline. (Previously some prompts contained one or more `🔧 tool_call: Read... Bash... Edit...` lines mid-response.) |
+| 15a.2 | `curl -s 'http://localhost:8001/claudecode/timeline' \| jq -r '.prompts[].response_text' \| grep -F '🔧'` | Zero matches. The emoji was only used in the now-removed prefix; no other usage in real Claude transcripts. |
+| 15a.3 | Pick a prompt that used to show a `🔧 tool_call:` line mid-response (e.g. one in your local cache from before this change). Re-fetch its response_text. | Mid-response text now reads continuously across the spot where the tool-call line used to sit, separated by the same `\n\n` paragraph break that the join produces. No orphan blank lines. |
+
+### 15b. Frontend rendering
+
+| ID | Steps | Expected |
+|---|---|---|
+| 15b.1 | Open `transcripts-viewer.html`. Navigate to a prompt whose stored response had both prose paragraphs AND tool calls between them. | The rendered response shows the prose paragraphs back-to-back; no `🔧 tool_call: …` line appears. |
+| 15b.2 | Navigate to a prompt whose response was **only** tool calls (no text blocks at all — e.g. a "ran 3 tools then stopped" turn). | The viewer renders the existing `(no response captured)` placeholder text inside `#response-body`. No JS error, no blank card. |
+| 15b.3 | Navigate to a prompt with only text blocks (no tool calls). | Unchanged from before — the response renders identically to how it did with the old code (since the join already produced the same output for tool-free responses). |
+| 15b.4 | DevTools → search the page DOM for the string `🔧` or `tool_call:` after navigating across multiple prompts. | Zero hits in `#response-body` for any prompt. |
+
+### 15c. Cursor / search / navigation regressions
+
+| ID | Steps | Expected |
+|---|---|---|
+| 15c.1 | Visit a prompt that used to have N tool-call lines. Note that `totalLines()` for that response is now lower than it was before (the tool-call lines contributed `\n` separators that are gone). Press `G` to jump to the last line. | Cursor lands at the new last line (post-removal). No off-by-N error. |
+| 15c.2 | `/some-text<Enter>` for a string that previously appeared *after* a tool-call line in some prompt. | Search still finds it. Match position shifts upward by however many `\n` separators were removed, but the cursor lands on the correct character. |
+| 15c.3 | ←/→ day navigation, ↑/↓ prompt navigation, H/M/L screen motions. | All unchanged. |
+
+### 15d. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 15d.1 | `grep -nF '🔧' api/server/claudecode_client.py` | Zero matches. The emoji should not be re-introduced. |
+| 15d.2 | `grep -nF '_TOOL_CALL_PREFIX' api/server/claudecode_client.py` | Zero matches. The constant has been removed. |
+| 15d.3 | `grep -nF "'tool'" api/server/claudecode_client.py` | Zero matches for the `'tool'` kind tag (the tuple-shape sentinel). Docstrings may still mention `tool_use` to explain *what is dropped* — those don't use the bare `'tool'` literal. |
+| 15d.4 | Read `_extract_assistant_text_blocks`. | Returns `list[str]` of text-block contents only. No `tool_use` branch, no `('text', …)` tuple wrapping. |
+| 15d.5 | Read `_parse_session.flush`. | Inlines the join: `current_prompt["response_text"] = "\n\n".join(current_response_texts).strip()`. No call to a removed `_render_response_items` helper. |
+
 ## Exit criteria
 
 A change ships when:
