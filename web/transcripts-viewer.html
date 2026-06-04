@@ -1186,9 +1186,8 @@
         days = Array.isArray(data.days) ? data.days : [];
         const urlParams = new URLSearchParams(window.location.search);
         const requested = parseInt(urlParams.get('prompt') || '', 10);
-        const startIndex = Number.isFinite(requested)
-          ? requested
-          : Math.max(0, prompts.length - 1);
+        const lastDayFirst = days.length ? days[days.length - 1].first_prompt_index : 0;
+        const startIndex = Number.isFinite(requested) ? requested : lastDayFirst;
         render(startIndex);
       } catch (err) {
         const msg = err && err.message ? err.message : String(err);
