@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-03
+
+### docs: regression coverage for per-day prompt-position memory (issue #66)
+
+- `web/TEST-PLAN.md`: new § 13 (sub-sections 13a–13g, ~22 cases) locking in the existing `lastIndexByDay` / `targetForDay` behavior introduced in #35 and unchanged across #45 / #50 / #54. Covers each of #66's three requirements (initialize to first prompt, remember on visit, transition to saved location), clamp safety against corrupted memory, memory boundaries (refresh, single-day, day-less prompts), interaction with all other motion types (`/` search auto-jump, cross-response jk, H/M/L, `<num>G`), and code-shape regression guards against re-attempts of #63's removal (greps for `lastIndexByDay` / `targetForDay` occurrence counts).
+- No code change. #66 was filed and accepted after #63 was rejected (which would have removed this behavior). This section is the regression coverage that makes the rejection durable — future changes that delete `lastIndexByDay` or `targetForDay` will fail § 13g tests.
+
 ## 2026-06-02
 
 ### feat: VIM screen-position motions H / M / L (issue #54)

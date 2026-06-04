@@ -680,6 +680,79 @@ The issue also notes `gg (top of file) will be implemented with other "g" functi
 | 12g.4 | Resize the browser window so the `#output-card` shrinks vertically, putting more lines off-screen. Press `H`/`M`/`L` again. | Each motion re-measures the viewport via `getBoundingClientRect()`, so the new H/M/L targets reflect the new visible range. |
 | 12g.5 | Sanity check: set cursor at line 1, scroll, then press `H`/`M`/`L`. Verify the motion still finds the correct viewport-relative lines. | `rectForLineStart`'s tree walker skips nodes whose parent has class `cursor`, so the cursor's own position does not bias the measurement. |
 
+## 13. Per-day prompt-position memory (issue #66)
+
+Issue #66 specifies three behaviors for `web/transcripts-viewer.html`'s day-navigation memory. All three are met by the existing `lastIndexByDay` / `targetForDay` machinery introduced in #35 and unchanged across #45 / #50 / #54 — this section is **regression coverage** for that pre-existing behavior, not a new feature. #66 was filed and accepted after #63 was rejected (which would have removed this behavior in favor of always-first-prompt-of-day landing).
+
+| Requirement (#66) | How it's met in `main` |
+| --- | --- |
+| Initialize prompt location of each day to be the first prompt of the day | `targetForDay(day)` returns `day.first_prompt_index` whenever `lastIndexByDay[day.date]` is unset (or out of range). No explicit pre-population — the fallback path IS the initialization. |
+| If a day has been visited, remember the last visited prompt location of that day | `render(index)` writes `lastIndexByDay[p.day] = clamped` on every prompt-switch (line ~1051). "Visited" = "currently rendered". |
+| When transitioning to a day, jump to the saved prompt location of that day | `goToPrevDay` / `goToNextDay` call `render(targetForDay(days[di ± 1]))`. Arrow `←` / `→` are wired to those in the key handler. |
+
+Memory is **in-memory only** — a page refresh clears `lastIndexByDay`. This is intentional (mirrors `cursorByPromptIndex` from § 10m.3). If cross-refresh persistence is wanted later, it would need its own issue (localStorage backing) and isn't part of #66's scope.
+
+### 13a. Initialization — unvisited days default to first prompt
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13a.1 | Hard-refresh the page (no `?prompt=` URL parameter). Note the prompt index in the URL after load. | URL is rewritten to `?prompt=N` where `N === prompts.length - 1` (most-recent prompt globally — current load default; this case is asserting the load behavior is unchanged by #66, NOT first-prompt-of-last-day). |
+| 13a.2 | After 13a.1, press ← (assuming there is a day before the last). | Viewer jumps to `days[lastDay - 1].first_prompt_index` — the previous day's **first** prompt, because that day has never been visited this session and `targetForDay` returns the `first_prompt_index` fallback. |
+| 13a.3 | Continue pressing ← repeatedly into older days. Each press lands on the first prompt of the destination day on the first visit. | Until a day has been visited, each ← landing is `days[di].first_prompt_index`. |
+
+### 13b. Memory — last visited prompt of each day is remembered
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13b.1 | Load. ↓ several times so the current prompt is past day D's `first_prompt_index` (e.g. land on day D, prompt P > first). Console-inspect `lastIndexByDay` (via a test-harness accessor or temporary debug snippet). | `lastIndexByDay[D.date] === P` — the current `currentIndex` is captured. |
+| 13b.2 | After 13b.1, press ← into day D-1, then ↓ a few times to land at day D-1's prompt Q > first. | `lastIndexByDay[D-1.date] === Q`. The previous entry for `D.date` is untouched (still equals `P` from 13b.1). |
+| 13b.3 | After 13b.2, press → back into day D. | Viewer lands at prompt `P` (the remembered position from 13b.1) — **not** the first prompt of D. URL `?prompt=N` reads `N === P`. |
+| 13b.4 | After 13b.3, ↓ to a new prompt P' in day D. | `lastIndexByDay[D.date]` updates to `P'`. Older value `P` overwritten. |
+| 13b.5 | Inspect `lastIndexByDay` after a full walk visiting days D, D-1, D-2 at non-first prompts. | The dict contains one entry per visited day, mapping date → last-rendered prompt index. Unvisited days are absent. |
+
+### 13c. Transition — ← / → jump to saved location
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13c.1 | Set up: visit day D at prompt P_D, day D-1 at prompt P_{D-1}, day D-2 at prompt P_{D-2}. Then from any of them, press ←. | Lands at the saved prompt of the previous day per `targetForDay`. |
+| 13c.2 | After 13c.1, press → back. | Lands at the saved prompt of the day you came from — *the position when you last left it*, which `render` saved on the leave-trigger from that day. |
+| 13c.3 | From a remembered position in day D, press ←, then immediately ←, then →, then →. Compare landings against `lastIndexByDay` snapshots taken between each press. | Each landing matches `lastIndexByDay[destDay.date]` if defined, else `destDay.first_prompt_index`. The walk is symmetric. |
+| 13c.4 | Walk from a day's first prompt to its last prompt via ↓. Press ←. Press →. | The → return lands at the day's last prompt (the most recent save in `lastIndexByDay[D.date]`), not at first or middle. |
+
+### 13d. Clamp safety — remembered index outside the day's range
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13d.1 | Manually corrupt the memory via Console: `lastIndexByDay[someDay.date] = 99999`. Then ← / → to land on `someDay`. | `targetForDay` rejects the out-of-range value (`remembered >= day.first_prompt_index && remembered <= day.last_prompt_index` guard fails) and falls back to `day.first_prompt_index`. No JS error, no broken render. |
+| 13d.2 | Same as 13d.1 but with a value below `first_prompt_index` (e.g. `lastIndexByDay[D.date] = -1`). | Same fallback to `first_prompt_index`. |
+| 13d.3 | Same with `lastIndexByDay[D.date] = null`. | `null != null` is false, so the guard `remembered != null` is false → fallback to `first_prompt_index`. |
+
+### 13e. Memory boundaries — refresh, single day, day-less prompts
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13e.1 | Visit day D at prompt P. Hard-refresh the page. Press ← (or → if D was the first day). | Per-day memory is **cleared** — landing is `day.first_prompt_index` (initialization fallback), not the pre-refresh `P`. Per § 10m.3, `cursorByPromptIndex` is also cleared on refresh. |
+| 13e.2 | Single-day timeline (only one `days[]` entry). Press ← or → from any prompt. | No-op per existing boundary checks. `lastIndexByDay` is still maintained by `render()` calls (from ↑ ↓ navigation) but isn't read because day-transitions never happen. |
+| 13e.3 | A prompt with no `.day` field (placeholder / corrupted backend response). Render it (e.g. via direct `?prompt=N` URL). Inspect `lastIndexByDay`. | `if (p.day) lastIndexByDay[p.day] = clamped;` short-circuits — no entry written for a day-less prompt. Then pressing ← / → from such a prompt hits `dayIndexOf(undefined) === -1`, which `goToPrevDay`'s `di === -1` branch handles by rendering `targetForDay(days[0])` (first day's saved or first-prompt). |
+
+### 13f. Interaction — memory survives across all motion types
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13f.1 | Visit day D prompt P. ↓ ↓ ↓ (advance within D to P+3). ↑ back to P. | `lastIndexByDay[D.date] === P` (the most recent render). |
+| 13f.2 | Use `/searchterm` to auto-jump to a match in day D at prompt P. The auto-jump is performed by `applyMatch` → `render(promptIdx)`. | `render` writes `lastIndexByDay[D.date] === P` just like a manual navigation. Search auto-jump is not exempt. |
+| 13f.3 | Use cross-response motion (§ 11) `j` from the last line of day D's last prompt to cross into day D+1's first prompt. | Both `render(oldIdx)`'s saved state and `render(newIdx)`'s write update `lastIndexByDay` for the source and destination days respectively. |
+| 13f.4 | Use H / M / L (§ 12) — these don't change `currentIndex`, only cursor position within the response. | `lastIndexByDay` is **not** updated by H/M/L because no `render` call occurs (these are intra-response motions). The prompt index for the current day is whatever `render` last wrote. |
+| 13f.5 | Use `<num>G` (§ 10c) — intra-response motion, no `render`. | `lastIndexByDay` unchanged. |
+
+### 13g. Sanity — code-shape regression guards against re-attempts of #63
+
+| ID | Steps | Expected |
+|---|---|---|
+| 13g.1 | `grep -n 'lastIndexByDay' web/transcripts-viewer.html` | At least 4 occurrences: declaration (`const lastIndexByDay = {}`), write (`lastIndexByDay[p.day] = clamped`), read (`lastIndexByDay[day.date]`) inside `targetForDay`, and the `targetForDay` function definition itself. Removing any breaks #66. |
+| 13g.2 | `grep -n 'targetForDay' web/transcripts-viewer.html` | At least 4 occurrences: definition + 3 call-sites (one in `goToPrevDay` for `di > 0`, one in the `di === -1` fallback, one in `goToNextDay`). Removing any reduces the day-navigation paths that respect memory. |
+| 13g.3 | Read `goToPrevDay` and `goToNextDay`. | Both call `render(targetForDay(...))`, not `render(days[...].first_prompt_index)` directly. The indirection through `targetForDay` is what makes memory honored. |
+
 ## Exit criteria
 
 A change ships when:
