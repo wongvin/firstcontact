@@ -177,7 +177,7 @@
     </article>
     <div class="bottom-bar">
       <div class="search-bar empty" id="search-bar" aria-live="polite"></div>
-      <div class="help">↑↓ prompts &nbsp;·&nbsp; ←→ days &nbsp;·&nbsp; hjklG/nN vim keybind</div>
+      <div class="help">↑↓ prompts &nbsp;·&nbsp; ←→ days &nbsp;·&nbsp; hjklHMLG/nN vim keybind</div>
     </div>
   </main>
 
@@ -674,6 +674,73 @@
     function moveCursorAbs(line, col) {
       placeCursorAt(line, col);
     }
+
+    // Returns the DOM bounding rect for the start of rendered line `line`, or
+    // null if the line isn't reachable in the DOM. Uses a Range over one
+    // character so no DOM mutation occurs. Skips text nodes inside the cursor
+    // span so the cursor's own position doesn't perturb the measurement.
+    function rectForLineStart(line) {
+      const text = currentRenderedText();
+      const lines = text.split('\n');
+      if (line < 1 || line > lines.length) return null;
+      let off = 0;
+      for (let i = 0; i < line - 1; i++) off += lines[i].length + 1;
+      const walker = document.createTreeWalker(responseBodyEl, NodeFilter.SHOW_TEXT, null);
+      let walked = 0;
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentNode && node.parentNode.classList && node.parentNode.classList.contains('cursor')) continue;
+        const len = node.nodeValue.length;
+        if (walked + len > off) {
+          const local = off - walked;
+          const r = document.createRange();
+          r.setStart(node, local);
+          r.setEnd(node, Math.min(node.nodeValue.length, local + 1));
+          return r.getBoundingClientRect();
+        }
+        walked += len;
+      }
+      return null;
+    }
+
+    // Finds the top/middle/bottom rendered lines currently visible inside the
+    // #output-card viewport. "Top" = first line whose top is at or below the
+    // viewport top; "Bottom" = last line whose bottom is at or above the
+    // viewport bottom; "Middle" = line whose vertical center is closest to the
+    // viewport midpoint. Long content with lines outside the viewport on both
+    // sides gives sensible H/M/L candidates; very short content where the
+    // entire response fits inside the viewport falls back to first / mid / last.
+    function findVisibleLineRange() {
+      const card = document.getElementById('output-card');
+      if (!card) return null;
+      const cardRect = card.getBoundingClientRect();
+      const vTop = cardRect.top;
+      const vBot = cardRect.bottom;
+      const vMid = (vTop + vBot) / 2;
+      const total = totalLines();
+      if (total < 1) return null;
+
+      let top = -1, bot = -1, mid = -1;
+      let bestMidDist = Infinity;
+      for (let L = 1; L <= total; L++) {
+        const r = rectForLineStart(L);
+        if (!r) continue;
+        if (r.top >= vTop && r.bottom <= vBot) {
+          if (top === -1) top = L;
+          bot = L;
+        }
+        const center = (r.top + r.bottom) / 2;
+        const dist = Math.abs(center - vMid);
+        if (dist < bestMidDist) {
+          bestMidDist = dist;
+          mid = L;
+        }
+      }
+      if (top === -1) top = 1;
+      if (bot === -1) bot = total;
+      if (mid === -1) mid = Math.max(1, Math.min(total, Math.ceil((top + bot) / 2)));
+      return { top, mid, bot };
+    }
     // ---- end cursor placement ----------------------------------------------
 
     // ---- Search ------------------------------------------------------------
@@ -1078,6 +1145,15 @@
       else if (key === 'l') { event.preventDefault(); moveCursor(0, +1); numberPrefix = ''; }
       else if (key === 'j') { event.preventDefault(); moveCursor(+1, 0); numberPrefix = ''; }
       else if (key === 'k') { event.preventDefault(); moveCursor(-1, 0); numberPrefix = ''; }
+      else if (key === 'H' || key === 'M' || key === 'L') {
+        event.preventDefault();
+        numberPrefix = '';
+        const range = findVisibleLineRange();
+        if (range) {
+          const target = key === 'H' ? range.top : key === 'M' ? range.mid : range.bot;
+          moveCursorAbs(target, 1);
+        }
+      }
       else if (key === 'G') {
         event.preventDefault();
         const target = numberPrefix === '' ? totalLines() : parseInt(numberPrefix, 10);
