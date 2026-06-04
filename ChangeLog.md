@@ -2,6 +2,12 @@
 
 ## 2026-06-03
 
+### feat: remove tool_call lines from transcripts viewer (issue #65)
+
+- `api/server/claudecode_client.py`: assistant `tool_use` content blocks are now dropped at parse time, alongside the already-dropped `thinking` blocks. The `🔧 tool_call: Read... Bash... Edit...` lines that used to appear inside `response_text` between prose paragraphs are gone — the viewer surfaces only the user-facing prose Claude produced. The previous `_TOOL_CALL_PREFIX` constant, the `('text', …) | ('tool', …)` tuple shape returned by the old `_extract_assistant_items`, the `tool_buffer` / `flush_tools` grouping logic, and the leading-tool-call-line dropper are all removed — joining is now a plain `"\n\n".join(texts)` inside `_parse_session.flush`. Function renamed: `_extract_assistant_items` → `_extract_assistant_text_blocks` (now returns `list[str]`).
+- Frontend (`web/transcripts-viewer.html`) is unchanged — it renders whatever `response_text` it receives. An assistant turn that consisted only of tool calls (no text blocks) now produces `response_text = ""`, falling through to the existing `(no response captured)` placeholder.
+- `web/TEST-PLAN.md`: new § 15 (sub-sections 15a–15d, 14 cases) covering backend response-shape regression (`curl | jq | grep '🔧'` returns nothing), frontend rendering (prose-only / tool-only / mixed prompts), cursor / search / navigation invariants under the lower total-line count, and code-shape regression guards (greps for `🔧`, `_TOOL_CALL_PREFIX`, `'tool'` literal).
+
 ### feat: initial load opens first prompt of last day (issue #66 follow-up)
 
 - `web/transcripts-viewer.html`: changed the page-load default in the load IIFE so that when no `?prompt=` URL parameter is present, `startIndex = days[days.length - 1].first_prompt_index` (the **first prompt of the most-recent day**) instead of `Math.max(0, prompts.length - 1)` (most-recent prompt globally, which on a multi-prompt last day landed mid-day). This makes #66's "initialize prompt location of each day to be the first prompt of the day" apply at load time too, not only on the first ← / → visit to an unvisited day. Explicit URL override (`?prompt=N`) still wins. Empty-`days[]` payload falls through to the existing empty-state path (no crash).

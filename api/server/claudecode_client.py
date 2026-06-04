@@ -6,7 +6,7 @@ timeline that the /claudecode/* routes serve to the viewer page.
 
 JSONL event types observed in practice:
   - user                       — user prompt OR a tool_result echo (filter out the latter)
-  - assistant                  — Claude's reply, with content blocks (text/thinking/tool_use)
+  - assistant                  — Claude's reply, with content blocks (text/thinking/tool_use); only `text` blocks are surfaced
   - ai-title                   — auto-generated session title
   - queue-operation            — operational noise
   - attachment                 — attached file
@@ -86,80 +86,39 @@ def _extract_user_text(entry: dict[str, Any]) -> str | None:
     return text
 
 
-def _extract_assistant_items(entry: dict[str, Any]) -> list[tuple[str, str]]:
-    """Return typed items from an assistant entry as a list of (kind, value) pairs.
+def _extract_assistant_text_blocks(entry: dict[str, Any]) -> list[str]:
+    """Return only the text blocks from an assistant entry.
 
-    `kind` is either 'text' (value = the text) or 'tool' (value = the tool name).
-    `thinking` blocks are dropped. The list preserves the order of blocks in the entry
-    so a downstream pass can group consecutive `tool` items into one line.
+    `tool_use` and `thinking` blocks are dropped — the viewer surfaces just the
+    user-facing prose Claude produced, with no operational noise.
     """
     message = entry.get("message") or {}
     content = message.get("content")
     if isinstance(content, str):
-        return [("text", content)] if content else []
+        return [content] if content else []
     if not isinstance(content, list):
         return []
-    items: list[tuple[str, str]] = []
+    texts: list[str] = []
     for block in content:
         if not isinstance(block, dict):
             continue
-        btype = block.get("type")
-        if btype == "text" and isinstance(block.get("text"), str):
+        if block.get("type") == "text" and isinstance(block.get("text"), str):
             text = block["text"]
             if text:
-                items.append(("text", text))
-        elif btype == "tool_use":
-            name = block.get("name") or "tool"
-            items.append(("tool", name))
-        # 'thinking' blocks intentionally dropped
-    return items
-
-
-_TOOL_CALL_PREFIX = "🔧 tool_call:"
-
-
-def _render_response_items(items: list[tuple[str, str]]) -> str:
-    """Join a flat list of (kind, value) items into a renderable string.
-
-    Consecutive `tool` items collapse into one line:
-        🔧 tool_call: Read... Bash... Edit...
-    Non-consecutive (text-interleaved) tool items keep their own lines.
-
-    If the first chunk after grouping is a tool-call line, it is dropped — the viewer
-    leads with the assistant's first user-facing text instead of operational noise.
-    """
-    if not items:
-        return ""
-    chunks: list[str] = []
-    tool_buffer: list[str] = []
-
-    def flush_tools() -> None:
-        if tool_buffer:
-            chunks.append(_TOOL_CALL_PREFIX + " " + "... ".join(tool_buffer) + "...")
-            tool_buffer.clear()
-
-    for kind, value in items:
-        if kind == "tool":
-            tool_buffer.append(value)
-        else:
-            flush_tools()
-            chunks.append(value)
-    flush_tools()
-    if chunks and chunks[0].startswith(_TOOL_CALL_PREFIX):
-        chunks = chunks[1:]
-    return "\n\n".join(chunks)
+                texts.append(text)
+    return texts
 
 
 def _parse_session(path: Path) -> list[dict[str, Any]]:
     """Yield `(prompt, response)` pair dicts for one session file."""
     pairs: list[dict[str, Any]] = []
     current_prompt: dict[str, Any] | None = None
-    current_response_items: list[tuple[str, str]] = []
+    current_response_texts: list[str] = []
 
     def flush() -> None:
         if current_prompt is None:
             return
-        current_prompt["response_text"] = _render_response_items(current_response_items).strip()
+        current_prompt["response_text"] = "\n\n".join(current_response_texts).strip()
         pairs.append(current_prompt)
 
     try:
@@ -185,12 +144,12 @@ def _parse_session(path: Path) -> list[dict[str, Any]]:
                         "session_id": entry.get("sessionId") or path.stem,
                         "user_text": user_text,
                     }
-                    current_response_items = []
+                    current_response_texts = []
                 elif etype == "assistant":
                     if current_prompt is None:
                         # response with no preceding user prompt — skip
                         continue
-                    current_response_items.extend(_extract_assistant_items(entry))
+                    current_response_texts.extend(_extract_assistant_text_blocks(entry))
     except OSError:
         return []
     flush()
