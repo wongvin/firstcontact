@@ -1,6 +1,6 @@
 # iOS target — conventions
 
-Native iOS app at `ios/FirstContact/`. SwiftUI, `URLSession` + `async/await`, no third-party dependencies. Personal-use only; signed with a free Apple ID. Not distributed via TestFlight or the App Store.
+Native iOS app at `ios/FirstContact/`. SwiftUI with `URLSession` + `async/await` for plain HTTP work. Swift Package Manager dependencies are allowed when they earn their weight — prefer official first-party SDKs (Apple, Google) over community packages. Personal-use only; signed with a free Apple ID. Not distributed via TestFlight or the App Store.
 
 ## Free Apple ID signing — the chicken-and-egg
 
