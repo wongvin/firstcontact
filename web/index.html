@@ -35,8 +35,13 @@
       opacity: 0.8;
     }
     #summary-30d {
-      max-width: 32rem;
-      margin: 2rem auto 0;
+      position: fixed;
+      bottom: 1rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(20rem, calc(100vw - 2rem));
+      max-height: 25vh;
+      overflow-y: auto;
       padding: 0.75rem 1rem;
       background: rgba(255, 255, 255, 0.12);
       border: 1px solid rgba(255, 255, 255, 0.25);
@@ -44,7 +49,15 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       text-align: left;
-      line-height: 1.5;
+      font-size: 0.85rem;
+      line-height: 1.35;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+    #summary-30d:hover,
+    #summary-30d:focus-visible {
+      background: rgba(255, 255, 255, 0.18);
+      outline: none;
     }
     #summary-30d h2 {
       font-size: 1rem;
@@ -57,7 +70,7 @@
     }
     #summary-30d p {
       margin: 0;
-      font-size: 0.95rem;
+      font-size: 0.85rem;
       opacity: 1;
     }
     #summary-30d .footnote {
@@ -82,6 +95,22 @@
       text-align: left;
       font-size: 0.85rem;
       line-height: 1.35;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+    #recent-tasks:hover,
+    #recent-tasks:focus-visible {
+      background: rgba(255, 255, 255, 0.18);
+      outline: none;
+    }
+    .cycle-glyph {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.6rem;
+      font-size: 0.85rem;
+      opacity: 0.5;
+      pointer-events: none;
+      user-select: none;
     }
     #recent-tasks h2 {
       font-size: 1rem;
@@ -136,12 +165,14 @@
       <span id="quote-text"></span>
       <footer>— <span id="quote-author"></span></footer>
     </blockquote>
-    <section id="summary-30d" aria-label="Summary of the last 30 days">
-      <h2>Last 30 days</h2>
-      <p>Loading summary…</p>
-    </section>
   </div>
-  <aside id="recent-tasks" aria-label="Changes made this week">
+  <section id="summary-30d" role="button" tabindex="0" aria-live="polite" aria-label="Summary of the last 30 days. Tap to cycle view.">
+    <span class="cycle-glyph" aria-hidden="true">⟳</span>
+    <h2>Last 30 days</h2>
+    <p>Loading summary…</p>
+  </section>
+  <aside id="recent-tasks" role="button" tabindex="0" aria-live="polite" aria-label="Changes made this week. Tap to cycle view.">
+    <span class="cycle-glyph" aria-hidden="true">⟳</span>
     <h2>Changes made this week</h2>
     <ol id="recent-tasks-list"><li class="empty">Loading…</li></ol>
   </aside>
@@ -169,23 +200,115 @@
       }
     })();
 
+    // --- Tap-to-cycle view state for the two home-screen panels (#79) ---
+    // View 1 is the existing content; views 2 and 3 are placeholder
+    // "Work in progress" lines. Tap cycles 0 → 1 → 2 → 0; page reload
+    // resets to 0. Real angles for views 2/3 land in follow-up issues.
+    const VIEW_COUNT = 3;
+    const wipText = (view) => `View ${view + 1}: Work in progress`;
+
+    let summaryView = 0;
+    let summaryView1 = { prose: 'Loading summary…', footnote: null };
+
+    let recentTasksView = 0;
+    let recentTasksState = { kind: 'loading', items: [], message: 'Loading…' };
+
+    // Lock the panel's height to whatever view 1 naturally renders to,
+    // so cycling to the smaller view 2 / view 3 placeholders doesn't
+    // shrink the surface. min-height is a floor — view 1 can still grow
+    // past it later (e.g. when async data lands), and the next snapshot
+    // raises the floor accordingly.
+    function lockPanelHeight(panel) {
+      if (!panel) return;
+      const h = panel.getBoundingClientRect().height;
+      if (h > 0) panel.style.minHeight = h + 'px';
+    }
+
+    function renderSummaryPanel() {
+      const section = document.getElementById('summary-30d');
+      const para = section.querySelector('p');
+      const existingFootnote = section.querySelector('.footnote');
+      if (existingFootnote) existingFootnote.remove();
+      if (summaryView !== 0) {
+        para.textContent = wipText(summaryView);
+        return;
+      }
+      para.textContent = summaryView1.prose;
+      if (summaryView1.footnote) {
+        const span = document.createElement('span');
+        span.className = 'footnote';
+        span.textContent = summaryView1.footnote;
+        section.appendChild(span);
+      }
+      requestAnimationFrame(() => lockPanelHeight(section));
+    }
+
+    function renderRecentTasksPanel() {
+      const panel = document.getElementById('recent-tasks');
+      const list = document.getElementById('recent-tasks-list');
+      list.replaceChildren();
+      if (recentTasksView !== 0) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = wipText(recentTasksView);
+        list.appendChild(li);
+        return;
+      }
+      if (recentTasksState.kind === 'ready') {
+        for (const item of recentTasksState.items) {
+          const li = document.createElement('li');
+          li.textContent = item.title;
+          list.appendChild(li);
+        }
+      } else {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = recentTasksState.message;
+        list.appendChild(li);
+      }
+      requestAnimationFrame(() => lockPanelHeight(panel));
+    }
+
+    function attachCycleHandler(panel, getView, setView, rerender) {
+      const advance = () => {
+        // Skip if the user just selected text inside the panel
+        // (drag-to-select fires a click on mouseup if the cursor doesn't
+        // move far; the selection-length check rejects that case).
+        const sel = window.getSelection();
+        if (sel && sel.toString().length > 0) return;
+        setView((getView() + 1) % VIEW_COUNT);
+        rerender();
+      };
+      panel.addEventListener('click', advance);
+      panel.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          advance();
+        }
+      });
+    }
+
+    attachCycleHandler(
+      document.getElementById('summary-30d'),
+      () => summaryView,
+      (v) => { summaryView = v; },
+      renderSummaryPanel
+    );
+    attachCycleHandler(
+      document.getElementById('recent-tasks'),
+      () => recentTasksView,
+      (v) => { recentTasksView = v; },
+      renderRecentTasksPanel
+    );
+
     (async function loadSummary30d() {
       const SUMMARY_URL = 'http://localhost:8001/summary/30days';
       const STORAGE_KEY = 'firstcontact:summary-30d:v1';
       const TTL_HOURS = 24;
-      const section = document.getElementById('summary-30d');
-      const para = section.querySelector('p');
 
-      const render = (text, footnote) => {
-        para.textContent = text;
-        const existing = section.querySelector('.footnote');
-        if (existing) existing.remove();
-        if (footnote) {
-          const span = document.createElement('span');
-          span.className = 'footnote';
-          span.textContent = footnote;
-          section.appendChild(span);
-        }
+      const setView1 = (prose, footnote) => {
+        summaryView1 = { prose, footnote: footnote || null };
+        renderSummaryPanel();
       };
 
       const readCache = () => {
@@ -216,36 +339,28 @@
 
       const cached = readCache();
       if (cached?.fresh) {
-        render(cached.summary);
+        setView1(cached.summary);
         return;
       }
-      if (cached) render(cached.summary);
+      if (cached) setView1(cached.summary);
 
       try {
         const res = await fetch(SUMMARY_URL);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         if (typeof data?.summary !== 'string') throw new Error('malformed response');
-        render(data.summary);
+        setView1(data.summary);
         writeCache(data.summary);
       } catch (e) {
         if (cached) {
-          render(cached.summary, '(showing cached summary; backend unreachable)');
+          setView1(cached.summary, '(showing cached summary; backend unreachable)');
         } else {
-          render('Backend unreachable at http://localhost:8001 — start the local server (see api/server/README.md).');
+          setView1('Backend unreachable at http://localhost:8001 — start the local server (see api/server/README.md).');
         }
       }
     })();
 
     (async function loadRecent() {
-      const list = document.getElementById('recent-tasks-list');
-      const setEmpty = (msg) => {
-        list.replaceChildren();
-        const li = document.createElement('li');
-        li.className = 'empty';
-        li.textContent = msg;
-        list.appendChild(li);
-      };
       try {
         const res = await fetch(
           'https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=30&sort=updated&direction=desc'
@@ -256,16 +371,15 @@
         const recent = items
           .filter((i) => !i.pull_request && i.closed_at && new Date(i.closed_at).getTime() >= cutoff)
           .sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at));
-        if (recent.length === 0) return setEmpty('No changes this week.');
-        list.replaceChildren();
-        for (const item of recent) {
-          const li = document.createElement('li');
-          li.textContent = item.title;
-          list.appendChild(li);
+        if (recent.length === 0) {
+          recentTasksState = { kind: 'empty', items: [], message: 'No changes this week.' };
+        } else {
+          recentTasksState = { kind: 'ready', items: recent, message: null };
         }
       } catch (e) {
-        setEmpty('Could not load recent changes.');
+        recentTasksState = { kind: 'error', items: [], message: 'Could not load recent changes.' };
       }
+      renderRecentTasksPanel();
     })();
   </script>
 </body>
