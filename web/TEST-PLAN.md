@@ -501,7 +501,7 @@ Implementation: a `numberPrefix` accumulator collects digit keydowns. The `G` ke
 |---|---|---|
 | 10m.1 | On prompt A, press `5G` (cursor at line 5 col 1). Press ↓ to prompt B. Press `3G` on B. Press ↑ back to A. | Cursor on A restored to line 5 col 1. |
 | 10m.2 | From the previous test, press ↓ again to B. | Cursor on B restored to line 3 col 1. |
-| 10m.3 | Hard-refresh the page. | Cursor memory cleared. The loaded prompt's cursor starts at (1, 1). |
+| 10m.3 | Hard-refresh the page. | Cursor memory **survives** the refresh (#68 added `localStorage` persistence under `firstcontact:transcripts-viewer:v1:cursorByPromptIndex`). The loaded prompt's cursor restores from the saved entry if one exists; otherwise falls back to (1, 1). See § 17 for the persistence regression coverage; clear the storage key (`localStorage.removeItem('firstcontact:transcripts-viewer:v1:cursorByPromptIndex')`) and refresh again to observe the (1, 1) fallback. |
 
 ### 10n. Cursor memory + search auto-jump
 
@@ -733,7 +733,7 @@ Memory is **in-memory only** — a page refresh clears `lastIndexByDay`. This is
 
 | ID | Steps | Expected |
 |---|---|---|
-| 13e.1 | Visit day D at prompt P. Hard-refresh the page. Press ← (or → if D was the first day). | Per-day memory is **cleared** — landing is `day.first_prompt_index` (initialization fallback), not the pre-refresh `P`. Per § 10m.3, `cursorByPromptIndex` is also cleared on refresh. |
+| 13e.1 | Visit day D at prompt P. Hard-refresh the page. Press ← (or → if D was the first day). | Per-day memory **survives** the refresh — landing is the pre-refresh `P` (#68 added `localStorage` persistence under `firstcontact:transcripts-viewer:v1:lastIndexByDay`). To exercise the original `first_prompt_index` fallback, first clear the key: `localStorage.removeItem('firstcontact:transcripts-viewer:v1:lastIndexByDay')` then refresh. See § 17 for the persistence regression coverage. |
 | 13e.2 | Single-day timeline (only one `days[]` entry). Press ← or → from any prompt. | No-op per existing boundary checks. `lastIndexByDay` is still maintained by `render()` calls (from ↑ ↓ navigation) but isn't read because day-transitions never happen. |
 | 13e.3 | A prompt with no `.day` field (placeholder / corrupted backend response). Render it (e.g. via direct `?prompt=N` URL). Inspect `lastIndexByDay`. | `if (p.day) lastIndexByDay[p.day] = clamped;` short-circuits — no entry written for a day-less prompt. Then pressing ← / → from such a prompt hits `dayIndexOf(undefined) === -1`, which `goToPrevDay`'s `di === -1` branch handles by rendering `targetForDay(days[0])` (first day's saved or first-prompt). |
 
@@ -775,7 +775,7 @@ Existing § 10m / § 10n / § 11d already cover much of this behavior end-to-end
 |---|---|---|
 | 14a.1 | Load. The initial render places the cursor at `cursor.line = 1, cursor.col = 1` for the starting prompt. Inspect `cursorByPromptIndex` in the Console. | `cursorByPromptIndex` is an empty object (well, may contain one entry for `currentIndex = 0` written by the first-render save when `startIndex !== 0` — see 14a.4). The starting prompt's cursor is `(1, 1)` regardless. |
 | 14a.2 | Navigate via ↓ to a never-visited prompt (any direction works the first time). | Cursor on the new prompt lands at `(1, 1)`. |
-| 14a.3 | Hard-refresh the page. Cursor on initial render is `(1, 1)` (per § 10a / § 10m.3). | `cursorByPromptIndex` starts empty after refresh. |
+| 14a.3 | Hard-refresh the page. | `cursorByPromptIndex` hydrates from `firstcontact:transcripts-viewer:v1:cursorByPromptIndex` if that key exists (#68); otherwise starts empty. If the starting prompt has a saved entry, the cursor restores to that entry; otherwise initial render places it at `(1, 1)`. To exercise the empty-start path, `localStorage.removeItem('firstcontact:transcripts-viewer:v1:cursorByPromptIndex')` and refresh. |
 | 14a.4 | Load with `?prompt=5` URL param. Inspect `cursorByPromptIndex[0]` in the Console immediately after load. | Entry exists with `{ line: 1, col: 1 }` — the spurious save from `render(5)` saving the default cursor for the initial `currentIndex = 0` (`if (currentIndex !== clamped)` guard fires because `0 !== 5`). This is a known minor imperfection — it doesn't observably affect navigation since prompt 0 would land at `(1, 1)` either way. |
 
 ### 14b. Memory — last cursor location of each prompt is remembered
@@ -794,7 +794,7 @@ Existing § 10m / § 10n / § 11d already cover much of this behavior end-to-end
 |---|---|---|
 | 14c.1 | After 14b.2, ↑ back to A, then ↓ back to B. | Cursor on B restored to `(3, 7)` from `cursorByPromptIndex[B]`. |
 | 14c.2 | Visit A at `(5, 4)`, B at `(2, 1)`. From B press ←/→ to switch days then come back via ←/→ landing on A (per § 13). | Cursor on A restored to `(5, 4)`. (Both day-position memory and per-prompt cursor memory cooperate: § 13's `lastIndexByDay` chooses A as the day's saved prompt; § 14's `cursorByPromptIndex[A]` chooses `(5, 4)` as the cursor.) |
-| 14c.3 | Visit A at `(5, 4)`. Open URL `?prompt=<A>` in a new tab (different session). | Cursor at `(1, 1)` in the new tab — memory is per-session, doesn't persist across page loads (§ 10m.3 / § 14a.3). |
+| 14c.3 | Visit A at `(5, 4)`. Open URL `?prompt=<A>` in a new tab (different session). | Since #68 added `localStorage` persistence, the new tab shares the same origin's storage and restores A's cursor to `(5, 4)`. (For per-session-only isolation, open the URL in a private / incognito window — that window's `localStorage` is separate and starts empty, so cursor lands at `(1, 1)`.) |
 | 14c.4 | Visit A at `(5, 4)`, B at `(7, 2)`. Search `/sometext<Enter>` matches in A at line 9. | Search auto-jump renders A then OVERRIDES `cursorByPromptIndex[A]`'s `(5, 4)` with `(9, <match col>)` via `placeCursorAt(matchLine, matchCol)` (§ 10n.1 behavior). |
 | 14c.5 | After 14c.4, ↑ to A's neighbor then ↓ back to A. | Cursor restored to the *match* position `(9, ...)` — the search override updated the saved memory through the next save-on-leave cycle. |
 
@@ -966,6 +966,84 @@ Sibling of the rejected hand-curated version (#73, `[Rejected]`).
 | 16k.3 | `grep -nF "'firstcontact:summary-30d:v1'" web/index.html` | At least one match (storage key string literal). |
 | 16k.4 | `grep -cE 'WORD_LIMIT = 50' api/server/summary_client.py` | Returns `1`. |
 | 16k.5 | `grep -cE 'TTL_HOURS = 24' web/index.html` | Returns `1`. |
+
+## 17. Persistent day-position and cursor memory across page refreshes (issue #68)
+
+Issue #68 adds `localStorage` persistence on top of the existing in-memory `lastIndexByDay` (#66, § 13) and `cursorByPromptIndex` (#67, § 14) dicts. The dicts are hydrated from `localStorage` **before** the first `render()` call so initial rendering honors saved state, and they are written through (with insertion-order eviction) on every modification. Storage shape: two keys under the prefix `firstcontact:transcripts-viewer:v1:` — `:lastIndexByDay` and `:cursorByPromptIndex`. Caps: 100 days and 500 prompts respectively. All `localStorage` reads/writes are try/catch-wrapped and parsed entries are shape-validated (whole dict rejected on any malformed entry).
+
+The pre-existing § 10m.3 / § 13e.1 / § 14a.3 / § 14c.3 cases were updated to reflect the new survives-refresh behavior. § 17 below is the new persistence-specific coverage.
+
+### 17a. Hydrate-on-load
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17a.1 | DevTools Console: `localStorage.setItem('firstcontact:transcripts-viewer:v1:lastIndexByDay', JSON.stringify({'2026-05-25': 4}))`. Hard-refresh. In Console: `lastIndexByDay`. | Object includes `{'2026-05-25': 4}`. Then press ← or → to navigate to 2026-05-25 — landing prompt is index 4 (not the day's `first_prompt_index`). |
+| 17a.2 | Console:<br>`localStorage.setItem('firstcontact:transcripts-viewer:v1:cursorByPromptIndex', JSON.stringify({3: {line: 7, col: 2}}))`<br>Hard-refresh, then navigate to prompt 3 (e.g. arrow keys or `?prompt=3` URL). | Cursor on prompt 3 lands at `(7, 2)`, not `(1, 1)`. |
+| 17a.3 | Console with both keys pre-seeded as above, hard-refresh, **don't** navigate yet. Inspect `lastIndexByDay` and `cursorByPromptIndex` immediately. | Both dicts are populated from storage **before** `render(startIndex)` runs — confirms the hydration call sits ahead of `render` in the load IIFE. |
+
+### 17b. Write-on-modify (round-trip)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17b.1 | Console: `localStorage.clear()`. Hard-refresh. Navigate ↓ several prompts. After each press, in Console: `localStorage.getItem('firstcontact:transcripts-viewer:v1:lastIndexByDay')`. | Each navigation that crosses a day boundary updates the storage immediately (storage call fires inside `render` after `lastIndexByDay[p.day] = clamped`). Same-day navigation also writes (every render with a day-bearing prompt writes). |
+| 17b.2 | Same setup. On prompt A, press `5G`. Press ↓ to prompt B. In Console: `JSON.parse(localStorage.getItem('firstcontact:transcripts-viewer:v1:cursorByPromptIndex'))`. | Storage contains `{A: {line: 5, col: 1}}` — the leaving-A save fired and persisted. (Writes fire in the same `currentIndex !== clamped` branch that updates the in-memory dict.) |
+| 17b.3 | After 17b.2, hard-refresh. Navigate back to prompt A. | Cursor restores to `(5, 1)` from the persisted entry. |
+
+### 17c. Refresh-survives-day-position (end-to-end)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17c.1 | Visit day D, then within D navigate to prompt P (not D's first). Hard-refresh. Press ← (or → if D is the first day). | Lands at P, not D's `first_prompt_index`. |
+| 17c.2 | Visit days D1, D2, D3 at distinct in-day prompts. Hard-refresh. ← / → cycle through D1 → D2 → D3. | Each day lands at the pre-refresh saved prompt. |
+
+### 17d. Refresh-survives-cursor (end-to-end)
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17d.1 | On prompt A press `5G` then `l` × 3 (cursor at `(5, 4)`). ↓ to prompt B (saves A). Hard-refresh, then navigate back to A. | Cursor on A restored to `(5, 4)`. |
+| 17d.2 | Visit five prompts with distinct cursor positions. Hard-refresh. Re-visit each. | Each restored to its pre-refresh `(line, col)`. |
+
+### 17e. Schema-version-mismatch graceful ignore
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17e.1 | Console: `localStorage.setItem('firstcontact:transcripts-viewer:v0:lastIndexByDay', JSON.stringify({'2025-01-01': 99}))`. Hard-refresh. In Console: `lastIndexByDay`. | The v0 key is ignored (the hydration code only reads `:v1:`). `lastIndexByDay` does NOT contain `'2025-01-01': 99`. Remove the stale key when done. |
+| 17e.2 | Read [web/transcripts-viewer.html](web/transcripts-viewer.html): the `STORAGE_PREFIX` constant. | Equals `'firstcontact:transcripts-viewer:v1:'`. To migrate to a new schema, bump the prefix to `:v2:` — old `:v1:` entries are then ignored without explicit cleanup. |
+
+### 17f. Quota-exceeded fallback
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17f.1 | Console:<br>`const orig = Storage.prototype.setItem; Storage.prototype.setItem = function(){ throw new Error('quota'); };`<br>Then navigate ↓ in the viewer. | No JS error surfaces. The viewer still works — in-memory dicts still update, only the persist step swallows the throw. Restore: `Storage.prototype.setItem = orig`. |
+
+### 17g. Corrupted-entry fallback
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17g.1 | Console: `localStorage.setItem('firstcontact:transcripts-viewer:v1:lastIndexByDay', '{not valid json')`. Hard-refresh. In Console: `lastIndexByDay`. | The malformed entry is rejected (`JSON.parse` throws, caught). Dict starts empty. No alert / no thrown error to the user. Storage entry stays as-is until the next legitimate write replaces it. |
+| 17g.2 | Console: `localStorage.setItem('firstcontact:transcripts-viewer:v1:cursorByPromptIndex', JSON.stringify({5: {line: 'not-a-number', col: 2}}))`. Hard-refresh. In Console: `cursorByPromptIndex`. | The whole dict is rejected (one bad entry → entire dict ignored, per the issue's "reject the entire dict, not entry-by-entry" rule). `cursorByPromptIndex` is empty. |
+| 17g.3 | Console: `localStorage.setItem('firstcontact:transcripts-viewer:v1:lastIndexByDay', JSON.stringify('not an object'))`. Hard-refresh. | Top-level type check (`typeof parsed === 'object' && !Array.isArray`) rejects it. Dict starts empty. |
+| 17g.4 | Console: `localStorage.setItem('firstcontact:transcripts-viewer:v1:lastIndexByDay', JSON.stringify([1, 2, 3]))`. Hard-refresh. | Array is rejected by the same top-level check. Dict starts empty. |
+
+### 17h. Eviction trigger — insertion-order, capped at 100 / 500
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17h.1 | Console:<br>`const big = {}; for (let i = 0; i < 105; i++) big['2026-' + String(i).padStart(3,'0')] = i;`<br>`localStorage.setItem('firstcontact:transcripts-viewer:v1:lastIndexByDay', JSON.stringify(big));`<br>Hard-refresh, then navigate (any ↑/↓/←/→). After the first day-update render, in Console: `Object.keys(lastIndexByDay).length`. | After the first write-through, eviction trims to `DAY_CAP === 100`. The five oldest-inserted entries (`'2026-000'` through `'2026-004'`) are dropped first; the navigation just performed appends a new key (or updates an existing one). Net: ≤ 100. |
+| 17h.2 | Same flow but pre-seed cursor dict with 510 entries: `for (let i = 0; i < 510; i++) big[i] = {line: 1, col: 1}`. | After first cursor write-through, `Object.keys(cursorByPromptIndex).length === CURSOR_CAP === 500`. |
+| 17h.3 | Manually walk the eviction with both dicts under cap. Trigger a single render that adds one entry, putting the dict at exactly `CAP + 1`. | One entry dropped: the oldest-inserted (front of `Object.keys()`). The newly-added entry remains. |
+| 17h.4 | Pre-seed cursor dict with 600 entries (well over cap), hard-refresh, observe initial state. | Initial `cursorByPromptIndex` has all 600 entries until the first `render()` write triggers eviction. (Hydration doesn't evict on its own.) |
+
+### 17i. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 17i.1 | `grep -nF 'firstcontact:transcripts-viewer:v1:' web/transcripts-viewer.html` | Exactly one match (the `STORAGE_PREFIX` constant). |
+| 17i.2 | `grep -nE 'hydrateMemory\(\)' web/transcripts-viewer.html` | Exactly two matches: the function definition and a single call inside the load IIFE. The call must sit **before** `render(startIndex)`. |
+| 17i.3 | `grep -nE 'persistDay\(\)\|persistCursor\(\)' web/transcripts-viewer.html` | At least four matches: the two function definitions plus at least one call site each (inside `render`). |
+| 17i.4 | Read the load IIFE. The order is: `prompts = …; days = …; hydrateMemory(); render(startIndex);` | The hydration call must precede `render` so the initial render honors the persisted cursor for the starting prompt. |
+| 17i.5 | `grep -nE 'DAY_CAP = 100\|CURSOR_CAP = 500' web/transcripts-viewer.html` | Both constants present (exactly once each). |
+| 17i.6 | Read `safeRead`, `safeWrite`, `isValidDayDict`, `isValidCursorDict`. | All four are present and shaped per the description. `safeRead` returns `null` on parse failure, non-object top-level, or array top-level. `isValid*Dict` walk all values and return `false` on any malformed entry (whole-dict rejection). |
 
 ## Exit criteria
 
