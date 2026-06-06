@@ -73,7 +73,7 @@ This feature was originally a static day-of-year-rotating array (issue #2) and w
 | 4a.1 | Load homepage. | Top-right panel visible. Heading "CHANGES MADE THIS WEEK" in uppercase, bold, with a thin underline border below it. Translucent background (blurred view of gradient). |
 | 4a.2 | Same. | Body is a **numbered** list (`<ol>`, decimal markers `1.`, `2.`, `3.` visible). |
 | 4a.3 | Same. | List items are titles of issues closed in the last 7 days, **most recent first**. As of `119b0e5`, expect: `1.` "Display tasks completed in the last 7 days", `2.` "Add quote of the day to homepage", `3.` "HTTPS homepage". |
-| 4a.4 | Same. | Each entry is **plain text** — no underlined link, no `(Xh ago)` timestamp, no icon. Hover does not change the cursor to a pointer. |
+| 4a.4 | Same. | Each entry is **plain text** — no underlined link, no `(Xh ago)` timestamp, no icon. Item-level hover does not change the cursor. **Panel-level hover** (since #79) does — the whole `#recent-tasks` panel shows `cursor: pointer` and a faint background-brightness shift, and a small `⟳` glyph sits at the top-right. The full tap-cycle behavior is covered by § 4f. |
 | 4a.5 | DevTools → **Network** tab (Appendix A), hard-refresh (Cmd-Shift-R). Filter by "github.com". | Exactly one request to `https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=30&sort=updated&direction=desc`. Status `200`, `Type: fetch`. |
 
 ### 4b. Layout / sizing
@@ -104,6 +104,22 @@ This feature was originally a static day-of-year-rotating array (issue #2) and w
 |---|---|---|
 | 4e.1 | DevTools → Elements → click any `<li>` inside `#recent-tasks-list`. | Inside the `<li>` is a single Text node (the title). No `<a>`, no `<span>`, no nested elements. (Confirms the `textContent` rendering path.) |
 | 4e.2 | Override the API response (Appendix E). In the saved JSON file, change one issue's `title` to the literal string<br>`<img src=x onerror=alert('XSS')>`<br>and save. Hard-refresh. | The literal `<img …>` string appears as text in the list — visible angle brackets and all. **No alert dialog opens. No image tag is created.** Confirm by checking the rendered `<li>`'s innerHTML in the Elements panel — it should be the text-encoded form (`&lt;img …&gt;`), not a real `<img>` element. Disable the override when done. |
+
+### 4f. View rotation mechanic (issue #79)
+
+`#recent-tasks` is tappable: each tap (or `Enter` / `Space` while focused) cycles the panel's body content through three views, then back to view 1. View 2 and view 3 are placeholder lines for this issue — the body reads `View 2: Work in progress` and `View 3: Work in progress` respectively (the 1-based view number is embedded so the user can see which view they're on without an extra indicator). Real angles land in follow-up issues. The cycle counter resets on page reload.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 4f.1 | Hard-refresh. | View 1 renders — numbered list of recent issues (existing behavior, indistinguishable from § 4a.3). |
+| 4f.2 | Click anywhere inside the panel (e.g. on the heading text). | View 2 renders — panel body is now a single un-bulleted `View 2: Work in progress` line (the `<ol>` contains exactly one `<li class="empty">View 2: Work in progress</li>`). |
+| 4f.3 | Click again. | View 3 — body reads `View 3: Work in progress`. The view number distinguishes it from view 2. |
+| 4f.4 | Click again. | Cycles back to view 1. The full numbered list re-renders, matching what § 4a.3 expects. |
+| 4f.5 | Tab into the panel (`#recent-tasks` is `role="button"` `tabindex="0"`). Confirm a focus ring or background-brightness change indicates focus. Press `Enter`. Then press `Space`. | `Enter` and `Space` each advance one view, parallel to a tap. |
+| 4f.6 | After 4f.3 (cycled to view 3), hard-refresh. | Panel is back to view 1. View counter is in-memory only — no `localStorage` entry created. |
+| 4f.7 | Block the GitHub API URL (Appendix C) and hard-refresh. Panel shows `Could not load recent changes.` in view 1. Click. | View 2 renders `View 2: Work in progress`. Click again → view 3 (`View 3: Work in progress`). Click again → back to view 1's `Could not load recent changes.`. The error state cycles cleanly with no crash and no stale list. |
+| 4f.8 | DevTools → Elements → select the `<aside id="recent-tasks">` node → confirm attributes: `role="button"`, `tabindex="0"`, `aria-live="polite"`, `aria-label="Changes made this week. Tap to cycle view."`. | All four present. The `<span class="cycle-glyph" aria-hidden="true">⟳</span>` child is present right after the opening `<aside>` tag. |
+| 4f.9 | Wait for view 1 to fully render (the issue list, not just `Loading…`). Note the panel's rendered height (DevTools → Elements → hover the panel for the layout overlay, or read `getBoundingClientRect().height` in the Console). Tap to advance to view 2. | Panel height is **unchanged** — the `View 2: Work in progress` placeholder occupies a panel of the same height as view 1, with empty space below the text. DevTools → Elements → `#recent-tasks` shows an inline `style="min-height: <Npx>"` matching the view-1 height. Tap to view 3 → same. Tap back to view 1 → same height (full list re-renders within the locked size). |
 
 ## 5. Cross-browser / accessibility quick checks
 
@@ -953,9 +969,10 @@ Sibling of the rejected hand-curated version (#73, `[Rejected]`).
 
 | ID | Steps | Expected |
 |---|---|---|
-| 16j.1 | Desktop 1440×900. | `#summary-30d` sits centered under the quote in the hero column. Does NOT overlap `#recent-tasks` (top-right) or `.tool-links` (bottom-right). |
-| 16j.2 | DevTools device toolbar → 375×667 (iPhone SE). | Summary, recent-tasks, and tool-links all render. No horizontal scrollbar appears on the body. |
-| 16j.3 | Device toolbar → 360×640. | Same as 16j.2. No three-way overlap. |
+| 16j.1 | Desktop 1440×900. | `#summary-30d` is `position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%)` — anchored to **bottom-center** of the viewport. Width is `min(20rem, calc(100vw - 2rem))` (same formula as `#recent-tasks`) so on desktop it's exactly 20rem and doesn't change when the window resizes. `max-height: 25vh` with `overflow-y: auto` for long Gemini summaries. Hero (Hello, World + device + quote) is centered in the upper portion. No overlap with `#recent-tasks` (top-right) or `.tool-links` (bottom-right) on viewports ≥ ~42rem wide. |
+| 16j.2 | DevTools device toolbar → 375×667 (iPhone SE). | `#summary-30d` width = `min(20rem, calc(100vw - 2rem))` ≈ 328 px on a 375-px viewport. The bottom-center panel may visually collide with `.tool-links` (bottom-right) on narrow viewports — both are pinned to bottom. Document this trade-off for future iteration. No horizontal scrollbar on the body. |
+| 16j.3 | Device toolbar → 360×640. | Same as 16j.2. The bottom-center summary panel + bottom-right tool-links may overlap at this viewport width. A follow-up issue could collapse the tool-links into a hamburger or reposition the summary panel on narrow screens. |
+| 16j.4 | Wide desktop, resize the window from 1920×1080 down to 1024×768. | `#summary-30d` width stays at 20rem throughout — the panel **does not resize** as the viewport shrinks (until the viewport is narrower than ~22rem, at which point the `min()` formula clamps the width to `100vw - 2rem`). Matches `#recent-tasks` behavior. |
 
 ### 16k. Code-shape regression guards
 
@@ -966,6 +983,22 @@ Sibling of the rejected hand-curated version (#73, `[Rejected]`).
 | 16k.3 | `grep -nF "'firstcontact:summary-30d:v1'" web/index.html` | At least one match (storage key string literal). |
 | 16k.4 | `grep -cE 'WORD_LIMIT = 50' api/server/summary_client.py` | Returns `1`. |
 | 16k.5 | `grep -cE 'TTL_HOURS = 24' web/index.html` | Returns `1`. |
+
+### 16l. View rotation mechanic (issue #79)
+
+`#summary-30d` is tappable: each tap (or `Enter` / `Space` while focused) cycles the panel body through three views, then back to view 1. View 2 and view 3 are placeholder lines for this issue — the body reads `View 2: Work in progress` and `View 3: Work in progress` respectively.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16l.1 | Hard-refresh with backend up + fresh cache. | View 1 renders the Gemini prose paragraph (existing § 16d.1 / § 16e.1 behavior). |
+| 16l.2 | Click the panel. | View 2 — the `<p>` inside `#summary-30d` now reads `View 2: Work in progress`. Any pre-existing `.footnote` span is removed. |
+| 16l.3 | Click again. | View 3 — body reads `View 3: Work in progress`. The view number distinguishes it from view 2. |
+| 16l.4 | Click again. | Cycles back to view 1. The original prose re-renders. If the page-load state included a `(showing cached summary; backend unreachable)` footnote (the stale-with-failed-refresh path from § 16g.2), that footnote is re-attached. |
+| 16l.5 | View 1 visible. Drag-select a few words inside the prose paragraph (mousedown, drag across text, mouseup). | Text is selected and can be copied. **The view does not advance** — the `window.getSelection().toString().length > 0` guard rejects the click that fires on mouseup. |
+| 16l.6 | Tab to focus the panel (focus indicator: background-brightness shift via `:focus-visible`). Press `Enter`. Press `Space`. | Each press advances one view, parallel to a tap. |
+| 16l.7 | DevTools → Elements → select the `<section id="summary-30d">` node. Confirm attributes: `role="button"`, `tabindex="0"`, `aria-live="polite"`, `aria-label="Summary of the last 30 days. Tap to cycle view."`. | All four present. The `<span class="cycle-glyph" aria-hidden="true">⟳</span>` child is present right after the opening `<section>` tag. |
+| 16l.8 | After cycling to view 3, hard-refresh. | Panel returns to view 1. View counter is in-memory only — no `localStorage` entry created for it (only the existing `firstcontact:summary-30d:v1` key is set, unrelated to the view counter). |
+| 16l.9 | Wait for view 1's Gemini prose to render (full paragraph, not the `Loading summary…` placeholder). Tap to view 2. | Panel height is **unchanged** — the `View 2: Work in progress` placeholder occupies a panel of the same height as the prose, with empty space below. `#summary-30d` shows an inline `style="min-height: <Npx>"` matching the view-1 height. Tap to view 3 → same. Tap back to view 1 → same height (prose re-renders within the locked size, possibly with a stale-cache footnote if applicable). |
 
 ## 17. Persistent day-position and cursor memory across page refreshes (issue #68)
 
