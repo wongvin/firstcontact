@@ -34,6 +34,38 @@
       font-size: 0.9rem;
       opacity: 0.8;
     }
+    #summary-30d {
+      max-width: 32rem;
+      margin: 2rem auto 0;
+      padding: 0.75rem 1rem;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 0.5rem;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      text-align: left;
+      line-height: 1.5;
+    }
+    #summary-30d h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 0.5rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    }
+    #summary-30d p {
+      margin: 0;
+      font-size: 0.95rem;
+      opacity: 1;
+    }
+    #summary-30d .footnote {
+      display: block;
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
     #recent-tasks {
       position: fixed;
       top: 1rem;
@@ -104,6 +136,10 @@
       <span id="quote-text"></span>
       <footer>— <span id="quote-author"></span></footer>
     </blockquote>
+    <section id="summary-30d" aria-label="Summary of the last 30 days">
+      <h2>Last 30 days</h2>
+      <p>Loading summary…</p>
+    </section>
   </div>
   <aside id="recent-tasks" aria-label="Changes made this week">
     <h2>Changes made this week</h2>
@@ -130,6 +166,74 @@
       } catch (e) {
         textEl.textContent = 'Could not load today’s quote.';
         authorEl.textContent = '';
+      }
+    })();
+
+    (async function loadSummary30d() {
+      const SUMMARY_URL = 'http://localhost:8001/summary/30days';
+      const STORAGE_KEY = 'firstcontact:summary-30d:v1';
+      const TTL_HOURS = 24;
+      const section = document.getElementById('summary-30d');
+      const para = section.querySelector('p');
+
+      const render = (text, footnote) => {
+        para.textContent = text;
+        const existing = section.querySelector('.footnote');
+        if (existing) existing.remove();
+        if (footnote) {
+          const span = document.createElement('span');
+          span.className = 'footnote';
+          span.textContent = footnote;
+          section.appendChild(span);
+        }
+      };
+
+      const readCache = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          const obj = JSON.parse(raw);
+          if (typeof obj?.summary !== 'string' || typeof obj?.generated_at !== 'string') return null;
+          const ageMs = Date.now() - new Date(obj.generated_at).getTime();
+          if (Number.isNaN(ageMs)) return null;
+          const ttlMs = (Number(obj.ttl_hours) || TTL_HOURS) * 3600_000;
+          return { summary: obj.summary, ageMs, fresh: ageMs < ttlMs };
+        } catch (e) {
+          return null;
+        }
+      };
+
+      const writeCache = (summary) => {
+        try {
+          localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ summary, generated_at: new Date().toISOString(), ttl_hours: TTL_HOURS })
+          );
+        } catch (e) {
+          // quota exceeded / private browsing — degrade silently
+        }
+      };
+
+      const cached = readCache();
+      if (cached?.fresh) {
+        render(cached.summary);
+        return;
+      }
+      if (cached) render(cached.summary);
+
+      try {
+        const res = await fetch(SUMMARY_URL);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (typeof data?.summary !== 'string') throw new Error('malformed response');
+        render(data.summary);
+        writeCache(data.summary);
+      } catch (e) {
+        if (cached) {
+          render(cached.summary, '(showing cached summary; backend unreachable)');
+        } else {
+          render('Backend unreachable at http://localhost:8001 — start the local server (see api/server/README.md).');
+        }
       }
     })();
 

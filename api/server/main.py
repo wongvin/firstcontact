@@ -1,11 +1,12 @@
-"""Combined FastAPI app exposing /digikey/pricing, /mouser/pricing, and /claudecode/timeline.
+"""Combined FastAPI app exposing /digikey/pricing, /mouser/pricing, /claudecode/timeline, and /summary/30days.
 
-One process, one port, one .env (DigiKey + Mouser credentials), one CORS middleware block.
+One process, one port, one .env (DigiKey + Mouser + Gemini credentials), one CORS middleware block.
 
 Frontends:
-- web/digikey-search.html  → GET /digikey/pricing
-- web/mouser-search.html   → GET /mouser/pricing
-- web/transcripts-viewer.html → GET /claudecode/timeline
+- web/digikey-search.html      → GET /digikey/pricing
+- web/mouser-search.html       → GET /mouser/pricing
+- web/transcripts-viewer.html  → GET /claudecode/timeline
+- web/index.html               → GET /summary/30days
 """
 
 from __future__ import annotations
@@ -17,11 +18,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from claudecode_client import build_timeline
 from digikey_client import DigiKeyError, get_pricing as get_digikey_pricing
 from mouser_client import MouserError, get_pricing as get_mouser_pricing
+from summary_client import SummaryError, get_30day_summary
 
 
 load_dotenv()
 
-app = FastAPI(title="Part-pricing proxy + Claude Code transcript viewer", version="0.3.0")
+app = FastAPI(title="Part-pricing proxy + Claude Code transcript viewer + 30-day summary", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +40,7 @@ app.add_middleware(
 digikey_router = APIRouter(prefix="/digikey", tags=["digikey"])
 mouser_router = APIRouter(prefix="/mouser", tags=["mouser"])
 claudecode_router = APIRouter(prefix="/claudecode", tags=["claudecode"])
+summary_router = APIRouter(prefix="/summary", tags=["summary"])
 
 
 @digikey_router.get("/pricing")
@@ -66,9 +69,19 @@ async def claudecode_timeline():
     return build_timeline()
 
 
+@summary_router.get("/30days")
+async def summary_30days():
+    """LLM-generated prose summary (<50 words) of closed-issue activity in the last 30 days."""
+    try:
+        return await get_30day_summary()
+    except SummaryError as err:
+        raise HTTPException(status_code=502, detail=str(err))
+
+
 app.include_router(digikey_router)
 app.include_router(mouser_router)
 app.include_router(claudecode_router)
+app.include_router(summary_router)
 
 
 @app.get("/health")
