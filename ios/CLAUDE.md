@@ -109,6 +109,35 @@ API for it. Don't try to work around this by committing the screenshot
 to the repo or creating a release for hosting; either of those violates
 the "no commit/push without consent" gate.
 
+## API keys and Secrets.xcconfig
+
+Build-time secrets (e.g. the Google AI Studio `GEMINI_API_KEY` for the 30-day-summary panel) live in **`ios/FirstContact/Secrets.xcconfig`** — gitignored, never committed. A committed companion **`Secrets.example.xcconfig`** documents the expected shape.
+
+The wire-up:
+
+1. **`ios/FirstContact/Config.xcconfig`** (committed) is set as the `baseConfigurationReference` for both Debug and Release of the project (not the target — the project-level reference cascades to the target). It contains a single line: `#include? "Secrets.xcconfig"`. The optional include (`?`) skips silently when the file is missing, so a fresh clone still builds and runs.
+2. **`Secrets.xcconfig`** (when present) sets `GEMINI_API_KEY = <key>` and any other secrets.
+3. A **"Generate Secrets" Run Script build phase** (added in `project.pbxproj`, scheduled BEFORE the `Sources` phase) invokes **`ios/FirstContact/scripts/generate-secrets.sh`**, which reads `$GEMINI_API_KEY` from the build environment and writes **`ios/FirstContact/FirstContact/GeneratedSecrets.swift`** with the key as a typed constant. The generated file is gitignored.
+4. Swift code reads via `GeneratedSecrets.geminiAPIKey` — a plain compile-time constant. Empty string is interpreted as "key not set" and triggers the setup-hint render state.
+5. **`ENABLE_USER_SCRIPT_SANDBOXING = NO`** is required on the target so the Run Script can read its own .sh file from outside the build sandbox. Without this, the script is denied access to its own source (`deny(1) file-read-data`).
+
+The Info.plist path (`INFOPLIST_KEY_GeminiAPIKey = "$(GEMINI_API_KEY)"` + `Bundle.main.object(forInfoDictionaryKey:)`) was an early attempt and **does not work** — Xcode's `INFOPLIST_KEY_*` mechanism only emits Apple-whitelisted keys (scene manifest, supported orientations, etc.); arbitrary custom keys are silently dropped. The Run Script + GeneratedSecrets pattern is the working approach.
+
+To enable a freshly-cloned dev environment:
+
+```bash
+cp ios/FirstContact/Secrets.example.xcconfig ios/FirstContact/Secrets.xcconfig
+# Edit Secrets.xcconfig and paste the key as the value of GEMINI_API_KEY.
+# Then build — the first build creates GeneratedSecrets.swift; if Xcode
+# reports "cannot find 'GeneratedSecrets' in scope" on the very first
+# build (the synced root group discovers sources at project-open, before
+# the script has run), do a second build and the symbol resolves.
+```
+
+**Restrict the key at the AI Studio dashboard** (https://aistudio.google.com/apikey → key edit → Application restrictions → iOS apps → add Bundle ID `com.vwong.FirstContact`) so that even if the IPA leaks, the key is unusable from a different Bundle ID. This is the second line of defense; the first is `Secrets.xcconfig` being gitignored.
+
+Future iOS-side secrets follow the same shape: add a new line to `Secrets.example.xcconfig`, extend `scripts/generate-secrets.sh` to write the new constant into `GeneratedSecrets`, and update Swift to read it. Don't reach for the Info.plist path — `INFOPLIST_KEY_*` won't carry custom keys.
+
 ## Capabilities not available on free signing
 
 - TestFlight and App Store distribution (paid Apple Developer Program, $99/yr)
