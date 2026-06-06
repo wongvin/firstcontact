@@ -201,6 +201,70 @@
     const lastIndexByDay = {};       // last viewed prompt index within each day
     const cursorByPromptIndex = {};  // remembered cursor position per prompt index
     let cursor = { line: 1, col: 1 };// current cursor source-line/col (1-indexed)
+
+    // --- localStorage persistence for the two memory dicts (#68) --------------
+    // Bump the `:v1:` to `:v2:` to invalidate older entries (hydration ignores
+    // keys whose prefix doesn't match, so v2 silently starts fresh).
+    const STORAGE_PREFIX = 'firstcontact:transcripts-viewer:v1:';
+    const DAY_KEY = STORAGE_PREFIX + 'lastIndexByDay';
+    const CURSOR_KEY = STORAGE_PREFIX + 'cursorByPromptIndex';
+    const DAY_CAP = 100;
+    const CURSOR_CAP = 500;
+
+    function safeRead(key) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+        return parsed;
+      } catch (e) {
+        return null;
+      }
+    }
+    function safeWrite(key, obj) {
+      try {
+        localStorage.setItem(key, JSON.stringify(obj));
+      } catch (e) {
+        // quota exceeded / private browsing — degrade silently to in-memory only
+      }
+    }
+    function evictTo(obj, cap) {
+      const keys = Object.keys(obj);
+      if (keys.length <= cap) return;
+      for (let i = 0; i < keys.length - cap; i++) {
+        delete obj[keys[i]];
+      }
+    }
+    function isValidDayDict(obj) {
+      for (const v of Object.values(obj)) {
+        if (!Number.isInteger(v) || v < 0) return false;
+      }
+      return true;
+    }
+    function isValidCursorDict(obj) {
+      for (const v of Object.values(obj)) {
+        if (!v || typeof v !== 'object') return false;
+        if (!Number.isInteger(v.line) || !Number.isInteger(v.col)) return false;
+      }
+      return true;
+    }
+    function hydrateMemory() {
+      const day = safeRead(DAY_KEY);
+      if (day && isValidDayDict(day)) Object.assign(lastIndexByDay, day);
+      const cur = safeRead(CURSOR_KEY);
+      if (cur && isValidCursorDict(cur)) Object.assign(cursorByPromptIndex, cur);
+    }
+    function persistDay() {
+      evictTo(lastIndexByDay, DAY_CAP);
+      safeWrite(DAY_KEY, lastIndexByDay);
+    }
+    function persistCursor() {
+      evictTo(cursorByPromptIndex, CURSOR_CAP);
+      safeWrite(CURSOR_KEY, cursorByPromptIndex);
+    }
+    // --- end persistence ------------------------------------------------------
+
     let numberPrefix = '';           // accumulates digits for <num>G
     let searchMode = false;
     let searchString = '';
@@ -1016,6 +1080,7 @@
       // arrow keys (or search) restores it.
       if (prompts.length && currentIndex !== clamped) {
         cursorByPromptIndex[currentIndex] = { line: cursor.line, col: cursor.col };
+        persistCursor();
       }
 
       currentIndex = clamped;
@@ -1048,7 +1113,10 @@
       responseBodyEl.className = 'response-body';
       renderMarkdownInto(responseBodyEl, p.response_text || '(no response captured)');
 
-      if (p.day) lastIndexByDay[p.day] = clamped;
+      if (p.day) {
+        lastIndexByDay[p.day] = clamped;
+        persistDay();
+      }
 
       const url = new URL(window.location.href);
       url.searchParams.set('prompt', String(clamped));
@@ -1184,6 +1252,7 @@
         const data = await res.json();
         prompts = Array.isArray(data.prompts) ? data.prompts : [];
         days = Array.isArray(data.days) ? data.days : [];
+        hydrateMemory();
         const urlParams = new URLSearchParams(window.location.search);
         const requested = parseInt(urlParams.get('prompt') || '', 10);
         const lastDayFirst = days.length ? days[days.length - 1].first_prompt_index : 0;
