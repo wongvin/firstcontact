@@ -49,6 +49,8 @@ struct ContentView: View {
     @State private var issuesLoaded = false
     @State private var issuesError = false
     @State private var summaryState: SummaryState = .loading
+    @State private var recentChangesView = 0
+    @State private var summary30dView = 0
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let summaryTTLHours = 24
@@ -56,6 +58,8 @@ struct ContentView: View {
     private static let issueWindowDays = 30
     private static let issueFetchLimit = 50
     private static let wordLimit = 50
+    private static let viewCount = 3
+    private static func wipText(_ view: Int) -> String { "View \(view + 1): Work in progress" }
     private static let geminiSystemPrompt = """
         You write concise editorial summaries of software engineering work. \
         Given a chronological list of recently-closed issue titles, write a single \
@@ -131,59 +135,11 @@ struct ContentView: View {
 
     @ViewBuilder
     private var summary30dPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LAST 30 DAYS")
-                .font(.system(size: 11, weight: .bold))
-                .tracking(1.0)
-                .padding(.bottom, 4)
-                .overlay(
-                    Rectangle()
-                        .fill(.white.opacity(0.3))
-                        .frame(height: 1),
-                    alignment: .bottom
-                )
-
-            switch summaryState {
-            case .loading:
-                Text("Loading\u{2026}")
-                    .font(.system(size: 12))
-                    .opacity(0.7)
-            case .missingKey:
-                Text("Set GEMINI_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
-                    .font(.system(size: 12))
-                    .opacity(0.85)
-            case .ready(let prose, let stale):
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(prose)
-                        .font(.system(size: 13))
-                        .multilineTextAlignment(.leading)
-                    if stale {
-                        Text("(showing cached summary; refresh failed)")
-                            .font(.system(size: 11))
-                            .opacity(0.65)
-                    }
-                }
-            case .failedNoCache:
-                Text("Could not load summary.")
-                    .font(.system(size: 12))
-                    .opacity(0.7)
-            }
-        }
-        .frame(maxWidth: 320, alignment: .leading)
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.white.opacity(0.25), lineWidth: 1)
-        )
-        .padding(.top, 16)
-        .foregroundStyle(.white)
-    }
-
-    private var recentChangesPanel: some View {
-        ScrollView {
+        Button {
+            summary30dView = (summary30dView + 1) % Self.viewCount
+        } label: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("CHANGES MADE THIS WEEK")
+                Text("LAST 30 DAYS")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(1.0)
                     .padding(.bottom, 4)
@@ -194,37 +150,131 @@ struct ContentView: View {
                         alignment: .bottom
                     )
 
-                if !issues.isEmpty {
-                    ForEach(Array(issues.enumerated()), id: \.element.id) { idx, issue in
-                        HStack(alignment: .top, spacing: 6) {
-                            Text("\(idx + 1).").bold()
-                            Text(issue.title)
+                if summary30dView == 0 {
+                    switch summaryState {
+                    case .loading:
+                        Text("Loading\u{2026}")
+                            .font(.system(size: 12))
+                            .opacity(0.7)
+                    case .missingKey:
+                        Text("Set GEMINI_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
+                            .font(.system(size: 12))
+                            .opacity(0.85)
+                    case .ready(let prose, let stale):
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(prose)
+                                .font(.system(size: 13))
+                                .multilineTextAlignment(.leading)
+                            if stale {
+                                Text("(showing cached summary; refresh failed)")
+                                    .font(.system(size: 11))
+                                    .opacity(0.65)
+                            }
                         }
-                        .font(.system(size: 12))
+                    case .failedNoCache:
+                        Text("Could not load summary.")
+                            .font(.system(size: 12))
+                            .opacity(0.7)
                     }
-                } else if issuesError {
-                    Text("Could not load recent changes.")
-                        .font(.system(size: 12))
-                        .opacity(0.7)
-                } else if issuesLoaded {
-                    Text("No changes this week.")
-                        .font(.system(size: 12))
-                        .opacity(0.7)
                 } else {
-                    Text("Loading\u{2026}")
-                        .font(.system(size: 12))
-                        .opacity(0.7)
+                    Text(Self.wipText(summary30dView))
+                        .font(.system(size: 13))
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .frame(maxWidth: 320, minHeight: 120, alignment: .topLeading)
             .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.white.opacity(0.25), lineWidth: 1)
+            )
+            .overlay(
+                Text("⟳")
+                    .font(.system(size: 11))
+                    .opacity(0.5)
+                    .padding(.top, 6)
+                    .padding(.trailing, 8)
+                    .accessibilityHidden(true),
+                alignment: .topTrailing
+            )
+            .foregroundStyle(.white)
         }
-        .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.white.opacity(0.25), lineWidth: 1)
-        )
-        .foregroundStyle(.white)
+        .buttonStyle(.plain)
+        .padding(.top, 16)
+        .accessibilityLabel("Summary of the last 30 days. Tap to cycle view.")
+        .accessibilityHint("Cycles through alternate views of the panel's data.")
+    }
+
+    private var recentChangesPanel: some View {
+        Button {
+            recentChangesView = (recentChangesView + 1) % Self.viewCount
+        } label: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("CHANGES MADE THIS WEEK")
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(1.0)
+                        .padding(.bottom, 4)
+                        .overlay(
+                            Rectangle()
+                                .fill(.white.opacity(0.3))
+                                .frame(height: 1),
+                            alignment: .bottom
+                        )
+
+                    if recentChangesView == 0 {
+                        if !issues.isEmpty {
+                            ForEach(Array(issues.enumerated()), id: \.element.id) { idx, issue in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("\(idx + 1).").bold()
+                                    Text(issue.title)
+                                }
+                                .font(.system(size: 12))
+                            }
+                        } else if issuesError {
+                            Text("Could not load recent changes.")
+                                .font(.system(size: 12))
+                                .opacity(0.7)
+                        } else if issuesLoaded {
+                            Text("No changes this week.")
+                                .font(.system(size: 12))
+                                .opacity(0.7)
+                        } else {
+                            Text("Loading\u{2026}")
+                                .font(.system(size: 12))
+                                .opacity(0.7)
+                        }
+                    } else {
+                        Text(Self.wipText(recentChangesView))
+                            .font(.system(size: 12))
+                            .opacity(0.85)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(12)
+            }
+            .frame(maxWidth: 320, maxHeight: 200, alignment: .leading)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(.white.opacity(0.25), lineWidth: 1)
+            )
+            .overlay(
+                Text("⟳")
+                    .font(.system(size: 11))
+                    .opacity(0.5)
+                    .padding(.top, 6)
+                    .padding(.trailing, 8)
+                    .accessibilityHidden(true),
+                alignment: .topTrailing
+            )
+            .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Changes made this week. Tap to cycle view.")
+        .accessibilityHint("Cycles through alternate views of the panel's data.")
     }
 
     private func loadQuote() async {
