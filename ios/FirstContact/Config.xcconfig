@@ -1,0 +1,12 @@
+// Base build configuration for the FirstContact iOS target.
+//
+// `Secrets.xcconfig` (gitignored) is included optionally — the `?` after
+// `#include` skips it silently when the file is missing. With no
+// Secrets.xcconfig, GEMINI_API_KEY resolves to empty, the app builds, and
+// the home-screen 30-day summary panel renders its "Set GEMINI_API_KEY"
+// setup hint instead of attempting the Gemini call.
+//
+// To enable the summary: copy Secrets.example.xcconfig to Secrets.xcconfig
+// and paste your Google AI Studio key.
+
+#include? "Secrets.xcconfig"

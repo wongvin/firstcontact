@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import GoogleGenerativeAI
 
 struct Quote: Codable {
     let id: Int
@@ -28,12 +29,40 @@ struct Issue: Codable, Identifiable {
     struct PRMarker: Codable {}
 }
 
+struct CachedSummary: Codable {
+    let summary: String
+    let generatedAt: Date
+    let ttlHours: Int
+}
+
+enum SummaryState {
+    case loading
+    case missingKey
+    case ready(String, stale: Bool)
+    case failedNoCache
+}
+
 struct ContentView: View {
     @State private var quote: Quote?
     @State private var quoteError = false
     @State private var issues: [Issue] = []
     @State private var issuesLoaded = false
     @State private var issuesError = false
+    @State private var summaryState: SummaryState = .loading
+
+    private static let summaryCacheKey = "firstcontact.summary30d.v1"
+    private static let summaryTTLHours = 24
+    private static let geminiModel = "gemini-2.5-flash-lite"
+    private static let issueWindowDays = 30
+    private static let issueFetchLimit = 50
+    private static let wordLimit = 50
+    private static let geminiSystemPrompt = """
+        You write concise editorial summaries of software engineering work. \
+        Given a chronological list of recently-closed issue titles, write a single \
+        plain-prose paragraph under 50 words that describes the overall themes of the work. \
+        No bullet points, no emojis, no markdown, no headings. \
+        Plain prose only. Do not include preamble like 'Here is the summary:'.
+        """
 
     var body: some View {
         ZStack {
@@ -63,9 +92,14 @@ struct ContentView: View {
             recentChangesPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding()
+
+            summary30dPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding()
         }
         .task { await loadQuote() }
         .task { await loadIssues() }
+        .task { await loadSummary() }
     }
 
     @ViewBuilder
@@ -93,6 +127,57 @@ struct ContentView: View {
                 .opacity(0.6)
                 .padding(.top, 32)
         }
+    }
+
+    @ViewBuilder
+    private var summary30dPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LAST 30 DAYS")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(1.0)
+                .padding(.bottom, 4)
+                .overlay(
+                    Rectangle()
+                        .fill(.white.opacity(0.3))
+                        .frame(height: 1),
+                    alignment: .bottom
+                )
+
+            switch summaryState {
+            case .loading:
+                Text("Loading\u{2026}")
+                    .font(.system(size: 12))
+                    .opacity(0.7)
+            case .missingKey:
+                Text("Set GEMINI_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
+                    .font(.system(size: 12))
+                    .opacity(0.85)
+            case .ready(let prose, let stale):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(prose)
+                        .font(.system(size: 13))
+                        .multilineTextAlignment(.leading)
+                    if stale {
+                        Text("(showing cached summary; refresh failed)")
+                            .font(.system(size: 11))
+                            .opacity(0.65)
+                    }
+                }
+            case .failedNoCache:
+                Text("Could not load summary.")
+                    .font(.system(size: 12))
+                    .opacity(0.7)
+            }
+        }
+        .frame(maxWidth: 320, alignment: .leading)
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.white.opacity(0.25), lineWidth: 1)
+        )
+        .padding(.top, 16)
+        .foregroundStyle(.white)
     }
 
     private var recentChangesPanel: some View {
@@ -173,6 +258,161 @@ struct ContentView: View {
             issuesError = true
         }
         issuesLoaded = true
+    }
+
+    private func loadSummary() async {
+        let cached = readCachedSummary()
+        if let cached, isFresh(cached) {
+            summaryState = .ready(cached.summary, stale: false)
+            return
+        }
+        if let cached {
+            summaryState = .ready(cached.summary, stale: false)
+        } else {
+            summaryState = .loading
+        }
+
+        guard let apiKey = geminiAPIKey(), !apiKey.isEmpty else {
+            if cached == nil { summaryState = .missingKey }
+            return
+        }
+
+        do {
+            let titles = try await fetchClosedIssues30d()
+            if titles.isEmpty {
+                let prose = "No issues were closed in the last 30 days."
+                writeCachedSummary(prose)
+                summaryState = .ready(prose, stale: false)
+                return
+            }
+            let prompt = buildSummaryPrompt(titles: titles)
+            var prose = try await callGemini(apiKey: apiKey, prompt: prompt)
+            if wordCount(prose) > Self.wordLimit {
+                let retryPrompt = prompt + "\n\nYour previous response exceeded \(Self.wordLimit) words. Rewrite it more concisely. Hard limit: strictly under \(Self.wordLimit) words."
+                prose = try await callGemini(apiKey: apiKey, prompt: retryPrompt)
+            }
+            if wordCount(prose) > Self.wordLimit {
+                prose = truncateToWordLimit(prose, limit: Self.wordLimit)
+            }
+            writeCachedSummary(prose)
+            summaryState = .ready(prose, stale: false)
+        } catch {
+            if let cached {
+                summaryState = .ready(cached.summary, stale: true)
+            } else {
+                summaryState = .failedNoCache
+            }
+        }
+    }
+
+    private func geminiAPIKey() -> String? {
+        // Value comes from Secrets.xcconfig (gitignored) via the
+        // "Generate Secrets" build phase that writes GeneratedSecrets.swift.
+        // See ios/CLAUDE.md "API keys and Secrets.xcconfig".
+        let key = GeneratedSecrets.geminiAPIKey
+        return key.isEmpty ? nil : key
+    }
+
+    private func readCachedSummary() -> CachedSummary? {
+        guard let data = UserDefaults.standard.data(forKey: Self.summaryCacheKey) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(CachedSummary.self, from: data)
+    }
+
+    private func writeCachedSummary(_ prose: String) {
+        let payload = CachedSummary(summary: prose, generatedAt: Date(), ttlHours: Self.summaryTTLHours)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: Self.summaryCacheKey)
+    }
+
+    private func isFresh(_ cached: CachedSummary) -> Bool {
+        let age = Date().timeIntervalSince(cached.generatedAt)
+        let ttlSeconds = TimeInterval(cached.ttlHours * 3600)
+        return age < ttlSeconds
+    }
+
+    private func fetchClosedIssues30d() async throws -> [Issue] {
+        let cutoff = Date().addingTimeInterval(-Double(Self.issueWindowDays) * 86_400)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let since = formatter.string(from: cutoff)
+        let urlString = "https://api.github.com/repos/wongvin/firstcontact/issues?state=closed&per_page=100&since=\(since)&sort=updated&direction=desc"
+        guard let url = URL(string: urlString) else { return [] }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let all = try decoder.decode([Issue].self, from: data)
+        let filtered = all
+            .filter { $0.pullRequest == nil && ($0.closedAt ?? .distantPast) >= cutoff }
+            .sorted { ($0.closedAt ?? .distantPast) > ($1.closedAt ?? .distantPast) }
+        return Array(filtered.prefix(Self.issueFetchLimit))
+    }
+
+    private func extractPrefix(_ title: String) -> String {
+        let pattern = #"^(feat|fix|chore|docs|refactor|test|build|ci|perf)(\(.+?\))?:"#
+        let lowered = title.lowercased()
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return "other" }
+        let range = NSRange(lowered.startIndex..., in: lowered)
+        guard let match = regex.firstMatch(in: lowered, options: [], range: range),
+              match.numberOfRanges > 1,
+              let r = Range(match.range(at: 1), in: lowered) else {
+            return "other"
+        }
+        return String(lowered[r])
+    }
+
+    private func buildSummaryPrompt(titles: [Issue]) -> String {
+        let lines = titles.map { issue -> String in
+            let title = issue.title.trimmingCharacters(in: .whitespaces)
+            let prefix = extractPrefix(title)
+            return "- [\(prefix)] \(title)"
+        }
+        return """
+            Recently-closed issues from the last \(Self.issueWindowDays) days \
+            (most recent first, \(titles.count) total):
+
+            \(lines.joined(separator: "\n"))
+
+            Write a single plain-prose paragraph strictly under \(Self.wordLimit) words \
+            summarizing the overall themes. No bullet points, no markdown, no emojis.
+            """
+    }
+
+    private func callGemini(apiKey: String, prompt: String) async throws -> String {
+        let config = GenerationConfig(temperature: 0.4)
+        let model = GenerativeModel(
+            name: Self.geminiModel,
+            apiKey: apiKey,
+            generationConfig: config,
+            systemInstruction: ModelContent(parts: [.text(Self.geminiSystemPrompt)])
+        )
+        let response = try await model.generateContent(prompt)
+        let text = (response.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            throw URLError(.cannotParseResponse)
+        }
+        return text
+    }
+
+    private func wordCount(_ text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return 0 }
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    private func truncateToWordLimit(_ text: String, limit: Int) -> String {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace })
+        if words.count <= limit { return text }
+        let kept = words.prefix(limit).joined(separator: " ")
+        let trailingPunctuation = CharacterSet(charactersIn: ",.;:")
+        return kept.trimmingCharacters(in: trailingPunctuation) + "\u{2026}"
     }
 }
 

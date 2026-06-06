@@ -15,4 +15,7 @@ Pods/
 # Swift Package Manager
 .swiftpm/
 .build/
-Package.resolved
+# Package.resolved is intentionally NOT ignored — it's the SPM lockfile,
+# committed alongside the .xcodeproj so all machines / future CI resolve
+# to the same SDK versions. See ios/CLAUDE.md "API keys and Secrets.xcconfig"
+# section's #77 reference for the first SPM dep this pins.

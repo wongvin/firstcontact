@@ -214,3 +214,10 @@ __marimo__/
 
 # graphify outputs
 graphify-out/
+
+# Build-time secrets — match anywhere in the tree, not just one path:
+#   Secrets.xcconfig         (currently used by ios/FirstContact for GEMINI_API_KEY)
+#   GeneratedSecrets.swift   (regenerated on every iOS build from Secrets.xcconfig)
+# Committed companion stubs (Secrets.example.xcconfig) document the expected shape.
+Secrets.xcconfig
+GeneratedSecrets.swift
