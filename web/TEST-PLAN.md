@@ -876,6 +876,97 @@ The frontend (`web/transcripts-viewer.html`) is unchanged — the viewer just re
 | 15d.4 | Read `_extract_assistant_text_blocks`. | Returns `list[str]` of text-block contents only. No `tool_use` branch, no `('text', …)` tuple wrapping. |
 | 15d.5 | Read `_parse_session.flush`. | Inlines the join: `current_prompt["response_text"] = "\n\n".join(current_response_texts).strip()`. No call to a removed `_render_response_items` helper. |
 
+## 16. 30-day work summary on home screen via backend + localStorage cache (issue #74)
+
+Issue #74 adds an LLM-generated prose summary of the last ~30 days of closed-issue work as a new `#summary-30d` panel on the home screen. The static frontend ([web/index.html](web/index.html)) calls a new local backend route `GET http://localhost:8001/summary/30days` (defined in [api/server/main.py](api/server/main.py) and [api/server/summary_client.py](api/server/summary_client.py)) that fetches closed issues from the GitHub API, feeds them to a Gemini model via Google AI Studio (`google-genai` SDK, `gemini-2.5-flash-lite`, key in `.env` as `GEMINI_API_KEY`), and returns a strictly-under-50-word prose paragraph. The rendered summary is cached in `localStorage` under the key `firstcontact:summary-30d:v1` with a 24-hour TTL so visits while the backend is down still show the last-known-good summary.
+
+Sibling of the rejected hand-curated version (#73, `[Rejected]`).
+
+### 16a. Backend smoke
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16a.1 | Backend up with `GEMINI_API_KEY` set. `curl http://localhost:8001/summary/30days` | HTTP 200, JSON with keys `summary` (string), `word_count` (int, ≤ 50), `generated_at` (ISO timestamp ending in `Z`), `issue_count` (int ≥ 0). |
+| 16a.2 | `curl -s http://localhost:8001/summary/30days \| jq -r .summary \| wc -w` | Integer ≤ 50. |
+| 16a.3 | `curl http://localhost:8001/health` | Still returns `{"status":"ok"}` — the new route doesn't break the existing health endpoint. |
+| 16a.4 | Stop the backend, unset `GEMINI_API_KEY` in `.env`, restart. `curl -i http://localhost:8001/summary/30days` | HTTP 502 with JSON body `{"detail": "GEMINI_API_KEY must be set in the environment (.env). Generate one at https://aistudio.google.com/apikey."}`. Re-set the key and restart when done. |
+| 16a.5 | Block outbound to `api.github.com` (firewall rule or DNS override) and call `/summary/30days`. | HTTP 502 with `detail` starting with `"GitHub Issues fetch failed"`. Remove the block when done. |
+
+### 16b. Backend word-count guard
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16b.1 | In a Python REPL with the venv active:<br>`from summary_client import _word_count, _truncate_to_word_limit, WORD_LIMIT`<br>`_word_count("one two three")` | Returns `3`. |
+| 16b.2 | `_truncate_to_word_limit(" ".join(["w"] * 60), 50)` | Returns a string whose `_word_count` is `≤ 50` and which ends in `…`. |
+| 16b.3 | Temporarily monkey-patch `summary_client._generate_with_gemini` to return a 60-word string. Call `get_30day_summary()`. | The function calls `_generate_with_gemini` a **second** time with the retry-instruction suffix. Confirm via a counter or a captured-args list. |
+| 16b.4 | Same as 16b.3, but make the stub return 60 words on **both** calls. | The returned `word_count` is `≤ 50` and the `summary` ends with `…` — truncation fallback. |
+
+### 16c. Backend issue-list shaping
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16c.1 | In a REPL: `from summary_client import _extract_prefix`. `_extract_prefix("feat: thing")` / `"fix(infra): thing"` / `"chore: x"` / `"docs: y"` / `"random title"`. | Returns `"feat"`, `"fix"`, `"chore"`, `"docs"`, `"other"` respectively (lowercased). |
+| 16c.2 | In a REPL: `from summary_client import _fetch_recent_closed_issues`. `asyncio.run(_fetch_recent_closed_issues())` | Returns a list of dicts with `title`, `closed_at`, `number`. All entries have `closed_at` within the last 30 days. No entry has `pull_request` set. Length ≤ 50. Sorted by `closed_at` desc. |
+| 16c.3 | `from summary_client import _build_prompt`. Build a prompt with a fake list. Confirm shape. | Prompt body lists each issue as `- [<prefix>] <title>` and ends with an explicit-cap instruction. |
+
+### 16d. Frontend cache-hit path
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16d.1 | DevTools Console:<br>`localStorage.setItem('firstcontact:summary-30d:v1', JSON.stringify({ summary: 'Fresh cached summary text.', generated_at: new Date().toISOString(), ttl_hours: 24 }))`<br>Reload the page. DevTools → Network filter "summary". | The `#summary-30d` panel renders `Fresh cached summary text.` immediately. **No** request to `localhost:8001/summary/30days` appears in the Network panel. |
+| 16d.2 | Inspect `#summary-30d` in Elements. | Single `<h2>Last 30 days</h2>` + single `<p>Fresh cached summary text.</p>`. No `.footnote` span present. |
+
+### 16e. Frontend cache-miss path
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16e.1 | Console: `localStorage.removeItem('firstcontact:summary-30d:v1')`. Reload with backend up. | Network shows exactly one `GET http://localhost:8001/summary/30days` (status 200). The panel renders the backend's prose. |
+| 16e.2 | Console: `JSON.parse(localStorage.getItem('firstcontact:summary-30d:v1'))` | Returns `{summary: "<text>", generated_at: "<recent ISO>", ttl_hours: 24}`. `Date.now() - new Date(generated_at).getTime() < 60_000` (timestamp is ≈ now). |
+
+### 16f. Frontend cache-expiry path
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16f.1 | Console:<br>`localStorage.setItem('firstcontact:summary-30d:v1', JSON.stringify({ summary: 'Stale prose from yesterday.', generated_at: new Date(Date.now() - 25 * 3600_000).toISOString(), ttl_hours: 24 }))`<br>Reload with backend up. | The stale prose renders instantly (first paint). Then one network call to `localhost:8001/summary/30days` fires, and the prose is replaced with the fresh response. The new cache entry's `generated_at` is now ≈ current time. |
+
+### 16g. Frontend backend-down
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16g.1 | Console: `localStorage.removeItem('firstcontact:summary-30d:v1')`. Block `localhost:8001` (Appendix C) **or** simply stop the backend. Reload. | The panel renders the message `Backend unreachable at http://localhost:8001 — start the local server (see api/server/README.md).`. No `.footnote` span. No throw. |
+| 16g.2 | Console (with backend still blocked):<br>`localStorage.setItem('firstcontact:summary-30d:v1', JSON.stringify({ summary: 'Stale cached prose.', generated_at: new Date(Date.now() - 25 * 3600_000).toISOString(), ttl_hours: 24 }))`<br>Reload. | The stale prose renders. Below it, a smaller muted line reads `(showing cached summary; backend unreachable)`. |
+| 16g.3 | Re-enable backend, clear cache, reload. | Returns to the happy path of 16e.1. Unblock and clear when done. |
+
+### 16h. Word-count cap at the rendered DOM
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16h.1 | After any successful render (cache-hit or fresh):<br>`document.querySelector('#summary-30d p').textContent.trim().split(/\s+/).length` | Integer ≤ 50. |
+
+### 16i. XSS defense
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16i.1 | Override the backend response (Appendix E) so `summary` is the literal string `<img src=x onerror=alert('XSS')>`. Clear cache, reload. | The angle-bracket text renders **as text** inside the `<p>`. **No** alert dialog. Elements panel shows the `<p>` containing a single Text node whose content is the literal string (no `<img>` element materialized). Disable the override when done. |
+
+### 16j. Layout collision-avoidance
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16j.1 | Desktop 1440×900. | `#summary-30d` sits centered under the quote in the hero column. Does NOT overlap `#recent-tasks` (top-right) or `.tool-links` (bottom-right). |
+| 16j.2 | DevTools device toolbar → 375×667 (iPhone SE). | Summary, recent-tasks, and tool-links all render. No horizontal scrollbar appears on the body. |
+| 16j.3 | Device toolbar → 360×640. | Same as 16j.2. No three-way overlap. |
+
+### 16k. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 16k.1 | `grep -n 'GEMINI_API_KEY' api/server/.env.example api/server/README.md api/server/summary_client.py` | Three or more matches across at least these three files. Confirms the env var is documented in both setup README and `.env.example`, and read from the client module. |
+| 16k.2 | `grep -nF 'gemini-2.5-flash-lite' api/server/summary_client.py` | Exactly one match (the `GEMINI_MODEL` constant). |
+| 16k.3 | `grep -nF "'firstcontact:summary-30d:v1'" web/index.html` | At least one match (storage key string literal). |
+| 16k.4 | `grep -cE 'WORD_LIMIT = 50' api/server/summary_client.py` | Returns `1`. |
+| 16k.5 | `grep -cE 'TTL_HOURS = 24' web/index.html` | Returns `1`. |
+
 ## Exit criteria
 
 A change ships when:
