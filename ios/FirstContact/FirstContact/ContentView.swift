@@ -94,7 +94,7 @@ struct ContentView: View {
             .padding()
 
             recentChangesPanel
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding()
 
             summary30dPanel
@@ -183,8 +183,8 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(maxWidth: 320, minHeight: 120, alignment: .topLeading)
             .padding(12)
+            .frame(maxWidth: 320, minHeight: 120, alignment: .topLeading)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)

@@ -2,6 +2,12 @@
 
 ## 2026-06-06
 
+### feat: symmetric iOS home panel layout (issue #83)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: two small visual-symmetry adjustments to the home screen after #81 landed. (1) `recentChangesPanel`'s positioning frame in `body` changed from `alignment: .topTrailing` to `alignment: .top` — `.top` is `Alignment(horizontal: .center, vertical: .top)`, which horizontally centers the panel at the top of the screen instead of pinning it to the top-right corner. (2) `summary30dPanel`'s `.padding(12)` moved from *after* `.frame(maxWidth: 320, minHeight: 120, alignment: .topLeading)` to *before* the frame. Previously the padding added 12pt outside the framed view → total visual width 344pt; now the padded VStack is what gets sized by the frame → total visual width 320pt, matching `recentChangesPanel`. Both panels now mirror each other above and below the centered hero with identical widths.
+- The `minHeight: 120` floor on `summary30dPanel` still applies to the framed-and-padded view; content shorter than 120pt won't shrink the panel below that floor. The `.topLeading` alignment is preserved to keep the LAST 30 DAYS heading anchored to the top across view cycles (per the in-review fix from #81).
+- Verification: `xcodebuild` succeeded; simulator screenshot confirms both panels render at the same width, symmetric above and below the hero.
+
 ### feat: tap iOS home panels to cycle through view angles (issue #81)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: iOS sibling of #79's web tap-to-cycle. Both `recentChangesPanel` and `summary30dPanel` are now wrapped in `Button { advance } label: { … }` with `.buttonStyle(.plain)` so the panel chrome (`.ultraThinMaterial` background, rounded-rectangle stroke, padding) stays unchanged. New `@State` properties `recentChangesView: Int = 0` and `summary30dView: Int = 0` hold the per-panel view index. New static helpers `viewCount = 3` and `wipText(_ view: Int) -> String` that returns `"View \(view + 1): Work in progress"` (string-identical to the web's `wipText` helper). View 0 renders the existing real content; views 1 / 2 render a single `Text(Self.wipText(view))` placeholder. View-state is per-launch — a cold start resets both panels to view 0.
