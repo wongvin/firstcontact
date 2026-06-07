@@ -1078,6 +1078,38 @@ The pre-existing § 10m.3 / § 13e.1 / § 14a.3 / § 14c.3 cases were updated to
 | 17i.5 | `grep -nE 'DAY_CAP = 100\|CURSOR_CAP = 500' web/transcripts-viewer.html` | Both constants present (exactly once each). |
 | 17i.6 | Read `safeRead`, `safeWrite`, `isValidDayDict`, `isValidCursorDict`. | All four are present and shaped per the description. `safeRead` returns `null` on parse failure, non-object top-level, or array top-level. `isValid*Dict` walk all values and return `false` on any malformed entry (whole-dict rejection). |
 
+## 18. First-line-only prompt on the prompt-line (issue #85)
+
+Issue #85 collapses any multi-line user prompt (typically `/ship` and other slash commands that carry trailing context lines) to its first line on the prompt-line. The underlying `prompts[i].user_text` is unchanged — only the rendered prompt-line is truncated. Search and cursor coordinates continue to use the full text.
+
+Implementation: a single change inside `render(index)` in [web/transcripts-viewer.html](web/transcripts-viewer.html) — `userText` is now `(p.user_text || '').split('\n', 1)[0].replace(/\s+$/, '')`. Both the `Claude: … User: …` branch (when the previous response ends with `?`) and the bare `User: …` branch use the same collapsed `userText`.
+
+### 18a. Rendering
+
+| ID | Steps | Expected |
+|---|---|---|
+| 18a.1 | Open `transcripts-viewer.html`. Navigate (↑/↓) to a prompt whose `user_text` starts with a slash command (e.g. `/ship`) followed by `\n\n` and additional context lines. | Prompt-line shows `… User: /ship` only. The context lines do not appear on the prompt-line. |
+| 18a.2 | Same as 18a.1 but the previous response ends with `?` (so the `Claude: <question> User: …` form is active). | Prompt-line shows `… Claude: <question> User: /ship`. Trailing context still suppressed. |
+| 18a.3 | Navigate to a single-line prompt (no `\n` anywhere). | Prompt-line is unchanged from prior behavior — the entire prompt is shown. |
+| 18a.4 | Navigate to a prompt whose first line ends with trailing spaces or tabs (e.g. `"/ship   \nbody"`). | Prompt-line shows `… User: /ship` with the trailing whitespace stripped. No double space before any following text. |
+| 18a.5 | Navigate to an empty `user_text` (defensive — `prompts[i].user_text === ''`). | Prompt-line shows `… User: ` with nothing after. No JS error. |
+
+### 18b. Underlying data preserved
+
+| ID | Steps | Expected |
+|---|---|---|
+| 18b.1 | DevTools console: navigate to a multi-line prompt at index `i`, then evaluate `prompts[i].user_text`. | Returns the full multi-line string, unchanged — newlines and trailing content intact. The truncation is render-only. |
+| 18b.2 | `/<text-from-line-2-of-a-multiline-prompt><Enter>` to search for a substring that only exists past the first line of some prompt's `user_text`. (Note: search scope is `response_text`, not `user_text` — see § 10. So this test is to confirm that confining the prompt-line render doesn't alter that scope.) | Search behavior is unchanged from § 10. The result is whatever the existing `response_text`-only search returns. |
+| 18b.3 | Press `j` / `k` to move the cursor down/up through a response whose prompt happens to be multi-line. | Cursor motion is identical to a single-line-prompt case. Cursor coordinates are tied to the response body, not the prompt-line. |
+
+### 18c. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 18c.1 | `grep -nF "split('\n', 1)" web/transcripts-viewer.html` | Exactly one match — inside `render(index)`, building `userText`. |
+| 18c.2 | `grep -nF 'p.user_text || ' web/transcripts-viewer.html` | Exactly one match — the same line. No other code path bypasses the first-line collapse for the prompt-line. |
+| 18c.3 | Read the two `buildPromptLine(...)` calls in `render(index)`. | Both branches pass the same `userText` variable. Neither re-derives a multi-line version. |
+
 ## Exit criteria
 
 A change ships when:

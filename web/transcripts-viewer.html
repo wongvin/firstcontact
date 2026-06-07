@@ -1093,7 +1093,10 @@
       // that's intentional: the timeline is conceptually flat.
       const prev = clamped > 0 ? prompts[clamped - 1] : null;
       const question = prev ? extractTrailingQuestion(prev.response_text || '') : null;
-      const userText = p.user_text || '';
+      // Slash-command prompts (and any other multi-line user input) are
+      // collapsed to their first line on the prompt-line. The underlying
+      // `p.user_text` is left intact for search/cursor logic.
+      const userText = (p.user_text || '').split('\n', 1)[0].replace(/\s+$/, '');
       if (question) {
         buildPromptLine(
           formatDate(prev.timestamp),
