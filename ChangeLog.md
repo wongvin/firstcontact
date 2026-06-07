@@ -2,6 +2,11 @@
 
 ## 2026-06-06
 
+### feat: collapse multi-line user prompts to first line on the prompt-line (issue #85)
+
+- `web/transcripts-viewer.html`: inside `render(index)`, `userText` is now `(p.user_text || '').split('\n', 1)[0].replace(/\s+$/, '')`. Slash-command entries (e.g. `/ship` followed by trailing context lines) and any other multi-line prompts render only their first line on the prompt-line. The underlying `prompts[i].user_text` is unchanged, so cursor/search logic continue to use the full text (and search-scope is `response_text` anyway, per § 10). Both the `Claude: <question> User: …` branch and the bare `User: …` branch consume the same collapsed `userText`.
+- `web/TEST-PLAN.md`: new § 18 with rendering, data-preservation, and code-shape regression guards.
+
 ### feat: symmetric iOS home panel layout (issue #83)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: two small visual-symmetry adjustments to the home screen after #81 landed. (1) `recentChangesPanel`'s positioning frame in `body` changed from `alignment: .topTrailing` to `alignment: .top` — `.top` is `Alignment(horizontal: .center, vertical: .top)`, which horizontally centers the panel at the top of the screen instead of pinning it to the top-right corner. (2) `summary30dPanel`'s `.padding(12)` moved from *after* `.frame(maxWidth: 320, minHeight: 120, alignment: .topLeading)` to *before* the frame. Previously the padding added 12pt outside the framed view → total visual width 344pt; now the padded VStack is what gets sized by the frame → total visual width 320pt, matching `recentChangesPanel`. Both panels now mirror each other above and below the centered hero with identical widths.
