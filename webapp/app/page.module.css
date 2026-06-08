@@ -1,0 +1,157 @@
+/* Unified First Contact homepage — ported from the former static web/index.html.
+   Scoped to this route (CSS module) so the /news pages keep their own styling. */
+
+.page {
+  min-height: 100vh;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.hero h1 {
+  font-size: 3rem;
+  margin: 0 0 0.5rem;
+}
+
+.hero p {
+  font-size: 1.25rem;
+  opacity: 0.9;
+}
+
+.quote {
+  max-width: 28rem;
+  margin: 2rem auto 0;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.4);
+  font-style: italic;
+  font-size: 1rem;
+  line-height: 1.5;
+  opacity: 0.95;
+}
+
+.quote footer {
+  margin-top: 0.5rem;
+  font-style: normal;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+/* Shared glass panel styling */
+.panel {
+  position: fixed;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: 25vh;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.5rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-align: left;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.panel:hover,
+.panel:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.summaryPanel {
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.recentPanel {
+  top: 1rem;
+  right: 1rem;
+}
+
+.panel h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.recentPanel h2 {
+  margin-bottom: 0.75rem;
+}
+
+.summaryPanel p {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 1;
+}
+
+.footnote {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.cycleGlyph {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.6rem;
+  font-size: 0.85rem;
+  opacity: 0.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.recentPanel ol {
+  padding-left: 1.25rem;
+  margin: 0;
+}
+
+.recentPanel li {
+  padding: 0.25rem 0;
+}
+
+.recentPanel .empty {
+  list-style: none;
+  margin-left: -1.25rem;
+  opacity: 0.7;
+}
+
+.toolLinks {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.toolLink {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.4rem;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-align: right;
+}
+
+.toolLink:hover {
+  color: white;
+}

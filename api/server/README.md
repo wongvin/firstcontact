@@ -1,13 +1,13 @@
 # Part-pricing proxy + transcript viewer + 30-day summary
 
-Single local FastAPI backend serving four frontends:
+Single local FastAPI backend serving four frontends in the Vercel-hosted `webapp/` target:
 
-- [`web/digikey-search.html`](../../web/digikey-search.html) — `/digikey/pricing`
-- [`web/mouser-search.html`](../../web/mouser-search.html) — `/mouser/pricing`
-- [`web/transcripts-viewer.html`](../../web/transcripts-viewer.html) — `/claudecode/timeline`
-- [`web/index.html`](../../web/index.html) — `/summary/30days` (the 30-day work-summary panel; issue #74)
+- [`webapp/public/digikey-search.html`](../../webapp/public/digikey-search.html) — `/digikey/pricing`
+- [`webapp/public/mouser-search.html`](../../webapp/public/mouser-search.html) — `/mouser/pricing`
+- [`webapp/public/transcripts-viewer.html`](../../webapp/public/transcripts-viewer.html) — `/claudecode/timeline`
+- [`webapp/app/page.tsx`](../../webapp/app/page.tsx) (homepage) — `/summary/30days` (the 30-day work-summary panel; issue #74)
 
-Holds DigiKey OAuth2 credentials, the Mouser API key, and the Google AI Studio (Gemini) key in one local `.env` so none of them ship to the static frontend.
+Holds DigiKey OAuth2 credentials, the Mouser API key, and the Google AI Studio (Gemini) key in one local `.env` so none of them ship to the frontend.
 
 Consolidates the previous `api/digikey/server/` and `api/mouser/server/` directories per issue #26. Per-feature logic still lives in dedicated client modules (`digikey_client.py`, `mouser_client.py`, `claudecode_client.py`, `summary_client.py`) — only the routing layer is shared.
 
@@ -33,9 +33,11 @@ uvicorn main:app --port 8001
 ```
 
 The server listens on `http://localhost:8001`. CORS is allowed for:
+- `http://localhost:3000` (Next.js dev server for `webapp/`)
 - `http://localhost:5500` (VS Code Live Server default)
-- `http://localhost:8080` (e.g. `python -m http.server 8080` from `web/`)
-- `https://wongvin.github.io` (the deployed GH Pages origin)
+- `http://localhost:8080` (e.g. `python -m http.server 8080`)
+- `https://*.vercel.app` (Vercel production + preview deploys, via `allow_origin_regex`)
+- `https://wongvin.github.io` (legacy GH Pages origin; kept harmless)
 
 ## Endpoints
 

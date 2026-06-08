@@ -2,10 +2,10 @@
 
 This repo contains two top-level targets:
 
-- [`web/`](web/) — static homepage deployed to https://wongvin.github.io/firstcontact/. Web-specific conventions in [web/CLAUDE.md](web/CLAUDE.md).
+- [`webapp/`](webapp/) — the primary web app: a Next.js 16 site (homepage, daily news reader, and the DigiKey/Mouser/Transcripts tool pages) deployed to Vercel. Target conventions in [webapp/CLAUDE.md](webapp/CLAUDE.md).
 - [`ios/`](ios/) — native iOS app (early development, free Apple ID signing for personal use). Target conventions will live in `ios/CLAUDE.md` once they emerge.
 
-The `web/` target is deployed by the GitHub Actions workflow at [.github/workflows/pages.yml](.github/workflows/pages.yml).
+The `webapp/` target is deployed by Vercel (Root Directory `webapp`, `GNEWS_API_KEY` env var). It supersedes the former static `web/` + GitHub Pages target, retired in issue #88. A local FastAPI backend ([`api/server/`](api/server/), `localhost:8001`) enriches the homepage's 30-day summary and the tool pages; it stays a local-only service.
 
 ## Repo-wide conventions
 
