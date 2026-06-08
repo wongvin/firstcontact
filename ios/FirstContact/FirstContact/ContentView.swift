@@ -42,6 +42,33 @@ enum SummaryState {
     case failedNoCache
 }
 
+// MARK: - News (gnews.io)
+
+struct Article: Codable, Identifiable {
+    let id = UUID()
+    let title: String
+    let description: String?
+    let content: String?
+    let url: String?
+    let image: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, description, content, url, image
+    }
+}
+
+struct NewsResponse: Codable {
+    let articles: [Article]
+}
+
+enum NewsState {
+    case loading
+    case missingKey
+    case failed
+    case empty
+    case ready([Article])
+}
+
 struct ContentView: View {
     @State private var quote: Quote?
     @State private var quoteError = false
@@ -51,6 +78,10 @@ struct ContentView: View {
     @State private var summaryState: SummaryState = .loading
     @State private var recentChangesView = 0
     @State private var summary30dView = 0
+    @State private var newsState: NewsState = .loading
+    @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
+    @State private var goingForward = true      // drives swipe transition direction
+    @State private var detailArticle: Article?
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let summaryTTLHours = 24
@@ -59,6 +90,7 @@ struct ContentView: View {
     private static let issueFetchLimit = 50
     private static let wordLimit = 50
     private static let viewCount = 3
+    private static let newsCategories = ["general", "technology", "science"]
     private static func wipText(_ view: Int) -> String { "View \(view + 1): Work in progress" }
     private static let geminiSystemPrompt = """
         You write concise editorial summaries of software engineering work. \
@@ -80,6 +112,46 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
+            if let article = detailArticle {
+                articleDetailScreen(article)
+                    .transition(.move(edge: .trailing))
+            } else {
+                pager
+            }
+        }
+        .task { await loadQuote() }
+        .task { await loadIssues() }
+        .task { await loadSummary() }
+        .task { await loadNews() }
+    }
+
+    // Vertical swipe pager: home at index 0, news articles after it, wrapping in a
+    // circular ring (swipe up past the last article -> home; swipe down on home -> last).
+    private var pager: some View {
+        currentScreen
+            .id(screenIndex)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .transition(.asymmetric(
+                insertion: .move(edge: goingForward ? .bottom : .top),
+                removal: .move(edge: goingForward ? .top : .bottom)
+            ))
+            .contentShape(Rectangle())
+            .gesture(swipeGesture)
+    }
+
+    @ViewBuilder
+    private var currentScreen: some View {
+        if screenIndex == 0 {
+            homeScreen
+        } else if case .ready(let articles) = newsState, screenIndex - 1 < articles.count {
+            articleScreen(articles[screenIndex - 1])
+        } else {
+            newsStatusScreen
+        }
+    }
+
+    private var homeScreen: some View {
+        ZStack {
             VStack(spacing: 8) {
                 Text("Hello, World!")
                     .font(.system(size: 48, weight: .bold))
@@ -101,9 +173,34 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding()
         }
-        .task { await loadQuote() }
-        .task { await loadIssues() }
-        .task { await loadSummary() }
+    }
+
+    // Total swipe screens = home + one per article (or a single status screen
+    // while news is loading / empty / failed).
+    private var totalScreens: Int {
+        let newsCount: Int
+        if case .ready(let articles) = newsState { newsCount = articles.count } else { newsCount = 1 }
+        return newsCount + 1
+    }
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onEnded { value in
+                let dy = value.translation.height
+                let dx = value.translation.width
+                guard abs(dy) > abs(dx), abs(dy) > 50 else { return }
+                let total = totalScreens
+                guard total > 1 else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    if dy < 0 {
+                        goingForward = true
+                        screenIndex = (screenIndex + 1) % total
+                    } else {
+                        goingForward = false
+                        screenIndex = (screenIndex - 1 + total) % total
+                    }
+                }
+            }
     }
 
     @ViewBuilder
@@ -275,6 +372,180 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Changes made this week. Tap to cycle view.")
         .accessibilityHint("Cycles through alternate views of the panel's data.")
+    }
+
+    // MARK: - News screens
+
+    private func articleScreen(_ article: Article) -> some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                articleImage(article)
+                    .frame(width: geo.size.width, height: geo.size.height / 2)
+                    .clipped()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(article.title)
+                        .font(.system(size: 24, weight: .bold))
+                        .multilineTextAlignment(.leading)
+                    if let description = article.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 16))
+                            .opacity(0.9)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(20)
+            }
+        }
+        .ignoresSafeArea(edges: .top)
+        .foregroundStyle(.white)
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation { detailArticle = article } }
+    }
+
+    private func articleDetailScreen(_ article: Article) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    withAnimation { detailArticle = nil }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Back to article")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(article.title)
+                        .font(.system(size: 26, weight: .bold))
+
+                    articleImage(article)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 200)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    if let description = article.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 17, weight: .semibold))
+                            .opacity(0.95)
+                    }
+
+                    if let content = article.content, !content.isEmpty {
+                        Text(content)
+                            .font(.system(size: 16))
+                            .opacity(0.9)
+                    } else if article.description == nil {
+                        Text("No further text available for this article.")
+                            .font(.system(size: 15))
+                            .opacity(0.7)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    private var newsStatusScreen: some View {
+        VStack(spacing: 12) {
+            switch newsState {
+            case .loading:
+                ProgressView().tint(.white)
+                Text("Loading latest news\u{2026}")
+            case .missingKey:
+                Text("Set GNEWS_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
+                    .multilineTextAlignment(.center)
+            case .failed:
+                Text("Could not load news.")
+            case .empty:
+                Text("No news right now.")
+            case .ready:
+                EmptyView()
+            }
+        }
+        .font(.system(size: 15))
+        .foregroundStyle(.white)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func articleImage(_ article: Article) -> some View {
+        if let urlString = article.image, let url = URL(string: urlString) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .empty:
+                    ZStack { imagePlaceholder; ProgressView().tint(.white) }
+                case .failure:
+                    imagePlaceholder
+                @unknown default:
+                    imagePlaceholder
+                }
+            }
+        } else {
+            imagePlaceholder
+        }
+    }
+
+    private var imagePlaceholder: some View {
+        Rectangle()
+            .fill(.white.opacity(0.1))
+            .overlay(
+                Image(systemName: "newspaper")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.white.opacity(0.5))
+            )
+    }
+
+    // MARK: - News data
+
+    private func loadNews() async {
+        guard let key = gnewsAPIKey() else {
+            newsState = .missingKey
+            return
+        }
+        // Fetch the three categories concurrently, then concatenate in order
+        // (general -> technology -> science) so articles stay grouped by category.
+        async let general = fetchNews(category: Self.newsCategories[0], key: key)
+        async let technology = fetchNews(category: Self.newsCategories[1], key: key)
+        async let science = fetchNews(category: Self.newsCategories[2], key: key)
+        let groups = await [general, technology, science]
+        let succeeded = groups.compactMap { $0 }
+        if succeeded.isEmpty {
+            newsState = .failed
+            return
+        }
+        let combined = succeeded.flatMap { $0 }
+        newsState = combined.isEmpty ? .empty : .ready(combined)
+    }
+
+    private func fetchNews(category: String, key: String) async -> [Article]? {
+        let urlString = "https://gnews.io/api/v4/top-headlines?category=\(category)&lang=en&country=us&apikey=\(key)"
+        guard let url = URL(string: urlString) else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return nil
+            }
+            return try JSONDecoder().decode(NewsResponse.self, from: data).articles
+        } catch {
+            return nil
+        }
+    }
+
+    private func gnewsAPIKey() -> String? {
+        let key = GeneratedSecrets.gnewsAPIKey
+        return key.isEmpty ? nil : key
     }
 
     private func loadQuote() async {

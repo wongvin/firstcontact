@@ -2,6 +2,12 @@
 
 ## 2026-06-07
 
+### feat: iOS swipe-driven news reader (issue #96)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: added a gnews.io-backed news experience navigated by vertical swipes. New `Article`/`NewsResponse` models and `NewsState`; `loadNews()` fetches `general`/`technology`/`science` concurrently (`async let`) and concatenates them in that order (partial failures degrade; all-fail/empty → status screen). Refactored `body` into a circular swipe pager (`screenIndex` over `[home] + articles`, `(i±1) % total` so the last article wraps to home and home swipes to the last article). New `articleScreen` (image fills the top half via `GeometryReader`, headline + description below; tap anywhere opens detail), `articleDetailScreen` (scrollable title + image + description + gnews `content`, top-left `chevron.left` back button), and `newsStatusScreen` (loading/missing-key/failed/empty). One root `DragGesture` distinguishes vertical swipes (>50pt) from taps; the home panels' tap-to-cycle Buttons still work.
+- `ios/FirstContact/scripts/generate-secrets.sh` + `Secrets.example.xcconfig`: extended the secrets pipeline to also embed `GNEWS_API_KEY` as `GeneratedSecrets.gnewsAPIKey` (same pattern as `GEMINI_API_KEY`; no `project.pbxproj` change). Empty key → news screen shows a setup hint.
+- Verified: `xcodebuild` (simulator) succeeds; simulator screenshots confirm the home screen is unchanged and an article screen renders image-top-half + headline + description with a real gnews article. Swipe transitions/wrap and the tap→detail→back flow need a manual device/simulator check (no reliable CLI swipe injection).
+
 ### feat: TTS button pause/resume + hold-to-restart (issue #94)
 
 - `webapp/app/news/TTSButton.tsx`: rewrote the single-action "Read Aloud" button into a play/pause/resume control with a hold-to-restart gesture. State machine: **idle** (`🔊 Read Aloud`, click → speak from start) → **playing** (`⏸️ Pause`, click → `speechSynthesis.pause()`) → **paused** (`🔊 Read Aloud`, click → `speechSynthesis.resume()`). A long-press (~500ms `HOLD_MS`) from any state restarts from the beginning (`cancel` + `speak`); the click that follows a hold is suppressed via `heldRef`.
