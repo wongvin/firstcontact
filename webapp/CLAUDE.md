@@ -9,7 +9,7 @@ issue #88). It serves three things:
 - **Homepage** (`app/page.tsx`) — the unified landing (hero / quote /
   changes-made-this-week / 30-day summary / tool links + a "Latest News" link).
   A client component; ported 1:1 from the former `web/index.html`.
-- **News reader** (`app/news/**`) — `/news`, `/news/health`, `/news/economy`.
+- **News reader** (`app/news/**`) — `/news`, `/news/technology`, `/news/science`.
   Headlines are fetched **server-side** from `gnews.io` using `GNEWS_API_KEY`
   (so this target needs a Node runtime — it can't be statically hosted).
   "Read Aloud" uses the browser `SpeechSynthesis` API (`app/news/TTSButton.tsx`).

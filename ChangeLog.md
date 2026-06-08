@@ -2,6 +2,15 @@
 
 ## 2026-06-07
 
+### feat: switch news topics to Technology and Science (issue #90)
+
+- Renamed the two category routes: `webapp/app/news/economy/` → `technology/` and `webapp/app/news/health/` → `science/` (via `git mv`).
+- `app/news/technology/page.tsx`: fetches gnews `category=technology`, heading "Technology News", helper `getTechnologyNews`, empty-state "No technology articles found." (was `category=business` / Economy).
+- `app/news/science/page.tsx`: fetches gnews `category=science`, heading "Science News", helper `getScienceNews`, empty-state "No science articles found." (was `category=health` / Health).
+- `app/news/page.tsx`: category nav now links `/news/technology` and `/news/science` with matching labels.
+- `webapp/CLAUDE.md`: route list updated to the new paths.
+- Verified: `npm run lint` + `npm run build` clean; `/news/technology` and `/news/science` return 200 with correct headings, old routes 404, `/news` nav points to the new routes.
+
 ### feat: migrate web to a Vercel-hosted Next.js app (`webapp/`, issue #88)
 
 - New top-level `webapp/` target: the `news-voice` Next.js 16 / React 19 / Tailwind 4 app copied in (source only, fresh history). Renamed package to `firstcontact-webapp`; set real `metadata` title/description; cleaned the merge-conflicted README; typed the news pages' article param (`app/news/types.ts`) so the target lints clean.
