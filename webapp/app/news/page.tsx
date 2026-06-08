@@ -17,11 +17,11 @@ export default async function NewsPage() {
 
       {/* Category Navigation */}
       <nav style={{ marginBottom: 30, display: "flex", gap: 20 }}>
-        <Link href="/news/health" style={{ fontWeight: "bold" }}>
-          Health
+        <Link href="/news/technology" style={{ fontWeight: "bold" }}>
+          Technology
         </Link>
-        <Link href="/news/economy" style={{ fontWeight: "bold" }}>
-          Economy
+        <Link href="/news/science" style={{ fontWeight: "bold" }}>
+          Science
         </Link>
       </nav>
 

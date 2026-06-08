@@ -1,23 +1,23 @@
 import TTSButton from "../TTSButton";
 import type { Article } from "../types";
 
-async function getEconomyNews() {
+async function getTechnologyNews() {
   const apiKey = process.env.GNEWS_API_KEY;
 
   const res = await fetch(
-    `https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us&apikey=${apiKey}`,
+    `https://gnews.io/api/v4/top-headlines?category=technology&lang=en&country=us&apikey=${apiKey}`,
     { cache: "no-store" }
   );
 
   return res.json();
 }
 
-export default async function EconomyNewsPage() {
-  const data = await getEconomyNews();
+export default async function TechnologyNewsPage() {
+  const data = await getTechnologyNews();
 
   return (
     <div style={{ padding: 40, maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ marginBottom: 20 }}>Economy News</h1>
+      <h1 style={{ marginBottom: 20 }}>Technology News</h1>
 
       {data.articles?.length > 0 ? (
         data.articles.map((article: Article, index: number) => (
@@ -57,7 +57,7 @@ export default async function EconomyNewsPage() {
           </div>
         ))
       ) : (
-        <p>No economy articles found.</p>
+        <p>No technology articles found.</p>
       )}
     </div>
   );

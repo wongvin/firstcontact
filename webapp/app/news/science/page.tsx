@@ -1,23 +1,23 @@
 import TTSButton from "../TTSButton";
 import type { Article } from "../types";
 
-async function getHealthNews() {
+async function getScienceNews() {
   const apiKey = process.env.GNEWS_API_KEY;
 
   const res = await fetch(
-    `https://gnews.io/api/v4/top-headlines?category=health&lang=en&country=us&apikey=${apiKey}`,
+    `https://gnews.io/api/v4/top-headlines?category=science&lang=en&country=us&apikey=${apiKey}`,
     { cache: "no-store" }
   );
 
   return res.json();
 }
 
-export default async function HealthNewsPage() {
-  const data = await getHealthNews();
+export default async function ScienceNewsPage() {
+  const data = await getScienceNews();
 
   return (
     <div style={{ padding: 40, maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ marginBottom: 20 }}>Health News</h1>
+      <h1 style={{ marginBottom: 20 }}>Science News</h1>
 
       {data.articles?.length > 0 ? (
         data.articles.map((article: Article, index: number) => (
@@ -57,7 +57,7 @@ export default async function HealthNewsPage() {
           </div>
         ))
       ) : (
-        <p>No health articles found.</p>
+        <p>No science articles found.</p>
       )}
     </div>
   );
