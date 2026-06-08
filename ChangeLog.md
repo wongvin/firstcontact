@@ -2,6 +2,12 @@
 
 ## 2026-06-07
 
+### feat: TTS button pause/resume + hold-to-restart (issue #94)
+
+- `webapp/app/news/TTSButton.tsx`: rewrote the single-action "Read Aloud" button into a play/pause/resume control with a hold-to-restart gesture. State machine: **idle** (`🔊 Read Aloud`, click → speak from start) → **playing** (`⏸️ Pause`, click → `speechSynthesis.pause()`) → **paused** (`🔊 Read Aloud`, click → `speechSynthesis.resume()`). A long-press (~500ms `HOLD_MS`) from any state restarts from the beginning (`cancel` + `speak`); the click that follows a hold is suppressed via `heldRef`.
+- Uses pointer events (`onPointerDown`/`Up`/`Leave`) for the hold timer; `userSelect: none` + `touchAction: manipulation` + `onContextMenu` preventDefault to keep long-press clean on touch. Detaches utterance handlers on restart/unmount so a `cancel()` can't `setState` on a stale/unmounted instance; starting one button cancels any other so only one reads at a time.
+- Verified: `npm run lint` + `npm run build` clean; `/news` renders 10 buttons at initial `Read Aloud` state. Click/hold/audio transitions require manual browser verification (SpeechSynthesis is unavailable headless).
+
 ### feat: Read Aloud buttons on the Latest News page (issue #92)
 
 - `webapp/app/news/page.tsx`: imported `TTSButton` and rendered `<TTSButton text={`${article.title}. ${article.description}`} />` after each article's "Read more" link, matching the `/news/technology` and `/news/science` pages. The general `/news` feed previously had no TTS button.
