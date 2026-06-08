@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-06-07
+
+### feat: migrate web to a Vercel-hosted Next.js app (`webapp/`, issue #88)
+
+- New top-level `webapp/` target: the `news-voice` Next.js 16 / React 19 / Tailwind 4 app copied in (source only, fresh history). Renamed package to `firstcontact-webapp`; set real `metadata` title/description; cleaned the merge-conflicted README; typed the news pages' article param (`app/news/types.ts`) so the target lints clean.
+- `webapp/app/page.tsx`: the former static `web/index.html` homepage ported 1:1 into a `"use client"` component — hero + dummyjson quote, 30-day-summary panel (`localhost:8001` + 24h `localStorage` cache + unreachable fallback), changes-this-week panel (GitHub closed-issues REST, PRs filtered), tap-to-cycle (`VIEW_COUNT=3`) and panel height-lock, plus a new "Latest News →" link to `/news`. Styles in `app/page.module.css` (scoped so `/news` keeps its look).
+- Tool pages (`digikey-search.html`, `mouser-search.html`, `transcripts-viewer.html`) served verbatim from `webapp/public/`.
+- `api/server/main.py`: CORS now allows `http://localhost:3000` and `https://*.vercel.app` (`allow_origin_regex`); docstring frontend paths updated `web/*` → `webapp/...`.
+- Retired GitHub Pages: deleted `.github/workflows/pages.yml` and the old `web/` directory; moved `web/TEST-PLAN.md` → `webapp/TEST-PLAN.md`.
+- Docs: root `CLAUDE.md` targets list (`web/` → `webapp/`, Vercel), new `webapp/CLAUDE.md`, `api/server/README.md` frontend + CORS sections.
+- News headlines still fetched server-side directly from `gnews.io` (`GNEWS_API_KEY`) — not through the local backend. Tagged `pre-vercel-migration` on `main` as a rollback point before the change.
+
+### fix: tool-page Home links target the Next.js root (issue #88)
+
+- `webapp/public/{digikey-search,mouser-search,transcripts-viewer}.html`: the `← Home` link pointed at `index.html` (correct under the old GitHub Pages flat site, broken under the Next.js app where the homepage is the root route). Changed `href="index.html"` → `href="/"`. Deployed to Vercel production and verified all three resolve to `/`.
+
 ## 2026-06-06
 
 ### feat: collapse multi-line user prompts to first line on the prompt-line (issue #85)

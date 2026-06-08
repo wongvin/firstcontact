@@ -2,11 +2,11 @@
 
 One process, one port, one .env (DigiKey + Mouser + Gemini credentials), one CORS middleware block.
 
-Frontends:
-- web/digikey-search.html      → GET /digikey/pricing
-- web/mouser-search.html       → GET /mouser/pricing
-- web/transcripts-viewer.html  → GET /claudecode/timeline
-- web/index.html               → GET /summary/30days
+Frontends (served by the Vercel-hosted Next.js app under webapp/):
+- webapp/public/digikey-search.html      → GET /digikey/pricing
+- webapp/public/mouser-search.html       → GET /mouser/pricing
+- webapp/public/transcripts-viewer.html  → GET /claudecode/timeline
+- webapp/app/page.tsx (homepage)         → GET /summary/30days
 """
 
 from __future__ import annotations
@@ -28,10 +28,14 @@ app = FastAPI(title="Part-pricing proxy + Claude Code transcript viewer + 30-day
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:3000",  # Next.js dev server (webapp)
         "http://localhost:5500",
         "http://localhost:8080",
-        "https://wongvin.github.io",
+        "https://wongvin.github.io",  # legacy GH Pages origin (kept harmless)
     ],
+    # Vercel production + preview deploys (e.g. https://<project>.vercel.app,
+    # https://<project>-<hash>-<scope>.vercel.app).
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_methods=["GET"],
     allow_headers=["*"],
 )
