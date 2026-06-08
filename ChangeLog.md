@@ -2,6 +2,11 @@
 
 ## 2026-06-07
 
+### feat: Read Aloud buttons on the Latest News page (issue #92)
+
+- `webapp/app/news/page.tsx`: imported `TTSButton` and rendered `<TTSButton text={`${article.title}. ${article.description}`} />` after each article's "Read more" link, matching the `/news/technology` and `/news/science` pages. The general `/news` feed previously had no TTS button.
+- Verified: `npm run lint` + `npm run build` clean; `/news` renders one Read Aloud button per article (10/10 with a live `GNEWS_API_KEY`).
+
 ### feat: switch news topics to Technology and Science (issue #90)
 
 - Renamed the two category routes: `webapp/app/news/economy/` → `technology/` and `webapp/app/news/health/` → `science/` (via `git mv`).

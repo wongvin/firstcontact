@@ -1,4 +1,5 @@
 import Link from "next/link";
+import TTSButton from "./TTSButton";
 import type { Article } from "./types";
 
 export default async function NewsPage() {
@@ -59,6 +60,8 @@ export default async function NewsPage() {
             >
               Read more →
             </a>
+
+            <TTSButton text={`${article.title}. ${article.description}`} />
           </div>
         ))
       ) : (
