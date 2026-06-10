@@ -2,6 +2,11 @@
 
 ## 2026-06-09
 
+### feat: drop redundant description from iOS article detail (issue #98 follow-up)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: removed the standalone `description` block from `articleDetailScreen` — the full body scraped from the linked URL already contains it, so showing the GNews `description` above it was redundant. The detail screen now flows title → image → full body. Simplified `truncatedContent`'s fallback to always show the "No further text available" message when there's no `content` (the previous `article.description == nil` guard only mattered while the description was rendered).
+- Verified: `xcodebuild` (simulator) succeeds; simulator screenshot of the detail screen confirms the description is gone and title + image + full body render correctly (verified via a temporary launch-env hook, removed before commit).
+
 ### feat: iOS full-text article detail from linked URL (issue #98)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the article detail screen (from #96) now fetches the **entire article body from the article's linked URL** instead of only GNews's ~160-char truncated `content`. New `ArticleTextState` (`loading`/`loaded`/`failed`) and `@State articleTextState`; a `.task(id: article.url)` on `articleDetailScreen` runs `loadFullText`, which fetches the page with a Safari-like `User-Agent` (15s timeout) and feeds the HTML to a pure-Swift readability heuristic.
