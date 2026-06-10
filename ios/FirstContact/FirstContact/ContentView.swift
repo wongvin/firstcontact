@@ -69,6 +69,14 @@ enum NewsState {
     case ready([Article])
 }
 
+// Full article body fetched from the article's linked URL. GNews only returns a
+// ~160-char truncated `content` field, so the detail screen scrapes the source page.
+enum ArticleTextState {
+    case loading
+    case loaded(String)
+    case failed
+}
+
 struct ContentView: View {
     @State private var quote: Quote?
     @State private var quoteError = false
@@ -82,6 +90,7 @@ struct ContentView: View {
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
     @State private var goingForward = true      // drives swipe transition direction
     @State private var detailArticle: Article?
+    @State private var articleTextState: ArticleTextState = .loading
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let summaryTTLHours = 24
@@ -437,21 +446,50 @@ struct ContentView: View {
                             .opacity(0.95)
                     }
 
-                    if let content = article.content, !content.isEmpty {
-                        Text(content)
-                            .font(.system(size: 16))
-                            .opacity(0.9)
-                    } else if article.description == nil {
-                        Text("No further text available for this article.")
-                            .font(.system(size: 15))
-                            .opacity(0.7)
-                    }
+                    articleBody(article)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
             }
         }
         .foregroundStyle(.white)
+        .task(id: article.url) { await loadFullText(article) }
+    }
+
+    // The article body: the full text scraped from article.url once it loads, with the
+    // truncated GNews `content` shown immediately as a placeholder and on failure.
+    @ViewBuilder
+    private func articleBody(_ article: Article) -> some View {
+        switch articleTextState {
+        case .loaded(let text):
+            Text(text)
+                .font(.system(size: 16))
+                .opacity(0.9)
+        case .loading:
+            truncatedContent(article)
+            HStack(spacing: 8) {
+                ProgressView().tint(.white)
+                Text("Loading full article\u{2026}")
+                    .font(.system(size: 14))
+                    .opacity(0.7)
+            }
+            .padding(.top, 4)
+        case .failed:
+            truncatedContent(article)
+        }
+    }
+
+    @ViewBuilder
+    private func truncatedContent(_ article: Article) -> some View {
+        if let content = article.content, !content.isEmpty {
+            Text(content)
+                .font(.system(size: 16))
+                .opacity(0.9)
+        } else if article.description == nil {
+            Text("No further text available for this article.")
+                .font(.system(size: 15))
+                .opacity(0.7)
+        }
     }
 
     private var newsStatusScreen: some View {
@@ -546,6 +584,126 @@ struct ContentView: View {
     private func gnewsAPIKey() -> String? {
         let key = GeneratedSecrets.gnewsAPIKey
         return key.isEmpty ? nil : key
+    }
+
+    // MARK: - Full article text (client-side scrape of article.url)
+
+    private func loadFullText(_ article: Article) async {
+        guard let urlString = article.url, let url = URL(string: urlString) else {
+            articleTextState = .failed
+            return
+        }
+        articleTextState = .loading
+        do {
+            var request = URLRequest(url: url, timeoutInterval: 15)
+            // Some sites serve a stripped page (or block) the default URLSession UA.
+            request.setValue(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+                forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let html = String(decoding: data, as: UTF8.self)
+            let text = Self.extractReadableText(from: html)
+            guard !text.isEmpty else { throw URLError(.cannotParseResponse) }
+            articleTextState = .loaded(text)
+        } catch {
+            articleTextState = .failed
+        }
+    }
+
+    // Heuristic readability extraction: strip non-content blocks, prefer the <article>
+    // region, then collect block-level text. Good across most news sites, not perfect.
+    static func extractReadableText(from html: String) -> String {
+        let stripped = removeBlocks(
+            html,
+            tags: ["script", "style", "head", "noscript", "svg",
+                   "header", "footer", "nav", "aside", "form", "figure", "button"])
+        // Prefer the first <article>…</article> region when the page has one.
+        let scope = captures(stripped, pattern: "<article\\b[^>]*>(.*?)</article>", group: 1).first ?? stripped
+        let paragraphs = captures(scope, pattern: "<(p|h1|h2|h3|li)\\b[^>]*>(.*?)</\\1>", group: 2)
+            .map { collapseWhitespace(decodeEntities(stripTags($0))) }
+            .filter { $0.count >= 40 }          // drop nav/ad/byline scraps
+            .filter { !looksLikeMarkup($0) }    // drop escaped-HTML/JSON blobs that survived stripping
+        if !paragraphs.isEmpty {
+            return paragraphs.joined(separator: "\n\n")
+        }
+        // Fallback: strip every tag from the scope and return whatever text remains.
+        return collapseWhitespace(decodeEntities(stripTags(scope)))
+    }
+
+    private static func removeBlocks(_ html: String, tags: [String]) -> String {
+        var s = html
+        for tag in tags {
+            s = replacingRegex(s, pattern: "<\(tag)\\b[^>]*>.*?</\(tag)>", with: " ")
+        }
+        return s
+    }
+
+    private static func stripTags(_ s: String) -> String {
+        replacingRegex(s, pattern: "<[^>]+>", with: " ")
+    }
+
+    // True when a candidate paragraph still carries markup/JSON signatures (some pages
+    // embed escaped HTML inside attributes that survives tag stripping). Clean prose never does.
+    private static func looksLikeMarkup(_ s: String) -> Bool {
+        s.contains("href=") || s.contains("src=") || s.contains("</") || s.contains("/>")
+    }
+
+    private static func collapseWhitespace(_ s: String) -> String {
+        replacingRegex(s, pattern: "\\s+", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func decodeEntities(_ s: String) -> String {
+        var t = s
+        let named: [String: String] = [
+            "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+            "&#39;": "'", "&apos;": "'", "&nbsp;": " ",
+            "&mdash;": "\u{2014}", "&ndash;": "\u{2013}", "&hellip;": "\u{2026}",
+            "&rsquo;": "\u{2019}", "&lsquo;": "\u{2018}",
+            "&ldquo;": "\u{201C}", "&rdquo;": "\u{201D}"
+        ]
+        for (k, v) in named { t = t.replacingOccurrences(of: k, with: v) }
+        return decodeNumericEntities(t)
+    }
+
+    // &#160; (decimal) and &#xA0; (hex) numeric character references.
+    private static func decodeNumericEntities(_ s: String) -> String {
+        guard let re = try? NSRegularExpression(pattern: "&#(x?)([0-9A-Fa-f]+);") else { return s }
+        let ns = s as NSString
+        var result = ""
+        var last = 0
+        re.enumerateMatches(in: s, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
+            guard let match = match else { return }
+            result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+            let isHex = ns.substring(with: match.range(at: 1)) == "x"
+            let digits = ns.substring(with: match.range(at: 2))
+            if let code = UInt32(digits, radix: isHex ? 16 : 10), let scalar = Unicode.Scalar(code) {
+                result += String(scalar)
+            }
+            last = match.range.location + match.range.length
+        }
+        result += ns.substring(with: NSRange(location: last, length: ns.length - last))
+        return result
+    }
+
+    private static func captures(_ s: String, pattern: String, group: Int) -> [String] {
+        guard let re = try? NSRegularExpression(
+            pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return [] }
+        let range = NSRange(s.startIndex..., in: s)
+        return re.matches(in: s, range: range).compactMap { match in
+            guard match.numberOfRanges > group, let r = Range(match.range(at: group), in: s) else { return nil }
+            return String(s[r])
+        }
+    }
+
+    private static func replacingRegex(_ s: String, pattern: String, with replacement: String) -> String {
+        guard let re = try? NSRegularExpression(
+            pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return s }
+        let range = NSRange(s.startIndex..., in: s)
+        return re.stringByReplacingMatches(in: s, range: range, withTemplate: replacement)
     }
 
     private func loadQuote() async {
