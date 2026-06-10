@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-06-09
+
+### feat: iOS full-text article detail from linked URL (issue #98)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the article detail screen (from #96) now fetches the **entire article body from the article's linked URL** instead of only GNews's ~160-char truncated `content`. New `ArticleTextState` (`loading`/`loaded`/`failed`) and `@State articleTextState`; a `.task(id: article.url)` on `articleDetailScreen` runs `loadFullText`, which fetches the page with a Safari-like `User-Agent` (15s timeout) and feeds the HTML to a pure-Swift readability heuristic.
+- `extractReadableText(from:)` strips non-content blocks (`script`/`style`/`head`/`nav`/`header`/`footer`/`aside`/`form`/`figure`/…), prefers the first `<article>…</article>` region, collects `<p>/<h1-3>/<li>` text, decodes HTML entities (named + numeric `&#NN;`/`&#xNN;`), drops sub-40-char scraps and any fragment still carrying markup signatures (`href=`/`src=`/`</`/`/>`), and joins surviving paragraphs. All regex via `NSRegularExpression` (case-insensitive, dot-matches-newlines).
+- Detail body now switches on `articleTextState`: shows the truncated `content` immediately while loading (plus a "Loading full article…" spinner), swaps to the full extracted text on success, and falls back to the truncated `content` (else the existing "no further text" message) on failure. Title/image/description unchanged.
+- Verified: `xcodebuild` (simulator) succeeds; the extraction was validated standalone against real article pages (clean multi-paragraph body; non-200 → graceful fallback); a simulator screenshot of the detail screen confirms title + image + description + full scrollable body render correctly (verified via a temporary launch-env hook, since there's no reliable CLI swipe injection — hook removed before commit).
+
 ## 2026-06-07
 
 ### feat: iOS swipe-driven news reader (issue #96)
