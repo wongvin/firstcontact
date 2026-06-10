@@ -440,12 +440,6 @@ struct ContentView: View {
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                    if let description = article.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 17, weight: .semibold))
-                            .opacity(0.95)
-                    }
-
                     articleBody(article)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -485,7 +479,7 @@ struct ContentView: View {
             Text(content)
                 .font(.system(size: 16))
                 .opacity(0.9)
-        } else if article.description == nil {
+        } else {
             Text("No further text available for this article.")
                 .font(.system(size: 15))
                 .opacity(0.7)
