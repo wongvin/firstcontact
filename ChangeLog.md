@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-10
+
+### fix: pin iOS article detail column width (issue #101)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: fixed the article detail screen clipping its left margin and bleeding the image full-width on narrow devices (iPhone SE) for certain articles. Cause: a long unbreakable token in the extracted body (e.g. a bare URL) that the device's iOS won't wrap widened the leading-aligned content column past the screen, dragging the `.frame(maxWidth: .infinity)` image full-bleed with it. Wrapped the detail `ScrollView` in a `GeometryReader` and pinned the content column with `.frame(width: geo.size.width, alignment: .leading)` (padding applied inside the pin) so no body content can exceed the screen width; long tokens now wrap within the column. Added `.fixedSize(horizontal: false, vertical: true)` to the title and body text as belt-and-suspenders against horizontal expansion.
+- Also fixed the detail image bleeding into the right margin: a `scaledToFill` image with `.frame(maxWidth: .infinity)` applied directly to it overflowed its column on the trailing edge. Re-anchored the image on a `Color.clear` box (`.frame(maxWidth: .infinity).frame(height: 200)`) with the image as a clipped `.overlay`, so the box defines the exact column width and the image can't exceed it — the image now keeps equal 20pt margins on both sides.
+- Verified: `xcodebuild` (simulator) succeeds; reproduced and confirmed the fix on an iPhone SE (3rd gen) simulator with a synthetic long-token body — title, inset rounded image, and wrapped body all keep their 20pt side margins. (iOS 26.4 auto-breaks long tokens so the original overflow only shows on the older device OS; the width pin makes overflow impossible regardless of OS wrapping behavior.)
+
 ## 2026-06-09
 
 ### feat: drop redundant description from iOS article detail (issue #98 follow-up)
