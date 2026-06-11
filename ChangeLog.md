@@ -2,6 +2,12 @@
 
 ## 2026-06-10
 
+### feat: cross-axis swipe shows Gemini key term for article (issue #111)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: a swipe on the axis opposite to navigation (horizontal in portrait, vertical in landscape) on an article now opens a new `keywordScreen` showing a Gemini-extracted key word/term for that article, centered, with a top-left exit arrow. New `KeywordState` (`loading`/`loaded`/`failed`/`missingKey`), `keywordArticle`/`keywordState` state, and a `currentArticle` helper.
+- Refactored `swipeGesture` to route by axis: a swipe whose dominant axis matches the nav axis (`horizontal == isLandscape`) navigates as before; the cross-axis swipe (>50pt) opens the key-term screen for the current article (no-op on home/status). `loadKeyword`/`generateKeyword` call Gemini (`gemini-2.5-flash-lite`, temp 0.2) with a dedicated `keywordSystemPrompt` using only the headline + description; the back chevron mirrors the detail screen's dismiss.
+- Verified: `xcodebuild` (simulator) succeeds; the keyword prompt was validated against the Gemini API (e.g. "background apps", "Whale graveyard", "Knicks vs. Spurs"); an iPhone SE (3rd gen) screenshot shows the real Gemini term ("background apps") centered with the exit arrow. The cross-axis gesture itself was verified by code review (gestures aren't capturable in a still).
+
 ### feat: swipe to dismiss full-text detail screen (issue #109)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: added a horizontal swipe (left or right) on `articleDetailScreen` that dismisses back to the pager — same as the back chevron (`withAnimation { detailArticle = nil }`). Implemented as a `.simultaneousGesture(DragGesture(minimumDistance: 20))` that only acts on horizontal-dominant swipes (`abs(width) > abs(height)` and `> 50pt`), so the body's vertical scrolling is unaffected.
