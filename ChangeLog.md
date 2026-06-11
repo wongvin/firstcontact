@@ -2,6 +2,12 @@
 
 ## 2026-06-10
 
+### feat: landscape layout + swipe mapping for iOS article pager (issue #105)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: added landscape-specific behavior to the swipe-pager article screen. New `@Environment(\.verticalSizeClass)` + `isLandscape` (compact height = landscape on iPhone). In landscape, `articleScreen` lays the image on the left half (`geo.size.width * 0.5`, full height) with the headline/description on the right half; portrait keeps the image across the top 35% with text below. Extracted the shared headline+description into an `articleText(_:)` helper.
+- Remapped pager navigation by orientation: landscape swipes on the horizontal axis (swipe-left = forward, mirroring portrait's swipe-up; swipe-right = back), portrait stays vertical. The page-transition slide also follows the axis (horizontal move in landscape) so a horizontal swipe doesn't animate vertically. The gesture is shared by the whole pager, so home screens navigate the same way in landscape.
+- Verified: `xcodebuild` (simulator) succeeds; confirmed the landscape layout on an iPhone SE (3rd gen) simulator (temporarily forced landscape-only to launch rotated) — image fills the left half, headline + description fill the right half.
+
 ### feat: shrink iOS article screen image to top 35% (issue #103)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: on the swipe-pager `articleScreen`, changed the headline image height from `geo.size.height / 2` (top 50%) to `geo.size.height * 0.35` (top 35%), giving the headline + description more room above the fold. Detail-screen image (fixed 200pt) unchanged.
