@@ -91,6 +91,9 @@ struct ContentView: View {
     @State private var goingForward = true      // drives swipe transition direction
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
+    // On iPhone a compact vertical size class means landscape orientation.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var isLandscape: Bool { verticalSizeClass == .compact }
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let summaryTTLHours = 24
@@ -141,8 +144,12 @@ struct ContentView: View {
             .id(screenIndex)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .transition(.asymmetric(
-                insertion: .move(edge: goingForward ? .bottom : .top),
-                removal: .move(edge: goingForward ? .top : .bottom)
+                insertion: .move(edge: isLandscape
+                    ? (goingForward ? .trailing : .leading)
+                    : (goingForward ? .bottom : .top)),
+                removal: .move(edge: isLandscape
+                    ? (goingForward ? .leading : .trailing)
+                    : (goingForward ? .top : .bottom))
             ))
             .contentShape(Rectangle())
             .gesture(swipeGesture)
@@ -195,13 +202,22 @@ struct ContentView: View {
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 20)
             .onEnded { value in
-                let dy = value.translation.height
                 let dx = value.translation.width
-                guard abs(dy) > abs(dx), abs(dy) > 50 else { return }
+                let dy = value.translation.height
                 let total = totalScreens
                 guard total > 1 else { return }
+                // Landscape navigates on the horizontal axis (swipe-left = forward,
+                // mirroring portrait's swipe-up); portrait stays on the vertical axis.
+                let forward: Bool
+                if isLandscape {
+                    guard abs(dx) > abs(dy), abs(dx) > 50 else { return }
+                    forward = dx < 0
+                } else {
+                    guard abs(dy) > abs(dx), abs(dy) > 50 else { return }
+                    forward = dy < 0
+                }
                 withAnimation(.easeInOut(duration: 0.3)) {
-                    if dy < 0 {
+                    if forward {
                         goingForward = true
                         screenIndex = (screenIndex + 1) % total
                     } else {
@@ -387,31 +403,50 @@ struct ContentView: View {
 
     private func articleScreen(_ article: Article) -> some View {
         GeometryReader { geo in
-            VStack(spacing: 0) {
-                articleImage(article)
-                    .frame(width: geo.size.width, height: geo.size.height / 2)
-                    .clipped()
+            if isLandscape {
+                // Landscape: image fills the left half, text the right half.
+                HStack(spacing: 0) {
+                    articleImage(article)
+                        .frame(width: geo.size.width * 0.5, height: geo.size.height)
+                        .clipped()
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(article.title)
-                        .font(.system(size: 24, weight: .bold))
-                        .multilineTextAlignment(.leading)
-                    if let description = article.description, !description.isEmpty {
-                        Text(description)
-                            .font(.system(size: 16))
-                            .opacity(0.9)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Spacer(minLength: 0)
+                    articleText(article)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(20)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(20)
+            } else {
+                // Portrait: image across the top 35%, text below.
+                VStack(spacing: 0) {
+                    articleImage(article)
+                        .frame(width: geo.size.width, height: geo.size.height * 0.35)
+                        .clipped()
+
+                    articleText(article)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(20)
+                }
             }
         }
         .ignoresSafeArea(edges: .top)
         .foregroundStyle(.white)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation { detailArticle = article } }
+    }
+
+    // Headline + description block shared by the portrait and landscape article layouts.
+    private func articleText(_ article: Article) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(article.title)
+                .font(.system(size: 24, weight: .bold))
+                .multilineTextAlignment(.leading)
+            if let description = article.description, !description.isEmpty {
+                Text(description)
+                    .font(.system(size: 16))
+                    .opacity(0.9)
+                    .multilineTextAlignment(.leading)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private func articleDetailScreen(_ article: Article) -> some View {
