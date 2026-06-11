@@ -88,7 +88,6 @@ struct ContentView: View {
     @State private var summary30dView = 0
     @State private var newsState: NewsState = .loading
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
-    @State private var goingForward = true      // drives swipe transition direction
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
     // On iPhone a compact vertical size class means landscape orientation.
@@ -143,14 +142,6 @@ struct ContentView: View {
         currentScreen
             .id(screenIndex)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.asymmetric(
-                insertion: .move(edge: isLandscape
-                    ? (goingForward ? .trailing : .leading)
-                    : (goingForward ? .bottom : .top)),
-                removal: .move(edge: isLandscape
-                    ? (goingForward ? .leading : .trailing)
-                    : (goingForward ? .top : .bottom))
-            ))
             .contentShape(Rectangle())
             .gesture(swipeGesture)
     }
@@ -216,14 +207,11 @@ struct ContentView: View {
                     guard abs(dy) > abs(dx), abs(dy) > 50 else { return }
                     forward = dy < 0
                 }
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    if forward {
-                        goingForward = true
-                        screenIndex = (screenIndex + 1) % total
-                    } else {
-                        goingForward = false
-                        screenIndex = (screenIndex - 1 + total) % total
-                    }
+                // No animation: pages swap instantly (no slide or fade).
+                if forward {
+                    screenIndex = (screenIndex + 1) % total
+                } else {
+                    screenIndex = (screenIndex - 1 + total) % total
                 }
             }
     }

@@ -2,6 +2,11 @@
 
 ## 2026-06-10
 
+### feat: remove swipe-pager transition animation (issue #107)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: removed the slide animation on the swipe pager so the article screen's image/title/description no longer animate when paging — content swaps instantly (no slide or fade). Dropped the `.transition(.asymmetric(.move…))` on `currentScreen` and the `withAnimation(.easeInOut)` wrapper around the `screenIndex` change in `swipeGesture`, and removed the now-dead `goingForward` state. Applies to the whole pager (home screens swap instantly too). Swipe navigation (next/prev, wrap-around, portrait + landscape axes) is unchanged; the tap-to-open detail-screen slide is unaffected.
+- Verified: `xcodebuild` (simulator) succeeds; iPhone SE (3rd gen) screenshot confirms the article screen still renders correctly (animation absence verified by code review — not capturable in a still).
+
 ### feat: landscape layout + swipe mapping for iOS article pager (issue #105)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: added landscape-specific behavior to the swipe-pager article screen. New `@Environment(\.verticalSizeClass)` + `isLandscape` (compact height = landscape on iPhone). In landscape, `articleScreen` lays the image on the left half (`geo.size.width * 0.5`, full height) with the headline/description on the right half; portrait keeps the image across the top 35% with text below. Extracted the shared headline+description into an `articleText(_:)` helper.
