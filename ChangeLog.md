@@ -2,6 +2,11 @@
 
 ## 2026-06-10
 
+### feat: swipe to dismiss full-text detail screen (issue #109)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: added a horizontal swipe (left or right) on `articleDetailScreen` that dismisses back to the pager — same as the back chevron (`withAnimation { detailArticle = nil }`). Implemented as a `.simultaneousGesture(DragGesture(minimumDistance: 20))` that only acts on horizontal-dominant swipes (`abs(width) > abs(height)` and `> 50pt`), so the body's vertical scrolling is unaffected.
+- Verified: `xcodebuild` (simulator) succeeds; iPhone SE (3rd gen) screenshot confirms the detail screen still renders/scrolls (the swipe-dismiss gesture verified by code review — not capturable in a still).
+
 ### feat: remove swipe-pager transition animation (issue #107)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: removed the slide animation on the swipe pager so the article screen's image/title/description no longer animate when paging — content swaps instantly (no slide or fade). Dropped the `.transition(.asymmetric(.move…))` on `currentScreen` and the `withAnimation(.easeInOut)` wrapper around the `screenIndex` change in `swipeGesture`, and removed the now-dead `goingForward` state. Applies to the whole pager (home screens swap instantly too). Swipe navigation (next/prev, wrap-around, portrait + landscape axes) is unchanged; the tap-to-open detail-screen slide is unaffected.

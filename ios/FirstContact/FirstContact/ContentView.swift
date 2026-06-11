@@ -483,6 +483,18 @@ struct ContentView: View {
             }
         }
         .foregroundStyle(.white)
+        // A horizontal swipe (either direction) dismisses, like the back chevron.
+        // simultaneousGesture so the body's vertical scrolling still works; we only
+        // act on horizontal-dominant swipes.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    if abs(value.translation.width) > abs(value.translation.height),
+                       abs(value.translation.width) > 50 {
+                        withAnimation { detailArticle = nil }
+                    }
+                }
+        )
         .task(id: article.url) { await loadFullText(article) }
     }
 
