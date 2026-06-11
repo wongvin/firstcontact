@@ -429,21 +429,34 @@ struct ContentView: View {
             }
             .padding(.horizontal, 12)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(article.title)
-                        .font(.system(size: 26, weight: .bold))
+            // GeometryReader pins the content column to the screen width so a long
+            // unbreakable token in the body (e.g. a bare URL) can't widen the column
+            // past the screen — which previously clipped the left margin and pushed the
+            // image full-bleed on narrower devices. The hard `.frame(width:)` forces the
+            // body text to wrap within the column instead of overflowing it.
+            GeometryReader { geo in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(article.title)
+                            .font(.system(size: 26, weight: .bold))
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    articleImage(article)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 200)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        // Color.clear anchors the layout to exactly the column width; the
+                        // scaledToFill image rides in a clipped overlay so it can't overflow
+                        // the right margin the way `.frame(maxWidth: .infinity)` applied
+                        // directly to the overflowing image did.
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 200)
+                            .overlay { articleImage(article) }
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                    articleBody(article)
+                        articleBody(article)
+                    }
+                    .padding(20)
+                    .frame(width: geo.size.width, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
             }
         }
         .foregroundStyle(.white)
@@ -459,6 +472,7 @@ struct ContentView: View {
             Text(text)
                 .font(.system(size: 16))
                 .opacity(0.9)
+                .fixedSize(horizontal: false, vertical: true)
         case .loading:
             truncatedContent(article)
             HStack(spacing: 8) {
@@ -479,6 +493,7 @@ struct ContentView: View {
             Text(content)
                 .font(.system(size: 16))
                 .opacity(0.9)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("No further text available for this article.")
                 .font(.system(size: 15))
