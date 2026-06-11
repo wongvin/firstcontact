@@ -77,6 +77,14 @@ enum ArticleTextState {
     case failed
 }
 
+// Gemini-extracted key word/term for an article (from headline + description only).
+enum KeywordState {
+    case loading
+    case loaded(String)
+    case failed
+    case missingKey
+}
+
 struct ContentView: View {
     @State private var quote: Quote?
     @State private var quoteError = false
@@ -90,6 +98,8 @@ struct ContentView: View {
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
+    @State private var keywordArticle: Article?
+    @State private var keywordState: KeywordState = .loading
     // On iPhone a compact vertical size class means landscape orientation.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     private var isLandscape: Bool { verticalSizeClass == .compact }
@@ -110,6 +120,11 @@ struct ContentView: View {
         No bullet points, no emojis, no markdown, no headings. \
         Plain prose only. Do not include preamble like 'Here is the summary:'.
         """
+    private static let keywordSystemPrompt = """
+        You extract the single most important key word or short term (1-4 words) from a \
+        news headline and description. Respond with ONLY that word or term — no punctuation \
+        wrapping, no quotes, no explanation, no preamble. Use only the provided headline and description.
+        """
 
     var body: some View {
         ZStack {
@@ -125,6 +140,9 @@ struct ContentView: View {
 
             if let article = detailArticle {
                 articleDetailScreen(article)
+                    .transition(.move(edge: .trailing))
+            } else if let article = keywordArticle {
+                keywordScreen(article)
                     .transition(.move(edge: .trailing))
             } else {
                 pager
@@ -190,28 +208,37 @@ struct ContentView: View {
         return newsCount + 1
     }
 
+    // The article currently shown by the pager, or nil on the home/status screens.
+    private var currentArticle: Article? {
+        guard screenIndex >= 1, case .ready(let articles) = newsState,
+              screenIndex - 1 < articles.count else { return nil }
+        return articles[screenIndex - 1]
+    }
+
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 20)
             .onEnded { value in
                 let dx = value.translation.width
                 let dy = value.translation.height
-                let total = totalScreens
-                guard total > 1 else { return }
-                // Landscape navigates on the horizontal axis (swipe-left = forward,
-                // mirroring portrait's swipe-up); portrait stays on the vertical axis.
-                let forward: Bool
-                if isLandscape {
-                    guard abs(dx) > abs(dy), abs(dx) > 50 else { return }
-                    forward = dx < 0
+                let horizontal = abs(dx) > abs(dy)
+                // Navigation runs on the horizontal axis in landscape, vertical in portrait.
+                if horizontal == isLandscape {
+                    let primary = isLandscape ? dx : dy
+                    guard abs(primary) > 50 else { return }
+                    let total = totalScreens
+                    guard total > 1 else { return }
+                    // No animation: pages swap instantly (no slide or fade).
+                    if primary < 0 {
+                        screenIndex = (screenIndex + 1) % total
+                    } else {
+                        screenIndex = (screenIndex - 1 + total) % total
+                    }
                 } else {
-                    guard abs(dy) > abs(dx), abs(dy) > 50 else { return }
-                    forward = dy < 0
-                }
-                // No animation: pages swap instantly (no slide or fade).
-                if forward {
-                    screenIndex = (screenIndex + 1) % total
-                } else {
-                    screenIndex = (screenIndex - 1 + total) % total
+                    // Cross-axis swipe (horizontal in portrait, vertical in landscape) on an
+                    // article opens its Gemini key-term screen; a no-op elsewhere.
+                    let cross = isLandscape ? dy : dx
+                    guard abs(cross) > 50, let article = currentArticle else { return }
+                    withAnimation { keywordArticle = article }
                 }
             }
     }
@@ -496,6 +523,59 @@ struct ContentView: View {
                 }
         )
         .task(id: article.url) { await loadFullText(article) }
+    }
+
+    // Reached by a cross-axis swipe on an article: shows a Gemini-extracted key term
+    // (from the headline + description) centered, with a top-left exit arrow.
+    private func keywordScreen(_ article: Article) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    withAnimation { keywordArticle = nil }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Back to article")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+
+            Spacer()
+            keywordContent
+                .padding(.horizontal, 24)
+            Spacer()
+        }
+        .foregroundStyle(.white)
+        .task(id: article.title) { await loadKeyword(article) }
+    }
+
+    @ViewBuilder
+    private var keywordContent: some View {
+        switch keywordState {
+        case .loading:
+            VStack(spacing: 12) {
+                ProgressView().tint(.white)
+                Text("Finding the key term\u{2026}")
+                    .font(.system(size: 15))
+                    .opacity(0.7)
+            }
+        case .loaded(let term):
+            Text(term)
+                .font(.system(size: 40, weight: .bold))
+                .multilineTextAlignment(.center)
+        case .failed:
+            Text("Couldn't extract a key term.")
+                .font(.system(size: 16))
+                .opacity(0.8)
+                .multilineTextAlignment(.center)
+        case .missingKey:
+            Text("Set GEMINI_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
+                .font(.system(size: 15))
+                .opacity(0.85)
+                .multilineTextAlignment(.center)
+        }
     }
 
     // The article body: the full text scraped from article.url once it loads, with the
@@ -921,6 +1001,36 @@ struct ContentView: View {
             throw URLError(.cannotParseResponse)
         }
         return text
+    }
+
+    // MARK: - Key term (Gemini, from headline + description)
+
+    private func loadKeyword(_ article: Article) async {
+        keywordState = .loading
+        guard let apiKey = geminiAPIKey() else {
+            keywordState = .missingKey
+            return
+        }
+        let description = article.description ?? ""
+        let input = "Headline: \(article.title)\nDescription: \(description)"
+        do {
+            let term = try await generateKeyword(apiKey: apiKey, input: input)
+            keywordState = term.isEmpty ? .failed : .loaded(term)
+        } catch {
+            keywordState = .failed
+        }
+    }
+
+    private func generateKeyword(apiKey: String, input: String) async throws -> String {
+        let config = GenerationConfig(temperature: 0.2)
+        let model = GenerativeModel(
+            name: Self.geminiModel,
+            apiKey: apiKey,
+            generationConfig: config,
+            systemInstruction: ModelContent(parts: [.text(Self.keywordSystemPrompt)])
+        )
+        let response = try await model.generateContent(input)
+        return (response.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func wordCount(_ text: String) -> Int {
