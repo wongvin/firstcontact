@@ -2,6 +2,11 @@
 
 ## 2026-06-10
 
+### feat: shrink iOS article screen image to top 35% (issue #103)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: on the swipe-pager `articleScreen`, changed the headline image height from `geo.size.height / 2` (top 50%) to `geo.size.height * 0.35` (top 35%), giving the headline + description more room above the fold. Detail-screen image (fixed 200pt) unchanged.
+- Verified: `xcodebuild` (simulator) succeeds; iPhone SE (3rd gen) simulator screenshot confirms the image occupies the top ~35% with the headline/description filling the space below.
+
 ### fix: pin iOS article detail column width (issue #101)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: fixed the article detail screen clipping its left margin and bleeding the image full-width on narrow devices (iPhone SE) for certain articles. Cause: a long unbreakable token in the extracted body (e.g. a bare URL) that the device's iOS won't wrap widened the leading-aligned content column past the screen, dragging the `.frame(maxWidth: .infinity)` image full-bleed with it. Wrapped the detail `ScrollView` in a `GeometryReader` and pinned the content column with `.frame(width: geo.size.width, alignment: .leading)` (padding applied inside the pin) so no body content can exceed the screen width; long tokens now wrap within the column. Added `.fixedSize(horizontal: false, vertical: true)` to the title and body text as belt-and-suspenders against horizontal expansion.

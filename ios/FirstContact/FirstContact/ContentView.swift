@@ -389,7 +389,7 @@ struct ContentView: View {
         GeometryReader { geo in
             VStack(spacing: 0) {
                 articleImage(article)
-                    .frame(width: geo.size.width, height: geo.size.height / 2)
+                    .frame(width: geo.size.width, height: geo.size.height * 0.35)
                     .clipped()
 
                 VStack(alignment: .leading, spacing: 12) {
