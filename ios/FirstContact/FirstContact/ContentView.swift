@@ -42,6 +42,13 @@ enum SummaryState {
     case failedNoCache
 }
 
+// A single message typed in the long-press compose screen. Persisted to UserDefaults
+// so the thread survives app relaunches (same approach as CachedSummary).
+struct ComposeMessage: Codable, Identifiable {
+    let id: UUID
+    let text: String
+}
+
 // MARK: - News (gnews.io)
 
 struct Article: Codable, Identifiable {
@@ -100,11 +107,16 @@ struct ContentView: View {
     @State private var articleTextState: ArticleTextState = .loading
     @State private var keywordArticle: Article?
     @State private var keywordState: KeywordState = .loading
+    @State private var showCompose = false
+    @State private var messages: [ComposeMessage] = []
+    @State private var draft = ""
+    @FocusState private var composeFieldFocused: Bool
     // On iPhone a compact vertical size class means landscape orientation.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     private var isLandscape: Bool { verticalSizeClass == .compact }
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
+    private static let composeCacheKey = "firstcontact.compose.v1"
     private static let summaryTTLHours = 24
     private static let geminiModel = "gemini-2.5-flash-lite"
     private static let issueWindowDays = 30
@@ -138,20 +150,36 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            if let article = detailArticle {
-                articleDetailScreen(article)
-                    .transition(.move(edge: .trailing))
-            } else if let article = keywordArticle {
-                keywordScreen(article)
+            if showCompose {
+                composeScreen
                     .transition(.move(edge: .trailing))
             } else {
-                pager
+                Group {
+                    if let article = detailArticle {
+                        articleDetailScreen(article)
+                            .transition(.move(edge: .trailing))
+                    } else if let article = keywordArticle {
+                        keywordScreen(article)
+                            .transition(.move(edge: .trailing))
+                    } else {
+                        pager
+                    }
+                }
+                // Long-press on any non-compose screen opens the compose screen.
+                // simultaneousGesture coexists with the pager's drag and the panels'
+                // button taps; attaching it only here keeps the compose screen's own
+                // text-field long-press (native text selection) intact.
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.5)
+                        .onEnded { _ in withAnimation { showCompose = true } }
+                )
             }
         }
         .task { await loadQuote() }
         .task { await loadIssues() }
         .task { await loadSummary() }
         .task { await loadNews() }
+        .task { messages = loadComposeMessages() }
     }
 
     // Vertical swipe pager: home at index 0, news articles after it, wrapping in a
@@ -576,6 +604,93 @@ struct ContentView: View {
                 .opacity(0.85)
                 .multilineTextAlignment(.center)
         }
+    }
+
+    // MARK: - Compose screen (long-press)
+
+    // iMessage-style screen reached by long-pressing any other screen: a scrollable
+    // thread of sent bubbles above a bottom input bar. Dismissed via the top-left chevron.
+    private var composeScreen: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    withAnimation { showCompose = false }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Back")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(messages) { message in
+                            HStack {
+                                Spacer(minLength: 40)
+                                Text(message.text)
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                            }
+                            .id(message.id)
+                        }
+                    }
+                    .padding()
+                }
+                .onChange(of: messages.count) {
+                    guard let last = messages.last else { return }
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+
+            HStack(spacing: 8) {
+                TextField("Message", text: $draft)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 1))
+                    .focused($composeFieldFocused)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+
+                if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(action: send) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityLabel("Send")
+                }
+            }
+            .padding()
+        }
+        .foregroundStyle(.white)
+    }
+
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        messages.append(ComposeMessage(id: UUID(), text: text))
+        draft = ""
+        saveComposeMessages()
+    }
+
+    private func loadComposeMessages() -> [ComposeMessage] {
+        guard let data = UserDefaults.standard.data(forKey: Self.composeCacheKey) else { return [] }
+        return (try? JSONDecoder().decode([ComposeMessage].self, from: data)) ?? []
+    }
+
+    private func saveComposeMessages() {
+        guard let data = try? JSONEncoder().encode(messages) else { return }
+        UserDefaults.standard.set(data, forKey: Self.composeCacheKey)
     }
 
     // The article body: the full text scraped from article.url once it loads, with the
