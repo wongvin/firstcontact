@@ -2,6 +2,11 @@
 
 ## 2026-06-13
 
+### feat: exclude/include a keyword (red bubble) from long-press menu (issue #125)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: added an **Exclude**/**Include** toggle above **Delete** in a keyword bubble's long-press context menu. A normal (blue) bubble shows "Exclude" (turns it red); a red bubble shows "Include" (turns it back blue). Backed by the keyword's new `excluded` flag (`keyword.excluded ? Color.red : Color.blue`) and a `toggleExcluded(_:)` helper that flips the flag and persists via `saveKeywords()`. `Keyword` gained a `var excluded: Bool = false` with a custom `init(from:)` (`decodeIfPresent`) so keywords saved before the field existed still load.
+- Bubbles render via a `sortedKeywords` computed view that lists non-excluded (blue) first and excluded (red) last (stable within each group), so a newly added keyword slots in among the blues and toggling exclude/include moves a bubble between the groups. Storage order is unchanged.
+
 ### feat: compose-style key-term panel with its own keyword list (issue #123)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: turned the key-term half-sheet into a compose UI — a scrollable thread of saved keyword bubbles above an input box pre-filled with the Gemini term, with long-press-to-delete per bubble. New `Keyword` model, `keywords`/`keywordDraft`/`keywordFieldFocused` state, `firstcontact.keywords.v1` cache key, and `sendKeyword`/`deleteKeyword`/`loadKeywords`/`saveKeywords` helpers (mirroring the compose-message ones). `loadKeyword` now sets `keywordDraft` to the term on success.
