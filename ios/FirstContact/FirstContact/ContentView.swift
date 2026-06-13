@@ -627,6 +627,13 @@ struct ContentView: View {
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 8)
                                     .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            withAnimation { delete(message) }
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                             }
                             .id(message.id)
                         }
@@ -670,6 +677,11 @@ struct ContentView: View {
         guard !text.isEmpty else { return }
         messages.append(ComposeMessage(id: UUID(), text: text))
         draft = ""
+        saveComposeMessages()
+    }
+
+    private func delete(_ message: ComposeMessage) {
+        messages.removeAll { $0.id == message.id }
         saveComposeMessages()
     }
 

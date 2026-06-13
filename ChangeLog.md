@@ -2,6 +2,10 @@
 
 ## 2026-06-13
 
+### feat: delete saved compose messages via long-press (issue #117)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: long-pressing a message bubble in the compose screen now shows a native context menu with a destructive **Delete** action. Added a `.contextMenu` on the bubble and a `delete(_:)` helper that removes the message by `id` and re-persists via the existing `saveComposeMessages()`. Per-message only — no clear-all, no confirmation dialog, no layout change.
+
 ### feat: rework long-press gestures (issue #115)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the long-press that opens the compose screen now fires only on the welcome (home) screen — moved the `.simultaneousGesture(LongPressGesture)` off the pager/overlay group and onto `homeScreen` (with `.contentShape(Rectangle())` so the whole area is pressable).
