@@ -107,6 +107,7 @@ struct ContentView: View {
     @State private var articleTextState: ArticleTextState = .loading
     @State private var keywordArticle: Article?
     @State private var keywordState: KeywordState = .loading
+    @State private var keywordDragOffset: CGFloat = 0
     @State private var showCompose = false
     @State private var messages: [ComposeMessage] = []
     @State private var draft = ""
@@ -156,11 +157,20 @@ struct ContentView: View {
             } else if let article = detailArticle {
                 articleDetailScreen(article)
                     .transition(.move(edge: .trailing))
-            } else if let article = keywordArticle {
-                keywordScreen(article)
-                    .transition(.move(edge: .trailing))
             } else {
-                pager
+                ZStack(alignment: isLandscape ? .trailing : .bottom) {
+                    pager
+                        .allowsHitTesting(keywordArticle == nil)
+                    if let article = keywordArticle {
+                        // Dim the peeked article; tapping it dismisses the sheet.
+                        Color.black.opacity(0.35)
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+                            .onTapGesture { withAnimation { keywordArticle = nil } }
+                        keywordPanel(article)
+                            .transition(.move(edge: isLandscape ? .trailing : .bottom))
+                    }
+                }
             }
         }
         .task { await loadQuote() }
@@ -543,30 +553,69 @@ struct ContentView: View {
         .task(id: article.url) { await loadFullText(article) }
     }
 
-    // Reached by a long-press on an article: shows a Gemini-extracted key term
-    // (from the headline + description) centered, with a top-left exit arrow.
-    private func keywordScreen(_ article: Article) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button {
-                    withAnimation { keywordArticle = nil }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .bold))
-                        .padding(8)
-                }
-                .accessibilityLabel("Back to article")
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-
-            Spacer()
+    // Reached by a long-press on an article: a half-size sheet showing a Gemini-extracted
+    // key term, peeking over the (dimmed) article. Portrait = bottom half (slides up);
+    // landscape = right half (slides in). Dismiss by dragging it down/right, tapping the
+    // dimmed area outside, or the Close bar. A grabber handle hints the drag.
+    private func keywordPanel(_ article: Article) -> some View {
+        // Round only the inner corners so the outer edges sit flush to the screen.
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 20,
+            bottomLeadingRadius: isLandscape ? 20 : 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: isLandscape ? 0 : 20,
+            style: .continuous
+        )
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
             keywordContent
                 .padding(.horizontal, 24)
-            Spacer()
+            Spacer(minLength: 0)
+
+            Button {
+                withAnimation { keywordArticle = nil }
+            } label: {
+                Text("Close")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(.white.opacity(0.15))
+                    .overlay(
+                        Rectangle().fill(.white.opacity(0.2)).frame(height: 1),
+                        alignment: .top
+                    )
+            }
+            .accessibilityLabel("Close")
         }
         .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerRelativeFrame(isLandscape ? .horizontal : .vertical) { dim, _ in dim / 2 }
+        .background(.ultraThinMaterial)
+        .overlay(alignment: isLandscape ? .leading : .top) {
+            Capsule()
+                .fill(.white.opacity(0.5))
+                .frame(width: isLandscape ? 5 : 40, height: isLandscape ? 40 : 5)
+                .padding(isLandscape ? .leading : .top, 8)
+        }
+        .clipShape(shape)
+        .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 1))
+        .offset(x: isLandscape ? keywordDragOffset : 0, y: isLandscape ? 0 : keywordDragOffset)
+        .gesture(keywordDismissDrag)
         .task(id: article.title) { await loadKeyword(article) }
+    }
+
+    // Drag the sheet in its entry direction (down in portrait, right in landscape) to dismiss.
+    private var keywordDismissDrag: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                let t = isLandscape ? value.translation.width : value.translation.height
+                keywordDragOffset = max(0, t)
+            }
+            .onEnded { value in
+                let t = isLandscape ? value.translation.width : value.translation.height
+                if t > 120 { withAnimation { keywordArticle = nil } }
+                withAnimation { keywordDragOffset = 0 }
+            }
     }
 
     @ViewBuilder
