@@ -6,6 +6,8 @@
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: turned the key-term half-sheet into a compose UI — a scrollable thread of saved keyword bubbles above an input box pre-filled with the Gemini term, with long-press-to-delete per bubble. New `Keyword` model, `keywords`/`keywordDraft`/`keywordFieldFocused` state, `firstcontact.keywords.v1` cache key, and `sendKeyword`/`deleteKeyword`/`loadKeywords`/`saveKeywords` helpers (mirroring the compose-message ones). `loadKeyword` now sets `keywordDraft` to the term on success.
 - The keyword list is its own persisted store, separate from the home compose messages; the panel placeholder reads "Keyword". Replaced the Close bar with the input bar (dismiss still via drag or tapping the dimmed peek) and shrank `keywordContent` to a compact loading/error status line. Half-sheet shell, `ComposeMessage`, and the home compose screen are unchanged.
+- The keyword thread is a static (non-scrolling) stack — no `ScrollView` — so the panel-wide drag-to-dismiss has nothing to conflict with. (Trade-off: a long thread can overflow the half-panel.)
+- Keyword bubbles now lay out as wrapping chips via a new `FlowLayout` (`Layout` protocol): left-to-right, wrapping top-to-bottom from the top-left corner, instead of one right-aligned bubble per row.
 
 ### feat: half-size key-term sheet over the article (issue #121)
 

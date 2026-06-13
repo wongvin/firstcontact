@@ -56,6 +56,52 @@ struct Keyword: Codable, Identifiable {
     let text: String
 }
 
+// Wrapping flow layout: places subviews left-to-right, wrapping to the next line when the
+// available width runs out, top-to-bottom, starting at the top-left. Used for keyword chips.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0, rowWidth + spacing + size.width > maxWidth {
+                totalWidth = max(totalWidth, rowWidth)
+                totalHeight += rowHeight + spacing
+                rowWidth = size.width
+                rowHeight = size.height
+            } else {
+                rowWidth += (rowWidth > 0 ? spacing : 0) + size.width
+                rowHeight = max(rowHeight, size.height)
+            }
+        }
+        totalWidth = max(totalWidth, rowWidth)
+        totalHeight += rowHeight
+        return CGSize(width: min(totalWidth, maxWidth), height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
 // MARK: - News (gnews.io)
 
 struct Article: Codable, Identifiable {
@@ -580,39 +626,29 @@ struct ContentView: View {
             topTrailingRadius: isLandscape ? 0 : 20,
             style: .continuous
         )
+        // Compose content: a static (non-scrolling) keyword thread + status + input.
+        // No ScrollView, so the panel-wide drag-to-dismiss has nothing to conflict with.
         return VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(keywords) { keyword in
-                            HStack {
-                                Spacer(minLength: 40)
-                                Text(keyword.text)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            withAnimation { deleteKeyword(keyword) }
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
-                                        }
-                                    }
+            // Bubbles flow left-to-right and wrap top-to-bottom, starting at the top-left.
+            FlowLayout(spacing: 8) {
+                ForEach(keywords) { keyword in
+                    Text(keyword.text)
+                        .font(.system(size: 16))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                withAnimation { deleteKeyword(keyword) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
-                            .id(keyword.id)
                         }
-                    }
-                    .padding()
-                    .padding(.top, isLandscape ? 0 : 12)
-                    .padding(.leading, isLandscape ? 12 : 0)
-                }
-                .onChange(of: keywords.count) {
-                    guard let last = keywords.last else { return }
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             keywordContent
 
