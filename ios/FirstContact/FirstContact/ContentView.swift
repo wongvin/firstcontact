@@ -50,10 +50,27 @@ struct ComposeMessage: Codable, Identifiable {
 }
 
 // A saved keyword from the key-term panel — its own persisted list, separate from the
-// compose messages above. Same shape; kept distinct so the two threads don't mix.
+// compose messages above. `excluded` keywords render as a red bubble.
 struct Keyword: Codable, Identifiable {
     let id: UUID
     let text: String
+    var excluded: Bool = false
+
+    enum CodingKeys: String, CodingKey { case id, text, excluded }
+
+    init(id: UUID, text: String, excluded: Bool = false) {
+        self.id = id
+        self.text = text
+        self.excluded = excluded
+    }
+
+    // Decode `excluded` defensively so keywords saved before the field existed still load.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        excluded = try c.decodeIfPresent(Bool.self, forKey: .excluded) ?? false
+    }
 }
 
 // Wrapping flow layout: places subviews left-to-right, wrapping to the next line when the
@@ -631,14 +648,24 @@ struct ContentView: View {
         return VStack(spacing: 0) {
             // Bubbles flow left-to-right and wrap top-to-bottom, starting at the top-left.
             FlowLayout(spacing: 8) {
-                ForEach(keywords) { keyword in
+                ForEach(sortedKeywords) { keyword in
                     Text(keyword.text)
                         .font(.system(size: 16))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                        .background(keyword.excluded ? Color.red : Color.blue,
+                                    in: RoundedRectangle(cornerRadius: 18))
                         .contextMenu {
+                            Button {
+                                withAnimation { toggleExcluded(keyword) }
+                            } label: {
+                                if keyword.excluded {
+                                    Label("Include", systemImage: "plus.circle")
+                                } else {
+                                    Label("Exclude", systemImage: "minus.circle")
+                                }
+                            }
                             Button(role: .destructive) {
                                 withAnimation { deleteKeyword(keyword) }
                             } label: {
@@ -849,6 +876,18 @@ struct ContentView: View {
     private func deleteKeyword(_ keyword: Keyword) {
         keywords.removeAll { $0.id == keyword.id }
         saveKeywords()
+    }
+
+    private func toggleExcluded(_ keyword: Keyword) {
+        guard let i = keywords.firstIndex(where: { $0.id == keyword.id }) else { return }
+        keywords[i].excluded.toggle()
+        saveKeywords()
+    }
+
+    // Display order: non-excluded (blue) bubbles first, excluded (red) last. Stable within
+    // each group (insertion order preserved). Storage order is unchanged — this is display-only.
+    private var sortedKeywords: [Keyword] {
+        keywords.filter { !$0.excluded } + keywords.filter { $0.excluded }
     }
 
     private func loadKeywords() -> [Keyword] {
