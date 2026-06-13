@@ -49,6 +49,13 @@ struct ComposeMessage: Codable, Identifiable {
     let text: String
 }
 
+// A saved keyword from the key-term panel — its own persisted list, separate from the
+// compose messages above. Same shape; kept distinct so the two threads don't mix.
+struct Keyword: Codable, Identifiable {
+    let id: UUID
+    let text: String
+}
+
 // MARK: - News (gnews.io)
 
 struct Article: Codable, Identifiable {
@@ -108,6 +115,9 @@ struct ContentView: View {
     @State private var keywordArticle: Article?
     @State private var keywordState: KeywordState = .loading
     @State private var keywordDragOffset: CGFloat = 0
+    @State private var keywords: [Keyword] = []
+    @State private var keywordDraft = ""
+    @FocusState private var keywordFieldFocused: Bool
     @State private var showCompose = false
     @State private var messages: [ComposeMessage] = []
     @State private var draft = ""
@@ -118,6 +128,7 @@ struct ContentView: View {
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let composeCacheKey = "firstcontact.compose.v1"
+    private static let keywordCacheKey = "firstcontact.keywords.v1"
     private static let summaryTTLHours = 24
     private static let geminiModel = "gemini-2.5-flash-lite"
     private static let issueWindowDays = 30
@@ -178,6 +189,7 @@ struct ContentView: View {
         .task { await loadSummary() }
         .task { await loadNews() }
         .task { messages = loadComposeMessages() }
+        .task { keywords = loadKeywords() }
     }
 
     // Vertical swipe pager: home at index 0, news articles after it, wrapping in a
@@ -553,10 +565,12 @@ struct ContentView: View {
         .task(id: article.url) { await loadFullText(article) }
     }
 
-    // Reached by a long-press on an article: a half-size sheet showing a Gemini-extracted
-    // key term, peeking over the (dimmed) article. Portrait = bottom half (slides up);
-    // landscape = right half (slides in). Dismiss by dragging it down/right, tapping the
-    // dimmed area outside, or the Close bar. A grabber handle hints the drag.
+    // Reached by a long-press on an article: a half-size compose sheet for keywords,
+    // peeking over the (dimmed) article. A thread of saved keyword bubbles (own store,
+    // separate from the compose messages) sits above an input box pre-filled with the
+    // Gemini-extracted term. Portrait = bottom half (slides up); landscape = right half
+    // (slides in). Dismiss by dragging it down/right or tapping the dimmed area outside.
+    // A grabber handle hints the drag; long-press a bubble to delete it.
     private func keywordPanel(_ article: Article) -> some View {
         // Round only the inner corners so the outer edges sit flush to the screen.
         let shape = UnevenRoundedRectangle(
@@ -567,25 +581,63 @@ struct ContentView: View {
             style: .continuous
         )
         return VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            keywordContent
-                .padding(.horizontal, 24)
-            Spacer(minLength: 0)
-
-            Button {
-                withAnimation { keywordArticle = nil }
-            } label: {
-                Text("Close")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(.white.opacity(0.15))
-                    .overlay(
-                        Rectangle().fill(.white.opacity(0.2)).frame(height: 1),
-                        alignment: .top
-                    )
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(keywords) { keyword in
+                            HStack {
+                                Spacer(minLength: 40)
+                                Text(keyword.text)
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            withAnimation { deleteKeyword(keyword) }
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                            }
+                            .id(keyword.id)
+                        }
+                    }
+                    .padding()
+                    .padding(.top, isLandscape ? 0 : 12)
+                    .padding(.leading, isLandscape ? 12 : 0)
+                }
+                .onChange(of: keywords.count) {
+                    guard let last = keywords.last else { return }
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
             }
-            .accessibilityLabel("Close")
+
+            keywordContent
+
+            HStack(spacing: 8) {
+                TextField("Keyword", text: $keywordDraft)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.25), lineWidth: 1))
+                    .focused($keywordFieldFocused)
+                    .submitLabel(.send)
+                    .onSubmit(sendKeyword)
+
+                if !keywordDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(action: sendKeyword) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityLabel("Send keyword")
+                }
+            }
+            .padding()
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -618,30 +670,34 @@ struct ContentView: View {
             }
     }
 
+    // Compact status shown just above the keyword input: a spinner while the Gemini term
+    // loads, an error / missing-key hint otherwise. Empty once loaded — the term is then
+    // pre-filled into the input box (keywordDraft).
     @ViewBuilder
     private var keywordContent: some View {
         switch keywordState {
         case .loading:
-            VStack(spacing: 12) {
+            HStack(spacing: 8) {
                 ProgressView().tint(.white)
                 Text("Finding the key term\u{2026}")
-                    .font(.system(size: 15))
+                    .font(.system(size: 13))
                     .opacity(0.7)
             }
-        case .loaded(let term):
-            Text(term)
-                .font(.system(size: 40, weight: .bold))
-                .multilineTextAlignment(.center)
+            .padding(.bottom, 4)
         case .failed:
             Text("Couldn't extract a key term.")
-                .font(.system(size: 16))
+                .font(.system(size: 13))
                 .opacity(0.8)
-                .multilineTextAlignment(.center)
+                .padding(.bottom, 4)
         case .missingKey:
             Text("Set GEMINI_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
-                .font(.system(size: 15))
+                .font(.system(size: 12))
                 .opacity(0.85)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
+        case .loaded:
+            EmptyView()
         }
     }
 
@@ -742,6 +798,31 @@ struct ContentView: View {
     private func saveComposeMessages() {
         guard let data = try? JSONEncoder().encode(messages) else { return }
         UserDefaults.standard.set(data, forKey: Self.composeCacheKey)
+    }
+
+    // MARK: - Keyword thread (key-term panel; own store, separate from compose messages)
+
+    private func sendKeyword() {
+        let text = keywordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        keywords.append(Keyword(id: UUID(), text: text))
+        keywordDraft = ""
+        saveKeywords()
+    }
+
+    private func deleteKeyword(_ keyword: Keyword) {
+        keywords.removeAll { $0.id == keyword.id }
+        saveKeywords()
+    }
+
+    private func loadKeywords() -> [Keyword] {
+        guard let data = UserDefaults.standard.data(forKey: Self.keywordCacheKey) else { return [] }
+        return (try? JSONDecoder().decode([Keyword].self, from: data)) ?? []
+    }
+
+    private func saveKeywords() {
+        guard let data = try? JSONEncoder().encode(keywords) else { return }
+        UserDefaults.standard.set(data, forKey: Self.keywordCacheKey)
     }
 
     // The article body: the full text scraped from article.url once it loads, with the
@@ -1181,7 +1262,12 @@ struct ContentView: View {
         let input = "Headline: \(article.title)\nDescription: \(description)"
         do {
             let term = try await generateKeyword(apiKey: apiKey, input: input)
-            keywordState = term.isEmpty ? .failed : .loaded(term)
+            if term.isEmpty {
+                keywordState = .failed
+            } else {
+                keywordState = .loaded(term)
+                keywordDraft = term   // pre-fill the input so the term is ready to edit/send
+            }
         } catch {
             keywordState = .failed
         }

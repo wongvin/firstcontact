@@ -2,6 +2,11 @@
 
 ## 2026-06-13
 
+### feat: compose-style key-term panel with its own keyword list (issue #123)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: turned the key-term half-sheet into a compose UI — a scrollable thread of saved keyword bubbles above an input box pre-filled with the Gemini term, with long-press-to-delete per bubble. New `Keyword` model, `keywords`/`keywordDraft`/`keywordFieldFocused` state, `firstcontact.keywords.v1` cache key, and `sendKeyword`/`deleteKeyword`/`loadKeywords`/`saveKeywords` helpers (mirroring the compose-message ones). `loadKeyword` now sets `keywordDraft` to the term on success.
+- The keyword list is its own persisted store, separate from the home compose messages; the panel placeholder reads "Keyword". Replaced the Close bar with the input bar (dismiss still via drag or tapping the dimmed peek) and shrank `keywordContent` to a compact loading/error status line. Half-sheet shell, `ComposeMessage`, and the home compose screen are unchanged.
+
 ### feat: half-size key-term sheet over the article (issue #121)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: reworked the Gemini key-term screen from a full-screen overlay into a half-size sheet that peeks over the (dimmed) article. Portrait occupies the bottom half and slides up from the bottom; landscape occupies the right half and slides in from the right (`.containerRelativeFrame`, `UnevenRoundedRectangle` rounding only the inner corners). The pager renders behind as a frozen peek (`.allowsHitTesting` off) with a `Color.black.opacity(0.35)` scrim.
