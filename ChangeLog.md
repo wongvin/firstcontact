@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-11
+
+### feat: long-press opens iMessage-style compose screen (issue #113)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: a long-press (0.5s) on any non-compose screen now opens a new `composeScreen` resembling the iOS Messages app — a scrollable thread of right-aligned blue bubbles above a bottom input bar, dismissed via a top-left back chevron. Tapping the field raises the keyboard; an `arrow.up.circle.fill` send button appears only when the field holds non-whitespace text; sending appends the text as a bubble and clears the field. New `ComposeMessage` model, `showCompose`/`messages`/`draft` state, and a `composeFieldFocused` focus binding.
+- Messages persist across launches via `UserDefaults` (`firstcontact.compose.v1`), mirroring the 30-day summary cache (`loadComposeMessages`/`saveComposeMessages`). The long-press is attached as a `.simultaneousGesture(LongPressGesture)` on the pager/overlay group only, so it coexists with the pager drag and panel taps while leaving the compose field's native text-selection long-press intact.
+
 ## 2026-06-10
 
 ### feat: cross-axis swipe shows Gemini key term for article (issue #111)
