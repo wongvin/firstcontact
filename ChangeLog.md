@@ -2,6 +2,11 @@
 
 ## 2026-06-13
 
+### feat: half-size key-term sheet over the article (issue #121)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: reworked the Gemini key-term screen from a full-screen overlay into a half-size sheet that peeks over the (dimmed) article. Portrait occupies the bottom half and slides up from the bottom; landscape occupies the right half and slides in from the right (`.containerRelativeFrame`, `UnevenRoundedRectangle` rounding only the inner corners). The pager renders behind as a frozen peek (`.allowsHitTesting` off) with a `Color.black.opacity(0.35)` scrim.
+- Three dismiss paths: drag the sheet down/right past a threshold (`keywordDismissDrag` + `keywordDragOffset` offset, grabber-handle affordance), tap the dimmed area outside the sheet, or a **Close** bar pinned to the panel bottom. Removed the back chevron. `loadKeyword`/`keywordContent` unchanged.
+
 ### feat: delete saved compose messages via long-press (issue #117)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: long-pressing a message bubble in the compose screen now shows a native context menu with a destructive **Delete** action. Added a `.contextMenu` on the bubble and a `delete(_:)` helper that removes the message by `id` and re-persists via the existing `saveComposeMessages()`. Per-message only — no clear-all, no confirmation dialog, no layout change.
