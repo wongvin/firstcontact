@@ -180,6 +180,7 @@ struct ContentView: View {
     @State private var keywordDragOffset: CGFloat = 0
     @State private var keywords: [Keyword] = []
     @State private var keywordDraft = ""
+    @State private var showKeywordTooLong = false
     @FocusState private var keywordFieldFocused: Bool
     @State private var showCompose = false
     @State private var messages: [ComposeMessage] = []
@@ -253,6 +254,11 @@ struct ContentView: View {
         .task { await loadNews() }
         .task { messages = loadComposeMessages() }
         .task { keywords = loadKeywords() }
+        .alert("Search filter too long", isPresented: $showKeywordTooLong) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("The keyword search expression is over GNews's 200-character limit, so some keywords may not be applied to the news filter.")
+        }
     }
 
     // Vertical swipe pager: home at index 0, news articles after it, wrapping in a
@@ -871,6 +877,7 @@ struct ContentView: View {
         keywords.append(Keyword(id: UUID(), text: text))
         keywordDraft = ""
         saveKeywords()
+        warnIfQueryTooLong()
     }
 
     private func deleteKeyword(_ keyword: Keyword) {
@@ -882,12 +889,29 @@ struct ContentView: View {
         guard let i = keywords.firstIndex(where: { $0.id == keyword.id }) else { return }
         keywords[i].excluded.toggle()
         saveKeywords()
+        // Excluding adds a `NOT ` prefix, lengthening the expression; warn only then.
+        if keywords[i].excluded { warnIfQueryTooLong() }
     }
 
     // Display order: non-excluded (blue) bubbles first, excluded (red) last. Stable within
     // each group (insertion order preserved). Storage order is unchanged — this is display-only.
     private var sortedKeywords: [Keyword] {
         keywords.filter { !$0.excluded } + keywords.filter { $0.excluded }
+    }
+
+    // Boolean GNews `q` from saved keywords: "blue" AND … AND NOT "red" AND …
+    // Empty string when there are no keywords. Reads the persisted list directly (not @State
+    // `keywords`) so it's correct at launch, where loadNews() races the keyword-load `.task`.
+    private func keywordQuery() -> String {
+        let saved = loadKeywords()
+        let parts = saved.filter { !$0.excluded }.map { "\"\($0.text)\"" }
+                  + saved.filter {  $0.excluded }.map { "NOT \"\($0.text)\"" }
+        return parts.joined(separator: " AND ")
+    }
+
+    // GNews caps `q` at 200 characters; warn (informational) if the expression exceeds it.
+    private func warnIfQueryTooLong() {
+        if keywordQuery().count > 200 { showKeywordTooLong = true }
     }
 
     private func loadKeywords() -> [Keyword] {
@@ -1000,9 +1024,11 @@ struct ContentView: View {
         }
         // Fetch the three categories concurrently, then concatenate in order
         // (general -> technology -> science) so articles stay grouped by category.
-        async let general = fetchNews(category: Self.newsCategories[0], key: key)
-        async let technology = fetchNews(category: Self.newsCategories[1], key: key)
-        async let science = fetchNews(category: Self.newsCategories[2], key: key)
+        // `q` filters each category by the keyword expression ("" when no keywords).
+        let q = keywordQuery()
+        async let general = fetchNews(category: Self.newsCategories[0], key: key, query: q)
+        async let technology = fetchNews(category: Self.newsCategories[1], key: key, query: q)
+        async let science = fetchNews(category: Self.newsCategories[2], key: key, query: q)
         let groups = await [general, technology, science]
         let succeeded = groups.compactMap { $0 }
         if succeeded.isEmpty {
@@ -1013,9 +1039,18 @@ struct ContentView: View {
         newsState = combined.isEmpty ? .empty : .ready(combined)
     }
 
-    private func fetchNews(category: String, key: String) async -> [Article]? {
-        let urlString = "https://gnews.io/api/v4/top-headlines?category=\(category)&lang=en&country=us&apikey=\(key)"
-        guard let url = URL(string: urlString) else { return nil }
+    private func fetchNews(category: String, key: String, query: String) async -> [Article]? {
+        // URLComponents percent-encodes the q expression (quotes/spaces/AND/NOT) correctly.
+        // The q item is always present — its value may be the empty string.
+        var components = URLComponents(string: "https://gnews.io/api/v4/top-headlines")
+        components?.queryItems = [
+            URLQueryItem(name: "category", value: category),
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "lang", value: "en"),
+            URLQueryItem(name: "country", value: "us"),
+            URLQueryItem(name: "apikey", value: key)
+        ]
+        guard let url = components?.url else { return nil }
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
