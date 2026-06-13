@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-13
+
+### feat: rework long-press gestures (issue #115)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the long-press that opens the compose screen now fires only on the welcome (home) screen — moved the `.simultaneousGesture(LongPressGesture)` off the pager/overlay group and onto `homeScreen` (with `.contentShape(Rectangle())` so the whole area is pressable).
+- The Gemini key-term screen now opens on a **long-press of an article** instead of a cross-axis swipe: added a `.simultaneousGesture(LongPressGesture)` to `articleScreen` that sets `keywordArticle`, dropped the cross-axis branch (and the now-unused `currentArticle` helper) from `swipeGesture`. Pager navigation swipes and tap-to-open-detail are unchanged.
+
 ## 2026-06-11
 
 ### feat: long-press opens iMessage-style compose screen (issue #113)

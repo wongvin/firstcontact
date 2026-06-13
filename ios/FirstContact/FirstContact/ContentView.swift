@@ -153,26 +153,14 @@ struct ContentView: View {
             if showCompose {
                 composeScreen
                     .transition(.move(edge: .trailing))
+            } else if let article = detailArticle {
+                articleDetailScreen(article)
+                    .transition(.move(edge: .trailing))
+            } else if let article = keywordArticle {
+                keywordScreen(article)
+                    .transition(.move(edge: .trailing))
             } else {
-                Group {
-                    if let article = detailArticle {
-                        articleDetailScreen(article)
-                            .transition(.move(edge: .trailing))
-                    } else if let article = keywordArticle {
-                        keywordScreen(article)
-                            .transition(.move(edge: .trailing))
-                    } else {
-                        pager
-                    }
-                }
-                // Long-press on any non-compose screen opens the compose screen.
-                // simultaneousGesture coexists with the pager's drag and the panels'
-                // button taps; attaching it only here keeps the compose screen's own
-                // text-field long-press (native text selection) intact.
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.5)
-                        .onEnded { _ in withAnimation { showCompose = true } }
-                )
+                pager
             }
         }
         .task { await loadQuote() }
@@ -226,6 +214,14 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .padding()
         }
+        // Long-press on the welcome screen opens the compose screen. simultaneousGesture
+        // coexists with the panels' button taps (tap-to-cycle still works); scoping it to
+        // homeScreen means other pager screens and the article/key-term overlays don't trigger it.
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in withAnimation { showCompose = true } }
+        )
     }
 
     // Total swipe screens = home + one per article (or a single status screen
@@ -236,13 +232,6 @@ struct ContentView: View {
         return newsCount + 1
     }
 
-    // The article currently shown by the pager, or nil on the home/status screens.
-    private var currentArticle: Article? {
-        guard screenIndex >= 1, case .ready(let articles) = newsState,
-              screenIndex - 1 < articles.count else { return nil }
-        return articles[screenIndex - 1]
-    }
-
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 20)
             .onEnded { value in
@@ -250,23 +239,18 @@ struct ContentView: View {
                 let dy = value.translation.height
                 let horizontal = abs(dx) > abs(dy)
                 // Navigation runs on the horizontal axis in landscape, vertical in portrait.
-                if horizontal == isLandscape {
-                    let primary = isLandscape ? dx : dy
-                    guard abs(primary) > 50 else { return }
-                    let total = totalScreens
-                    guard total > 1 else { return }
-                    // No animation: pages swap instantly (no slide or fade).
-                    if primary < 0 {
-                        screenIndex = (screenIndex + 1) % total
-                    } else {
-                        screenIndex = (screenIndex - 1 + total) % total
-                    }
+                // A cross-axis swipe is ignored — the Gemini key-term screen now opens on a
+                // long-press of the article (see articleScreen).
+                guard horizontal == isLandscape else { return }
+                let primary = isLandscape ? dx : dy
+                guard abs(primary) > 50 else { return }
+                let total = totalScreens
+                guard total > 1 else { return }
+                // No animation: pages swap instantly (no slide or fade).
+                if primary < 0 {
+                    screenIndex = (screenIndex + 1) % total
                 } else {
-                    // Cross-axis swipe (horizontal in portrait, vertical in landscape) on an
-                    // article opens its Gemini key-term screen; a no-op elsewhere.
-                    let cross = isLandscape ? dy : dx
-                    guard abs(cross) > 50, let article = currentArticle else { return }
-                    withAnimation { keywordArticle = article }
+                    screenIndex = (screenIndex - 1 + total) % total
                 }
             }
     }
@@ -474,6 +458,12 @@ struct ContentView: View {
         .foregroundStyle(.white)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation { detailArticle = article } }
+        // Long-press an article (any non-home screen) opens its Gemini key-term screen.
+        // simultaneousGesture so it coexists with the tap-to-open-detail and the pager swipe.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in withAnimation { keywordArticle = article } }
+        )
     }
 
     // Headline + description block shared by the portrait and landscape article layouts.
@@ -553,7 +543,7 @@ struct ContentView: View {
         .task(id: article.url) { await loadFullText(article) }
     }
 
-    // Reached by a cross-axis swipe on an article: shows a Gemini-extracted key term
+    // Reached by a long-press on an article: shows a Gemini-extracted key term
     // (from the headline + description) centered, with a top-left exit arrow.
     private func keywordScreen(_ article: Article) -> some View {
         VStack(spacing: 0) {
