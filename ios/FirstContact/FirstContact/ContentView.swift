@@ -175,7 +175,8 @@ struct ContentView: View {
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
-    @State private var keywordArticle: Article?
+    @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
+    @State private var showKeywordPanel = false      // drives panel presentation (article optional)
     @State private var keywordState: KeywordState = .loading
     @State private var keywordDragOffset: CGFloat = 0
     @State private var keywords: [Keyword] = []
@@ -235,14 +236,14 @@ struct ContentView: View {
             } else {
                 ZStack(alignment: isLandscape ? .trailing : .bottom) {
                     pager
-                        .allowsHitTesting(keywordArticle == nil)
-                    if let article = keywordArticle {
-                        // Dim the peeked article; tapping it dismisses the sheet.
+                        .allowsHitTesting(!showKeywordPanel)
+                    if showKeywordPanel {
+                        // Dim the screen behind; tapping it dismisses the sheet.
                         Color.black.opacity(0.35)
                             .ignoresSafeArea()
                             .transition(.opacity)
-                            .onTapGesture { withAnimation { keywordArticle = nil } }
-                        keywordPanel(article)
+                            .onTapGesture { withAnimation { showKeywordPanel = false } }
+                        keywordPanel()
                             .transition(.move(edge: isLandscape ? .trailing : .bottom))
                     }
                 }
@@ -549,11 +550,12 @@ struct ContentView: View {
         .foregroundStyle(.white)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation { detailArticle = article } }
-        // Long-press an article (any non-home screen) opens its Gemini key-term screen.
-        // simultaneousGesture so it coexists with the tap-to-open-detail and the pager swipe.
+        // Long-press an article (any non-home screen) opens the keyword panel, pre-filled
+        // with that article's Gemini key term. simultaneousGesture so it coexists with the
+        // tap-to-open-detail and the pager swipe.
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.5)
-                .onEnded { _ in withAnimation { keywordArticle = article } }
+                .onEnded { _ in withAnimation { keywordArticle = article; showKeywordPanel = true } }
         )
     }
 
@@ -640,7 +642,7 @@ struct ContentView: View {
     // Gemini-extracted term. Portrait = bottom half (slides up); landscape = right half
     // (slides in). Dismiss by dragging it down/right or tapping the dimmed area outside.
     // A grabber handle hints the drag; long-press a bubble to delete it.
-    private func keywordPanel(_ article: Article) -> some View {
+    private func keywordPanel() -> some View {
         // Round only the inner corners so the outer edges sit flush to the screen.
         let shape = UnevenRoundedRectangle(
             topLeadingRadius: 20,
@@ -722,7 +724,13 @@ struct ContentView: View {
         .overlay(shape.stroke(.white.opacity(0.2), lineWidth: 1))
         .offset(x: isLandscape ? keywordDragOffset : 0, y: isLandscape ? 0 : keywordDragOffset)
         .gesture(keywordDismissDrag)
-        .task(id: article.title) { await loadKeyword(article) }
+        .task(id: keywordArticle?.title) {
+            if let article = keywordArticle {
+                await loadKeyword(article)        // pre-fill the input with the article's term
+            } else {
+                keywordState = .loaded("")        // opened without an article → no term, no spinner
+            }
+        }
     }
 
     // Drag the sheet in its entry direction (down in portrait, right in landscape) to dismiss.
@@ -734,7 +742,7 @@ struct ContentView: View {
             }
             .onEnded { value in
                 let t = isLandscape ? value.translation.width : value.translation.height
-                if t > 120 { withAnimation { keywordArticle = nil } }
+                if t > 120 { withAnimation { showKeywordPanel = false } }
                 withAnimation { keywordDragOffset = 0 }
             }
     }
@@ -899,13 +907,18 @@ struct ContentView: View {
         keywords.filter { !$0.excluded } + keywords.filter { $0.excluded }
     }
 
-    // Boolean GNews `q` from saved keywords: "blue" AND … AND NOT "red" AND …
+    // Boolean GNews `q` from saved keywords: the blue (included) terms are OR-ed inside one
+    // parenthesized group, then AND-ed with each NOT-prefixed red (excluded) term —
+    //   ("blue1" OR "blue2") AND NOT "red1" AND NOT "red2"
     // Empty string when there are no keywords. Reads the persisted list directly (not @State
     // `keywords`) so it's correct at launch, where loadNews() races the keyword-load `.task`.
     private func keywordQuery() -> String {
         let saved = loadKeywords()
-        let parts = saved.filter { !$0.excluded }.map { "\"\($0.text)\"" }
-                  + saved.filter {  $0.excluded }.map { "NOT \"\($0.text)\"" }
+        let blue = saved.filter { !$0.excluded }.map { "\"\($0.text)\"" }
+        let red  = saved.filter {  $0.excluded }.map { "NOT \"\($0.text)\"" }
+        var parts: [String] = []
+        if !blue.isEmpty { parts.append("(" + blue.joined(separator: " OR ") + ")") }
+        parts += red
         return parts.joined(separator: " AND ")
     }
 
@@ -983,6 +996,13 @@ struct ContentView: View {
         .foregroundStyle(.white)
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        // Long-press the status screen (e.g. "No news right now." when the keyword filter is
+        // too narrow) opens the keyword panel — no article, so no term is pre-filled.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.5)
+                .onEnded { _ in withAnimation { keywordArticle = nil; showKeywordPanel = true } }
+        )
     }
 
     @ViewBuilder
