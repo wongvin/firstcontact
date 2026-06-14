@@ -185,6 +185,7 @@ struct ContentView: View {
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
     @State private var spawnedFeed: NewsFeed?                 // nil = base pager; one level only
     @State private var spawnCache: [String: NewsState] = [:] // related-news by source article.url (session memory)
+    @State private var keywordTermCache: [String: String] = [:] // key-term panel's Gemini term by article.url (session memory)
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
     @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
@@ -1529,6 +1530,12 @@ struct ContentView: View {
             keywordState = .missingKey
             return
         }
+        // Reuse the session cache (keyed by article.url) so the same headline never re-runs Gemini.
+        if let cacheKey = article.url, let cached = keywordTermCache[cacheKey] {
+            keywordState = .loaded(cached)
+            keywordDraft = cached
+            return
+        }
         let description = article.description ?? ""
         let content = article.content ?? ""
         let input = "Headline: \(article.title)\nDescription: \(description)\nContent: \(content)"
@@ -1537,6 +1544,7 @@ struct ContentView: View {
             if term.isEmpty {
                 keywordState = .failed
             } else {
+                if let cacheKey = article.url { keywordTermCache[cacheKey] = term }
                 keywordState = .loaded(term)
                 keywordDraft = term   // pre-fill the input so the term is ready to edit/send
             }
