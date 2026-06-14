@@ -84,10 +84,49 @@ issues the simulator misses (true `backdrop-filter` rendering, scroll inertia,
 real network conditions). But it's the cheapest, most reliable check for the
 whole class of bugs that compile fine yet render wrong.
 
-To deploy a Debug build to the connected iPhone in one command, run
-[`scripts/deploy-device.sh`](FirstContact/scripts/deploy-device.sh): it
-auto-detects the connected device, builds for iphoneos, and installs +
-launches via `devicectl` (no hardcoded UDID).
+### Deploying to a physical device
+
+The simulator can't drive gestures (long-press, swipe, context menus) or real
+rendering/network conditions, so iOS changes should **also be deployed to the
+physical iPhone connected to the Mac** for real-hardware testing. The target is
+**auto-detected** from `xcrun devicectl list devices` — never hardcode a device
+name or UDID, so this works regardless of which device is attached.
+
+One command does it:
+
+```bash
+ios/FirstContact/scripts/deploy-device.sh
+```
+
+It auto-detects the connected device, builds for iphoneos, and installs +
+launches via `devicectl`. The equivalent manual steps:
+
+```bash
+cd ios/FirstContact
+# 1. Connected device's devicectl identifier (the UUID on a row in the "connected" state)
+DEVICE=$(xcrun devicectl list devices \
+  | awk 'tolower($0) ~ /connected/ {
+      for (i=1;i<=NF;i++) if ($i ~ /^[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}$/) { print $i; exit }
+    }')
+# 2. Build for the device (generic destination + automatic provisioning — no device id needed)
+xcodebuild -scheme FirstContact -sdk iphoneos -configuration Debug \
+  -destination 'generic/platform=iOS' -allowProvisioningUpdates build
+# 3. Resolve the built .app, then install + launch
+APP=$(xcodebuild -showBuildSettings -scheme FirstContact -configuration Debug -sdk iphoneos \
+  | awk '/ BUILT_PRODUCTS_DIR / {print $3; exit}')/FirstContact.app
+xcrun devicectl device install app --device "$DEVICE" "$APP"
+xcrun devicectl device process launch --device "$DEVICE" com.vwong.FirstContact
+```
+
+Notes:
+
+- Check a device is connected first — `xcrun devicectl list devices` should show
+  it as `connected` (the script fails with a clear message if none is).
+- Free-signing provisioning expires ~7 days; just rebuild/redeploy when stale.
+- `devicectl` prints a benign `Error … Code=1002 "No provider was found."` line
+  to stderr — install/launch still succeed; ignore it.
+- A **locked** device can refuse the launch (`Code=10002`) even though the
+  install succeeded — unlock and rerun, or open the app from the home screen.
 
 ### Surfacing screenshots in issue comments
 

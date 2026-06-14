@@ -2,6 +2,10 @@
 
 ## 2026-06-14
 
+### docs: document iOS device-deploy verification convention (issue #119)
+
+- `ios/CLAUDE.md`: expanded the brief script mention into a "Deploying to a physical device" subsection under "Verifying UI changes" — documents deploying debug builds to the connected iPhone for real-hardware testing (the simulator can't drive gestures), the one-command `scripts/deploy-device.sh`, the equivalent manual `xcodebuild -sdk iphoneos` build + `devicectl install`/`launch` steps with generic auto-detection (no hardcoded UDID), and the gotchas (check device connected, ~7-day free-signing expiry, benign `Code=1002` noise, locked-device `Code=10002` launch refusal).
+
 ### feat: one-command device-deploy helper script (issue #118)
 
 - `ios/FirstContact/scripts/deploy-device.sh`: new helper that builds the app for the connected iPhone (Debug, `-sdk iphoneos`, generic destination) and installs + launches it via `devicectl` in one command. Auto-detects the connected device's identifier from `xcrun devicectl list devices` (no hardcoded name/UDID) and fails with a clear message if none is connected; resolves the built `.app` and bundle id from `xcodebuild -showBuildSettings`; launch failure (e.g. locked device) warns rather than erroring since the install already succeeded.
