@@ -2,6 +2,11 @@
 
 ## 2026-06-14
 
+### feat: cross-swipe a headline to drill into related news (issue #131)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: a cross-axis swipe on a news headline now spawns a feed of related news — GNews `search` results for that article's Gemini key term — with a top-left back chevron to return. New `NewsFeed` model + `spawnedFeed`/`spawnCache` state, `searchNews(query:key:)` (the `/search` endpoint via `URLComponents`), `spawn(from:)` + `fetchSpawnState(for:)` (reusing `generateKeyword`), `spawnedFeedPager`, and a `currentArticle` helper. The base `swipeGesture` cross-axis branch calls `spawn`.
+- The spawned feed is articles-only and inherits swipe navigation, tap→detail, and long-press→keyword panel; cross-swipe inside it is a no-op (one level only). Feeds are cached in session memory by `article.url`, so re-cross-swiping the same headline reuses the result (no repeat Gemini/GNews call). Factored `newsStatusScreen` into a shared `statusScreen(for:)`.
+
 ### docs: document iOS device-deploy verification convention (issue #119)
 
 - `ios/CLAUDE.md`: expanded the brief script mention into a "Deploying to a physical device" subsection under "Verifying UI changes" — documents deploying debug builds to the connected iPhone for real-hardware testing (the simulator can't drive gestures), the one-command `scripts/deploy-device.sh`, the equivalent manual `xcodebuild -sdk iphoneos` build + `devicectl install`/`launch` steps with generic auto-detection (no hardcoded UDID), and the gotchas (check device connected, ~7-day free-signing expiry, benign `Code=1002` noise, locked-device `Code=10002` launch refusal).
