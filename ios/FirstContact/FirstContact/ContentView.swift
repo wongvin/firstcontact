@@ -223,8 +223,8 @@ struct ContentView: View {
         """
     private static let keywordSystemPrompt = """
         You extract the single most important key word or short term (1-4 words) from a \
-        news headline and description. Respond with ONLY that word or term — no punctuation \
-        wrapping, no quotes, no explanation, no preamble. Use only the provided headline and description.
+        news headline, description, and content. Respond with ONLY that word or term — no punctuation \
+        wrapping, no quotes, no explanation, no preamble. Use only the provided headline, description, and content.
         """
 
     var body: some View {
@@ -1149,8 +1149,10 @@ struct ContentView: View {
         components?.queryItems = [
             URLQueryItem(name: "category", value: category),
             URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "in", value: "title,description,content"),
             URLQueryItem(name: "lang", value: "en"),
             URLQueryItem(name: "country", value: "us"),
+            URLQueryItem(name: "max", value: "10"),
             URLQueryItem(name: "apikey", value: key)
         ]
         guard let url = components?.url else { return nil }
@@ -1175,6 +1177,7 @@ struct ContentView: View {
         var components = URLComponents(string: "https://gnews.io/api/v4/search")
         components?.queryItems = [
             URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "in", value: "title,description,content"),
             URLQueryItem(name: "lang", value: "en"),
             URLQueryItem(name: "country", value: "us"),
             URLQueryItem(name: "max", value: "10"),
@@ -1213,7 +1216,7 @@ struct ContentView: View {
     private func fetchSpawnState(for article: Article) async -> NewsState {
         guard let geminiKey = geminiAPIKey() else { return .missingKey }
         guard let gnewsKey = gnewsAPIKey() else { return .missingKey }
-        let input = "Headline: \(article.title)\nDescription: \(article.description ?? "")"
+        let input = "Headline: \(article.title)\nDescription: \(article.description ?? "")\nContent: \(article.content ?? "")"
         let term: String
         do {
             term = try await generateKeyword(apiKey: geminiKey, input: input)
@@ -1527,7 +1530,8 @@ struct ContentView: View {
             return
         }
         let description = article.description ?? ""
-        let input = "Headline: \(article.title)\nDescription: \(description)"
+        let content = article.content ?? ""
+        let input = "Headline: \(article.title)\nDescription: \(description)\nContent: \(content)"
         do {
             let term = try await generateKeyword(apiKey: apiKey, input: input)
             if term.isEmpty {

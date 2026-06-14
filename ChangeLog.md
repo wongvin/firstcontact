@@ -2,6 +2,11 @@
 
 ## 2026-06-14
 
+### feat: include article content in news search (issue #131)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: GNews keyword search now matches article content, not just title/description. Both the home category feed (`fetchNews`, `top-headlines`) and the related-news drill-down (`searchNews`, `/search`) send `in=title,description,content`. Added `max=10` to the `top-headlines` request (the free-tier ceiling) to match the search request.
+- The Gemini key-term extraction now feeds article content alongside headline + description: both `fetchSpawnState` (cross-swipe drill-down) and `loadKeyword` (long-press keyword panel) append a `Content:` line, and `keywordSystemPrompt` was updated to reference headline, description, and content.
+
 ### feat: cross-swipe a headline to drill into related news (issue #131)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: a cross-axis swipe on a news headline now spawns a feed of related news — GNews `search` results for that article's Gemini key term — with a top-left back chevron to return. New `NewsFeed` model + `spawnedFeed`/`spawnCache` state, `searchNews(query:key:)` (the `/search` endpoint via `URLComponents`), `spawn(from:)` + `fetchSpawnState(for:)` (reusing `generateKeyword`), `spawnedFeedPager`, and a `currentArticle` helper. The base `swipeGesture` cross-axis branch calls `spawn`.
