@@ -146,6 +146,16 @@ enum NewsState {
     case ready([Article])
 }
 
+// A drilled-in feed of related news, spawned by cross-swiping a headline: GNews `search`
+// results for that headline's Gemini key term. Articles-only (no home); one level deep.
+struct NewsFeed: Identifiable {
+    let id = UUID()
+    let source: Article        // the headline that spawned this feed
+    var state: NewsState       // .loading → .ready([Article]) / .empty / .failed / .missingKey
+    var index = 0              // current article within this feed
+    var articles: [Article] { if case .ready(let a) = state { return a } else { return [] } }
+}
+
 // Full article body fetched from the article's linked URL. GNews only returns a
 // ~160-char truncated `content` field, so the detail screen scrapes the source page.
 enum ArticleTextState {
@@ -173,6 +183,8 @@ struct ContentView: View {
     @State private var summary30dView = 0
     @State private var newsState: NewsState = .loading
     @State private var screenIndex = 0          // 0 = home; i>=1 = news article i-1
+    @State private var spawnedFeed: NewsFeed?                 // nil = base pager; one level only
+    @State private var spawnCache: [String: NewsState] = [:] // related-news by source article.url (session memory)
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
     @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
@@ -211,8 +223,8 @@ struct ContentView: View {
         """
     private static let keywordSystemPrompt = """
         You extract the single most important key word or short term (1-4 words) from a \
-        news headline and description. Respond with ONLY that word or term — no punctuation \
-        wrapping, no quotes, no explanation, no preamble. Use only the provided headline and description.
+        news headline, description, and content. Respond with ONLY that word or term — no punctuation \
+        wrapping, no quotes, no explanation, no preamble. Use only the provided headline, description, and content.
         """
 
     var body: some View {
@@ -235,8 +247,15 @@ struct ContentView: View {
                     .transition(.move(edge: .trailing))
             } else {
                 ZStack(alignment: isLandscape ? .trailing : .bottom) {
-                    pager
-                        .allowsHitTesting(!showKeywordPanel)
+                    Group {
+                        if let feed = spawnedFeed {
+                            spawnedFeedPager(feed)
+                                .transition(.move(edge: .trailing))
+                        } else {
+                            pager
+                        }
+                    }
+                    .allowsHitTesting(!showKeywordPanel)
                     if showKeywordPanel {
                         // Dim the screen behind; tapping it dismisses the sheet.
                         Color.black.opacity(0.35)
@@ -281,6 +300,13 @@ struct ContentView: View {
         } else {
             newsStatusScreen
         }
+    }
+
+    // The base pager's currently-shown article, or nil on the home/status screen.
+    private var currentArticle: Article? {
+        guard screenIndex >= 1, case .ready(let articles) = newsState,
+              screenIndex - 1 < articles.count else { return nil }
+        return articles[screenIndex - 1]
     }
 
     private var homeScreen: some View {
@@ -331,18 +357,22 @@ struct ContentView: View {
                 let dy = value.translation.height
                 let horizontal = abs(dx) > abs(dy)
                 // Navigation runs on the horizontal axis in landscape, vertical in portrait.
-                // A cross-axis swipe is ignored — the Gemini key-term screen now opens on a
-                // long-press of the article (see articleScreen).
-                guard horizontal == isLandscape else { return }
-                let primary = isLandscape ? dx : dy
-                guard abs(primary) > 50 else { return }
-                let total = totalScreens
-                guard total > 1 else { return }
-                // No animation: pages swap instantly (no slide or fade).
-                if primary < 0 {
-                    screenIndex = (screenIndex + 1) % total
+                if horizontal == isLandscape {
+                    let primary = isLandscape ? dx : dy
+                    guard abs(primary) > 50 else { return }
+                    let total = totalScreens
+                    guard total > 1 else { return }
+                    // No animation: pages swap instantly (no slide or fade).
+                    if primary < 0 {
+                        screenIndex = (screenIndex + 1) % total
+                    } else {
+                        screenIndex = (screenIndex - 1 + total) % total
+                    }
                 } else {
-                    screenIndex = (screenIndex - 1 + total) % total
+                    // Cross-axis swipe on a headline drills into a related-news feed.
+                    let cross = isLandscape ? dy : dx
+                    guard abs(cross) > 50, let article = currentArticle else { return }
+                    withAnimation { spawn(from: article) }
                 }
             }
     }
@@ -975,9 +1005,11 @@ struct ContentView: View {
         }
     }
 
-    private var newsStatusScreen: some View {
+    // Loading / empty / failed / missing-key status view for any NewsState — shared by the
+    // base pager and spawned feeds.
+    private func statusScreen(for state: NewsState) -> some View {
         VStack(spacing: 12) {
-            switch newsState {
+            switch state {
             case .loading:
                 ProgressView().tint(.white)
                 Text("Loading latest news\u{2026}")
@@ -996,13 +1028,64 @@ struct ContentView: View {
         .foregroundStyle(.white)
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        // Long-press the status screen (e.g. "No news right now." when the keyword filter is
-        // too narrow) opens the keyword panel — no article, so no term is pre-filled.
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.5)
-                .onEnded { _ in withAnimation { keywordArticle = nil; showKeywordPanel = true } }
-        )
+    }
+
+    private var newsStatusScreen: some View {
+        statusScreen(for: newsState)
+            .contentShape(Rectangle())
+            // Long-press the status screen (e.g. "No news right now." when the keyword filter is
+            // too narrow) opens the keyword panel — no article, so no term is pre-filled.
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5)
+                    .onEnded { _ in withAnimation { keywordArticle = nil; showKeywordPanel = true } }
+            )
+    }
+
+    // MARK: - Spawned related-news feed (cross-swipe drill-down)
+
+    // Articles-only pager for a spawned feed: a top-left back chevron above the feed's current
+    // article (or its loading/empty/failed status). Inherits tap→detail and long-press→keyword
+    // via articleScreen. Nav-axis swipe pages within the feed; cross-swipe is ignored (one level).
+    private func spawnedFeedPager(_ feed: NewsFeed) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    withAnimation { spawnedFeed = nil }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Back to headline")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .foregroundStyle(.white)
+
+            Group {
+                if !feed.articles.isEmpty, feed.index < feed.articles.count {
+                    articleScreen(feed.articles[feed.index])
+                } else {
+                    statusScreen(for: feed.state)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(spawnedFeedSwipe(count: feed.articles.count))
+        }
+    }
+
+    // Nav-axis paging within the spawned feed (wraps among its articles). Cross-axis ignored.
+    private func spawnedFeedSwipe(count: Int) -> some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onEnded { value in
+                let horizontal = abs(value.translation.width) > abs(value.translation.height)
+                guard horizontal == isLandscape else { return }   // cross-axis: no drill-down (one level)
+                let primary = isLandscape ? value.translation.width : value.translation.height
+                guard abs(primary) > 50, count > 1,
+                      let i = spawnedFeed?.index else { return }
+                spawnedFeed?.index = primary < 0 ? (i + 1) % count : (i - 1 + count) % count
+            }
     }
 
     @ViewBuilder
@@ -1066,8 +1149,10 @@ struct ContentView: View {
         components?.queryItems = [
             URLQueryItem(name: "category", value: category),
             URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "in", value: "title,description,content"),
             URLQueryItem(name: "lang", value: "en"),
             URLQueryItem(name: "country", value: "us"),
+            URLQueryItem(name: "max", value: "10"),
             URLQueryItem(name: "apikey", value: key)
         ]
         guard let url = components?.url else { return nil }
@@ -1085,6 +1170,62 @@ struct ContentView: View {
     private func gnewsAPIKey() -> String? {
         let key = GeneratedSecrets.gnewsAPIKey
         return key.isEmpty ? nil : key
+    }
+
+    // GNews /search for related-news drill-down (q = a single key term).
+    private func searchNews(query: String, key: String) async -> [Article]? {
+        var components = URLComponents(string: "https://gnews.io/api/v4/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "in", value: "title,description,content"),
+            URLQueryItem(name: "lang", value: "en"),
+            URLQueryItem(name: "country", value: "us"),
+            URLQueryItem(name: "max", value: "10"),
+            URLQueryItem(name: "apikey", value: key)
+        ]
+        guard let url = components?.url else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(NewsResponse.self, from: data).articles
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Related-news drill-down (cross-swipe a headline)
+
+    // Cross-swipe handler: show a feed of related news for `article`. Reuses the session cache
+    // (keyed by article.url) so the same headline never re-runs Gemini or the GNews search.
+    private func spawn(from article: Article) {
+        let cacheKey = article.url   // nil → spawn without caching
+        if let cacheKey, let cached = spawnCache[cacheKey] {
+            spawnedFeed = NewsFeed(source: article, state: cached)
+            return
+        }
+        let feed = NewsFeed(source: article, state: .loading)
+        spawnedFeed = feed
+        Task {
+            let state = await fetchSpawnState(for: article)
+            if let cacheKey { spawnCache[cacheKey] = state }
+            if spawnedFeed?.id == feed.id { spawnedFeed?.state = state }   // still showing this feed
+        }
+    }
+
+    // Gemini key term for the headline, then a GNews search on it → a NewsState.
+    private func fetchSpawnState(for article: Article) async -> NewsState {
+        guard let geminiKey = geminiAPIKey() else { return .missingKey }
+        guard let gnewsKey = gnewsAPIKey() else { return .missingKey }
+        let input = "Headline: \(article.title)\nDescription: \(article.description ?? "")\nContent: \(article.content ?? "")"
+        let term: String
+        do {
+            term = try await generateKeyword(apiKey: geminiKey, input: input)
+        } catch {
+            return .failed
+        }
+        guard !term.isEmpty else { return .failed }
+        guard let articles = await searchNews(query: term, key: gnewsKey) else { return .failed }
+        return articles.isEmpty ? .empty : .ready(articles)
     }
 
     // MARK: - Full article text (client-side scrape of article.url)
@@ -1389,7 +1530,8 @@ struct ContentView: View {
             return
         }
         let description = article.description ?? ""
-        let input = "Headline: \(article.title)\nDescription: \(description)"
+        let content = article.content ?? ""
+        let input = "Headline: \(article.title)\nDescription: \(description)\nContent: \(content)"
         do {
             let term = try await generateKeyword(apiKey: apiKey, input: input)
             if term.isEmpty {
