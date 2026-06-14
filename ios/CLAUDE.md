@@ -84,6 +84,11 @@ issues the simulator misses (true `backdrop-filter` rendering, scroll inertia,
 real network conditions). But it's the cheapest, most reliable check for the
 whole class of bugs that compile fine yet render wrong.
 
+To deploy a Debug build to the connected iPhone in one command, run
+[`scripts/deploy-device.sh`](FirstContact/scripts/deploy-device.sh): it
+auto-detects the connected device, builds for iphoneos, and installs +
+launches via `devicectl` (no hardcoded UDID).
+
 ### Surfacing screenshots in issue comments
 
 After capturing a screenshot, if you also post an issue comment summarizing
