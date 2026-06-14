@@ -2,6 +2,10 @@
 
 ## 2026-06-14
 
+### feat: cache key-term panel's Gemini result per article (issue #133)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the long-press key-term panel (`loadKeyword`) now caches its Gemini-extracted term per `article.url` in a new `keywordTermCache` session dictionary, mirroring the drill-down's `spawnCache`. Reopening the panel for the same headline reuses the cached term (instant pre-fill, no spinner) instead of re-running Gemini; the term is stored on first successful extraction. Session-memory only — no persistence across launches.
+
 ### feat: include article content in news search (issue #131)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: GNews keyword search now matches article content, not just title/description. Both the home category feed (`fetchNews`, `top-headlines`) and the related-news drill-down (`searchNews`, `/search`) send `in=title,description,content`. Added `max=10` to the `top-headlines` request (the free-tier ceiling) to match the search request.
