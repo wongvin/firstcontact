@@ -2,6 +2,12 @@
 
 ## 2026-06-13
 
+### feat: GNews q expression from keyword bubbles (issue #127)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the saved keywords now drive the news feed. New `keywordQuery()` builds a GNews boolean expression — each term double-quoted; blue (included) terms are `OR`-ed inside one parenthesized group, then `AND`-ed with each `NOT`-prefixed red (excluded) term (e.g. `("Quantum computing" OR "Superconductors") AND NOT "Bitcoin"`); empty string when there are no keywords. `loadNews` passes it as `q` to all three category `fetchNews` calls; `fetchNews(category:key:query:)` now builds the URL with `URLComponents`/`URLQueryItem` (correct percent-encoding) and always includes the `q` item (value may be empty → unfiltered, same as before). Applied on next news load (launch); `top-headlines` endpoint + category grouping unchanged.
+- Added a 200-character warning: `warnIfQueryTooLong()` (called from `sendKeyword()` and from `toggleExcluded(_:)` when a keyword is newly excluded) shows an alert when the built expression exceeds GNews's 200-char `q` limit. The keyword is still added/excluded — the alert is informational.
+- The keyword panel can now be opened from the news **status screen** (e.g. "No news right now." when the filter is too narrow) via long-press — the escape hatch to fix an over-restrictive filter. Decoupled the panel's presentation from `keywordArticle` into a `showKeywordPanel` flag; `keywordPanel()` no longer requires an article (no article → no term pre-fill, no spinner). Long-pressing an article still opens it pre-filled with that article's term.
+
 ### feat: exclude/include a keyword (red bubble) from long-press menu (issue #125)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: added an **Exclude**/**Include** toggle above **Delete** in a keyword bubble's long-press context menu. A normal (blue) bubble shows "Exclude" (turns it red); a red bubble shows "Include" (turns it back blue). Backed by the keyword's new `excluded` flag (`keyword.excluded ? Color.red : Color.blue`) and a `toggleExcluded(_:)` helper that flips the flag and persists via `saveKeywords()`. `Keyword` gained a `var excluded: Bool = false` with a custom `init(from:)` (`decodeIfPresent`) so keywords saved before the field existed still load.
