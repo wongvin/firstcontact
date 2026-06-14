@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-14
+
+### feat: one-command device-deploy helper script (issue #118)
+
+- `ios/FirstContact/scripts/deploy-device.sh`: new helper that builds the app for the connected iPhone (Debug, `-sdk iphoneos`, generic destination) and installs + launches it via `devicectl` in one command. Auto-detects the connected device's identifier from `xcrun devicectl list devices` (no hardcoded name/UDID) and fails with a clear message if none is connected; resolves the built `.app` and bundle id from `xcodebuild -showBuildSettings`; launch failure (e.g. locked device) warns rather than erroring since the install already succeeded.
+- `ios/CLAUDE.md`: mentioned the script under "Verifying UI changes".
+
 ## 2026-06-13
 
 ### feat: GNews q expression from keyword bubbles (issue #127)
