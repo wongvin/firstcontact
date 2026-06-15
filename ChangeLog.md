@@ -7,6 +7,11 @@
 - `webapp/package.json`: bumped `next` and `eslint-config-next` from `16.2.7` to `16.2.9` (latest on the Next 16 patch line); refreshed `webapp/package-lock.json`.
 - Verified with a clean `npm run build` on Next 16.2.9.
 
+### fix: keep "Changes made this week" panel populated when GitHub fetch fails (issue #136)
+
+- `webapp/app/page.tsx`: the homepage "Changes made this week" panel now caches its last successful list in `localStorage` (`firstcontact:recent-changes:v1`) and renders it cache-first. The unauthenticated, browser-side GitHub fetch can fail on the anonymous 60/hr rate limit (403) or a transient 5xx/offline blip; previously that blanked the panel to "Could not load recent changes." Now the fetch falls back to the cached list, and the error only shows when there is no cache. New `readRecentCache`/`writeRecentCache` helpers mirror the 30-day-summary cache; the cache is written only on a non-empty success.
+- `webapp/TEST-PLAN.md`: added § 19 covering cache-first render, failure fallback, corrupted-cache tolerance, and code-shape guards.
+
 ### feat: cache key-term panel's Gemini result per article (issue #133)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the long-press key-term panel (`loadKeyword`) now caches its Gemini-extracted term per `article.url` in a new `keywordTermCache` session dictionary, mirroring the drill-down's `spawnCache`. Reopening the panel for the same headline reuses the cached term (instant pre-fill, no spinner) instead of re-running Gemini; the term is stored on first successful extraction. Session-memory only — no persistence across launches.
