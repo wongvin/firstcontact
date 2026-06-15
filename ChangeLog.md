@@ -2,6 +2,11 @@
 
 ## 2026-06-14
 
+### chore: bump Next.js 16.2.7 → 16.2.9 (issue #135)
+
+- `webapp/package.json`: bumped `next` and `eslint-config-next` from `16.2.7` to `16.2.9` (latest on the Next 16 patch line); refreshed `webapp/package-lock.json`.
+- Verified with a clean `npm run build` on Next 16.2.9.
+
 ### fix: keep "Changes made this week" panel populated when GitHub fetch fails (issue #136)
 
 - `webapp/app/page.tsx`: the homepage "Changes made this week" panel now caches its last successful list in `localStorage` (`firstcontact:recent-changes:v1`) and renders it cache-first. The unauthenticated, browser-side GitHub fetch can fail on the anonymous 60/hr rate limit (403) or a transient 5xx/offline blip; previously that blanked the panel to "Could not load recent changes." Now the fetch falls back to the cached list, and the error only shows when there is no cache. New `readRecentCache`/`writeRecentCache` helpers mirror the 30-day-summary cache; the cache is written only on a non-empty success.
