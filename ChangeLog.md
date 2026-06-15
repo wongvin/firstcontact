@@ -2,6 +2,11 @@
 
 ## 2026-06-14
 
+### chore: bump Next.js 16.2.7 → 16.2.9 (issue #135)
+
+- `webapp/package.json`: bumped `next` and `eslint-config-next` from `16.2.7` to `16.2.9` (latest on the Next 16 patch line); refreshed `webapp/package-lock.json`.
+- Verified with a clean `npm run build` on Next 16.2.9.
+
 ### feat: cache key-term panel's Gemini result per article (issue #133)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the long-press key-term panel (`loadKeyword`) now caches its Gemini-extracted term per `article.url` in a new `keywordTermCache` session dictionary, mirroring the drill-down's `spawnCache`. Reopening the panel for the same headline reuses the cached term (instant pre-fill, no spinner) instead of re-running Gemini; the term is stored on first successful extraction. Session-memory only — no persistence across launches.
