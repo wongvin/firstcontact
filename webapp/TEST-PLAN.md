@@ -1110,6 +1110,44 @@ Implementation: a single change inside `render(index)` in [web/transcripts-viewe
 | 18c.2 | `grep -nF 'p.user_text || ' web/transcripts-viewer.html` | Exactly one match — the same line. No other code path bypasses the first-line collapse for the prompt-line. |
 | 18c.3 | Read the two `buildPromptLine(...)` calls in `render(index)`. | Both branches pass the same `userText` variable. Neither re-derives a multi-line version. |
 
+## 19. "Changes made this week" last-known-good cache (issue #136)
+
+Issue #136 makes the homepage "Changes made this week" panel resilient to a failing GitHub fetch. The fetch is unauthenticated and browser-side, so it can fail on the anonymous 60/hr rate limit (403) or a transient 5xx/offline blip — previously that blanked the panel to "Could not load recent changes." Now the panel caches its last successful list in `localStorage` (key `firstcontact:recent-changes:v1`), renders it immediately on mount, and falls back to it on fetch failure; the error message only shows when there is no cache.
+
+Implementation: `readRecentCache`/`writeRecentCache` helpers in [app/page.tsx](app/page.tsx) (mirroring the 30-day-summary `readCache`/`writeCache`), and a rewritten recent-changes `useEffect` — cache-first render, `writeRecentCache(recent)` on a non-empty success, and a `catch` that only sets the `error` state when `cached` is null.
+
+### 19a. Cache-first render + revalidation
+
+| ID | Steps | Expected |
+|---|---|---|
+| 19a.1 | Fresh browser (no `firstcontact:recent-changes:v1` in Local Storage). Load `/`. | Panel shows "Loading…" briefly, then the live list of issues closed this week (PRs filtered out). Application → Local Storage now holds the key with an `items` array + `generated_at`. |
+| 19a.2 | With a populated cache, hard-refresh `/`. | Panel shows the cached list immediately (no "Loading…" flash), then updates in place when the live fetch resolves. |
+| 19a.3 | Fetch succeeds but returns no issues closed this week (override the `/issues` response to `[]` per Appendix E, or pick a quiet week). | Panel shows "No changes this week." The cache is **not** overwritten with an empty list (an empty success leaves the prior last-known-good intact). |
+
+### 19b. Failure fallback
+
+| ID | Steps | Expected |
+|---|---|---|
+| 19b.1 | With a populated cache, block `*api.github.com*` (Appendix C) and hard-refresh. | Panel shows the cached list. **No** "Could not load recent changes." message. No blank panel. |
+| 19b.2 | Same as 19b.1 but with the Network throttle set to **Offline** (Appendix D). | Same as 19b.1 — cached list shown, no error. |
+| 19b.3 | Clear Local Storage (no cache), then block `*api.github.com*` and hard-refresh. | Panel shows "Could not load recent changes." (the only path that still surfaces the error). |
+| 19b.4 | Override the `/issues` response to malformed JSON (Appendix E) with a populated cache. | Cached list shown, no error (parse failure is caught like any other). |
+
+### 19c. Corrupted / partial cache tolerance
+
+| ID | Steps | Expected |
+|---|---|---|
+| 19c.1 | Set `localStorage['firstcontact:recent-changes:v1'] = 'not json'` via console, then reload with the fetch blocked. | No JS error. `readRecentCache` returns null → "Could not load recent changes." (no cache to fall back to). |
+| 19c.2 | Set the key to `{"items":[{"id":1},{"title":"x"},{"id":2,"title":"ok"}]}` (mixed valid/invalid entries), reload with fetch blocked. | Only the well-formed entry (`id:2,"ok"`) renders; malformed entries are dropped by the type-guard filter. No error, no crash. |
+
+### 19d. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 19d.1 | `grep -nF 'firstcontact:recent-changes:v1' app/page.tsx` | Exactly one match — the `RECENT_STORAGE_KEY` constant. |
+| 19d.2 | `grep -nF 'writeRecentCache(recent)' app/page.tsx` | Exactly one match — inside the non-empty success branch only. The empty branch does not write the cache. |
+| 19d.3 | Read the recent-changes `useEffect` `catch` block. | It sets the `error` state only inside `if (!cached)`. With a cache present, the catch is a no-op (the cached list rendered before the fetch stays on screen). |
+
 ## Exit criteria
 
 A change ships when:
