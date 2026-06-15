@@ -14,6 +14,7 @@ const wipText = (view: number) => `View ${view + 1}: Work in progress`;
 const SUMMARY_URL = "http://localhost:8001/summary/30days";
 const STORAGE_KEY = "firstcontact:summary-30d:v1";
 const TTL_HOURS = 24;
+const RECENT_STORAGE_KEY = "firstcontact:recent-changes:v1";
 
 type SummaryView1 = { prose: string; footnote: string | null };
 type RecentTask = { id: number; title: string };
@@ -51,6 +52,36 @@ function writeCache(summary: string) {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ summary, generated_at: new Date().toISOString(), ttl_hours: TTL_HOURS })
+    );
+  } catch {
+    // quota exceeded / private browsing — degrade silently
+  }
+}
+
+// Last-known-good cache for the recent-changes list, so a transient GitHub API
+// failure (anonymous 60/hr rate limit, a 5xx, an offline blip) keeps showing the
+// last successful result instead of blanking the panel. Mirrors readCache above.
+function readRecentCache(): RecentTask[] | null {
+  try {
+    const raw = localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!Array.isArray(obj?.items)) return null;
+    const items: RecentTask[] = obj.items.filter(
+      (i: unknown): i is RecentTask =>
+        typeof (i as RecentTask)?.id === "number" && typeof (i as RecentTask)?.title === "string"
+    );
+    return items.length ? items : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRecentCache(items: RecentTask[]) {
+  try {
+    localStorage.setItem(
+      RECENT_STORAGE_KEY,
+      JSON.stringify({ items, generated_at: new Date().toISOString() })
     );
   } catch {
     // quota exceeded / private browsing — degrade silently
@@ -127,7 +158,16 @@ export default function HomePage() {
   }, []);
 
   // Changes made this week, from closed GitHub issues (PRs filtered out).
+  // Cache-first: show last-known-good immediately, then revalidate. The fetch is
+  // unauthenticated and browser-side, so it can fail on the anonymous 60/hr rate
+  // limit or a transient blip — fall back to the cached list rather than blanking.
   useEffect(() => {
+    const showItems = (items: RecentTask[]) =>
+      setRecentTasksState({ kind: "ready", items, message: null });
+
+    const cached = readRecentCache();
+    if (cached) showItems(cached);
+
     (async () => {
       try {
         const res = await fetch(
@@ -149,14 +189,18 @@ export default function HomePage() {
         if (recent.length === 0) {
           setRecentTasksState({ kind: "empty", items: [], message: "No changes this week." });
         } else {
-          setRecentTasksState({ kind: "ready", items: recent, message: null });
+          showItems(recent);
+          writeRecentCache(recent);
         }
       } catch {
-        setRecentTasksState({
-          kind: "error",
-          items: [],
-          message: "Could not load recent changes.",
-        });
+        // Keep the cached list shown above; only surface an error with no fallback.
+        if (!cached) {
+          setRecentTasksState({
+            kind: "error",
+            items: [],
+            message: "Could not load recent changes.",
+          });
+        }
       }
     })();
   }, []);
