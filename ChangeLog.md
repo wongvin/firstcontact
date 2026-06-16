@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-06-15
+
+### feat: embed GitHub treemap as /ghstars route in webapp (issue #139)
+
+- Ported the third-party **`xiaoxiunique/1k-github-stars`** treemap app into `webapp/` as a new client-rendered route at `/ghstars`, with prominent credit to the original author (header byline linking to the source repo).
+- `webapp/lib/treemap/*` + `webapp/components/treemap/*`: copied the source, namespaced under `treemap/`. `lib/treemap/data.ts` refactored from a build-time `import "@/data/repos.json"` into pure functions taking the fetched `RepoData`. `Treemap.tsx` drops `next/navigation` routing — language/tier drill and the Projects/Daily/Awesome tabs are now client state via new callbacks; `Header.tsx` tabs became buttons. Hover metadata fetch repointed to `github-treemap.pages.dev`.
+- `webapp/app/ghstars/{layout,page}.tsx`: client page fetches `/treemap-data/repos.json` on mount and degrades to a "dataset unavailable" empty state when absent (Vercel). Dark theme scoped via Tailwind on the page wrapper — `app/globals.css` untouched.
+- `webapp/app/page.tsx`: added a "GitHub Treemap →" homepage tool link.
+- `webapp/.gitignore`: ignore `public/treemap-data/` (the ~9.4 MB dataset is fetched at runtime, never committed). Known limitation: real data shows only in local `npm run dev`.
+- Docs: `webapp/CLAUDE.md` + `webapp/TEST-PLAN.md` (§ 20).
+
 ## 2026-06-14
 
 ### chore: bump Next.js 16.2.7 → 16.2.9 (issue #135)

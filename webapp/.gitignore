@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# treemap dataset (issue #139) — large, fetched at runtime; not committed
+/public/treemap-data/
+
+# The repo-root .gitignore has a bare `lib/` (Python packaging) that also
+# matches webapp/lib — re-include our TypeScript source under webapp/lib/.
+!/lib/

@@ -1148,6 +1148,47 @@ Implementation: `readRecentCache`/`writeRecentCache` helpers in [app/page.tsx](a
 | 19d.2 | `grep -nF 'writeRecentCache(recent)' app/page.tsx` | Exactly one match — inside the non-empty success branch only. The empty branch does not write the cache. |
 | 19d.3 | Read the recent-changes `useEffect` `catch` block. | It sets the `error` state only inside `if (!cached)`. With a cache present, the catch is a no-op (the cached list rendered before the fetch stays on screen). |
 
+## 20. GitHub Treemap embed at `/ghstars` (issue #139)
+
+Issue #139 ports the third-party `xiaoxiunique/1k-github-stars` treemap into the webapp as a client-rendered route at `/ghstars`, fetching its dataset at runtime. Source under `components/treemap/` + `lib/treemap/`; `lib/treemap/data.ts` is pure functions over a fetched `RepoData`; tabs + language/tier drill are client state (no router). Dataset (`public/treemap-data/repos.json`) is gitignored — present in `npm run dev`, absent on Vercel (graceful empty state).
+
+### 20a. Route + data loading
+
+| ID | Steps | Expected |
+|---|---|---|
+| 20a.1 | `npm run dev`, open `/ghstars` with `public/treemap-data/repos.json` present. | Brief "Loading treemap…", then the interactive treemap renders (language blocks sized by stars). |
+| 20a.2 | DevTools Network: confirm the dataset request. | `GET /treemap-data/repos.json` → 200. |
+| 20a.3 | Remove/rename `public/treemap-data/repos.json` (simulate Vercel), hard-refresh. | "Treemap dataset unavailable" empty state. No crash, no console error thrown past the caught fetch. |
+| 20a.4 | From the homepage, click "GitHub Treemap →". | Navigates to `/ghstars`. |
+
+### 20b. Views, drill-down, search
+
+| ID | Steps | Expected |
+|---|---|---|
+| 20b.1 | Click the **Daily** then **Awesome** then **Projects** tabs. | View switches each time; breadcrumb/info line update; drill state resets to overview. |
+| 20b.2 | Click a language block in overview. | Drills into that language (detail mode); breadcrumb shows `All Languages › <Lang>`. |
+| 20b.3 | In a language detail with >36 repos, click a tier header / "More". | Drills into the tier; breadcrumb shows `All Languages › <Lang> › <tier>`. |
+| 20b.4 | Click "All Languages" (and the `<Lang>` crumb) in the breadcrumb. | Returns to overview (resp. back one level to the language). |
+| 20b.5 | Type in the Search box. | Treemap filters to matching repos; `?q=` reflects in the URL; "No repositories match" shown when empty. |
+| 20b.6 | Switch metric Stars/30d Growth/Forks (Projects view). | Block sizes re-layout by the chosen metric. Daily view has no metric switcher (growth-only). |
+| 20b.7 | Hover a repo rectangle. | Tooltip shows repo metadata; created/updated dates load (fetched from `github-treemap.pages.dev/repo-meta.json`). |
+| 20b.8 | Click a repo rectangle. | Opens `https://github.com/<owner/repo>` in a new tab. |
+
+### 20c. Isolation + credit
+
+| ID | Steps | Expected |
+|---|---|---|
+| 20c.1 | Visit `/` (homepage) after visiting `/ghstars`. | Homepage retains its light theme — the treemap's dark styling did not leak (no upstream `globals.css` import). |
+| 20c.2 | Inspect the `/ghstars` header. | A visible "Original by xiaoxiunique ↗" link to `https://github.com/xiaoxiunique/1k-github-stars`. |
+
+### 20d. Code-shape regression guards
+
+| ID | Steps | Expected |
+|---|---|---|
+| 20d.1 | `grep -rnF '@/data/repos.json' lib/treemap components/treemap app/ghstars` | No matches — no build-time dataset import remains. |
+| 20d.2 | `grep -rnF 'next/navigation' components/treemap` | No matches — routing replaced by client-state callbacks. |
+| 20d.3 | `grep -nF 'public/treemap-data/' .gitignore` | One match — the dataset dir is gitignored. |
+
 ## Exit criteria
 
 A change ships when:
