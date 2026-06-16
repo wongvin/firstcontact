@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { squarify } from "@/lib/treemap/squarify";
-import { lighten, darken, contrastText, fmtK } from "@/lib/treemap/colors";
+import { lighten, darken, contrastText, fmtK, tierColor } from "@/lib/treemap/colors";
 import { getRepoValue } from "@/lib/treemap/metrics";
 import { Header, type HeaderBreadcrumbItem, type TreemapView } from "./Header";
 import { Panel, type PanelHandle } from "./Panel";
@@ -526,10 +526,13 @@ export function Treemap({
       const newGroupRects: GroupRect[] = [];
       const newRects: RepoRect[] = [];
 
-      for (const gi of gItems) {
+      for (let tierRank = 0; tierRank < gItems.length; tierRank++) {
+        const gi = gItems[tierRank];
         if (!gi.rect) continue;
         const g = gi.group;
-        const color = detailGroup.color;
+        // Webapp-side override: color each star-range tier by its rank along a
+        // Viridis ramp (gItems is star-descending, so rank 0 = highest = bright).
+        const color = tierColor(tierRank, gItems.length);
         const GAP = 1.5;
         const HEADER_H = Math.min(22, Math.max(14, gi.rect.h * 0.06));
 

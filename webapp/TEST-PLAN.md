@@ -1189,6 +1189,18 @@ Issue #139 ports the third-party `xiaoxiunique/1k-github-stars` treemap into the
 | 20d.2 | `grep -rnF 'next/navigation' components/treemap` | No matches — routing replaced by client-state callbacks. |
 | 20d.3 | `grep -nF 'public/treemap-data/' .gitignore` | One match — the dataset dir is gitignored. |
 
+### 20e. Star-range tier colors (issue #141)
+
+Detail-view star-range tiers are colored by a webapp-side Viridis ramp (`tierColor` in `lib/treemap/colors.ts`) keyed to star rank — brightest yellow = highest-star tier, purple = lowest. Overview language blocks keep their linguist colors.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 20e.1 | Drill into a language with several tiers (e.g. JavaScript). | Each `★ a–b` tier is a distinct Viridis color; the highest-star tier is bright yellow (≈`#fde725`), descending toward purple (`#440154`) for the lowest. |
+| 20e.2 | Compare the same view across two languages. | Tier colors depend only on star rank, not language — the highest tier is the same yellow in both. |
+| 20e.3 | Return to overview (any tab). | Language blocks still use their GitHub-linguist colors (e.g. TypeScript blue, Go cyan) — the Viridis scheme applies only to tiers. |
+| 20e.4 | Hover/click tiers; click a tier to sub-drill. | Hover lighten/darken shading and black/white label contrast still work; sub-tiers are themselves Viridis-colored by rank. |
+| 20e.5 | Inspect `lib/treemap/data.ts` color logic + `repos.json`. | Unchanged — the override is webapp-only; dataset colors are untouched. |
+
 ## Exit criteria
 
 A change ships when:
