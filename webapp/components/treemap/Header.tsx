@@ -1,0 +1,136 @@
+"use client";
+
+import type { Metric } from "@/lib/treemap/types";
+
+export type TreemapView = "projects" | "daily" | "awesome";
+
+export interface HeaderBreadcrumbItem {
+  label: string;
+  onClick?: () => void;
+  color?: string;
+}
+
+interface HeaderProps {
+  breadcrumb?: HeaderBreadcrumbItem[];
+  metric: Metric;
+  onMetricChange: (m: Metric) => void;
+  search: string;
+  onSearchChange: (v: string) => void;
+  info: string;
+  metrics?: { key: Metric; label: string }[];
+  activeView: TreemapView;
+  onViewChange: (v: TreemapView) => void;
+}
+
+const DEFAULT_METRICS: { key: Metric; label: string }[] = [
+  { key: "stars", label: "Stars" },
+  { key: "growth", label: "30d Growth" },
+  { key: "forks", label: "Forks" },
+];
+
+const GLOBAL_TABS: { view: TreemapView; label: string }[] = [
+  { view: "projects", label: "Projects" },
+  { view: "daily", label: "Daily" },
+  { view: "awesome", label: "Awesome" },
+];
+
+// Original treemap by xiaoxiunique — credit preserved (the upstream repo ships
+// no LICENSE; this embed links back to the source prominently).
+const SOURCE_REPO_URL = "https://github.com/xiaoxiunique/1k-github-stars";
+
+export function Header({
+  breadcrumb,
+  metric,
+  onMetricChange,
+  search,
+  onSearchChange,
+  info,
+  metrics = DEFAULT_METRICS,
+  activeView,
+  onViewChange,
+}: HeaderProps) {
+  return (
+    <header className="flex items-center gap-3 px-5 py-2.5 bg-[#151515] border-b border-[#252525] shrink-0 z-10">
+      <h1 className="text-[15px] font-bold whitespace-nowrap">
+        GitHub <span className="text-[#61dafb]">Treemap</span>
+      </h1>
+
+      <div className="flex gap-1">
+        {GLOBAL_TABS.map((tab) => {
+          const active = tab.view === activeView;
+          return (
+            <button
+              key={tab.view}
+              onClick={() => onViewChange(tab.view)}
+              className={`px-3 py-1 rounded text-xs border transition-all cursor-pointer ${
+                active
+                  ? "bg-[#61dafb] text-black border-[#61dafb]"
+                  : "border-[#252525] text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <a
+        href={SOURCE_REPO_URL}
+        target="_blank"
+        rel="noreferrer"
+        title="Original treemap by xiaoxiunique — view source on GitHub"
+        className="px-3 py-1 rounded text-xs border border-[#252525] text-neutral-500 hover:border-neutral-600 hover:text-neutral-300 transition-all whitespace-nowrap"
+      >
+        Original by xiaoxiunique ↗
+      </a>
+
+      <nav className="flex items-center gap-1 text-sm text-neutral-500">
+        {breadcrumb?.map((b, i) => (
+          <span key={i} className="flex items-center gap-1">
+            {i > 0 && <span className="opacity-40 mx-0.5">›</span>}
+            {b.onClick ? (
+              <button
+                onClick={b.onClick}
+                className="text-[#61dafb] hover:underline cursor-pointer"
+              >
+                {b.label}
+              </button>
+            ) : (
+              <span style={b.color ? { color: b.color, fontWeight: 600 } : undefined}>
+                {b.label}
+              </span>
+            )}
+          </span>
+        ))}
+      </nav>
+
+      {metrics.length > 0 && (
+        <div className="flex gap-1 ml-3">
+          {metrics.map((m) => (
+            <button
+              key={m.key}
+              onClick={() => onMetricChange(m.key)}
+              className={`px-3 py-1 rounded text-xs border transition-all cursor-pointer ${
+                metric === m.key
+                  ? "bg-white text-black border-white"
+                  : "border-[#252525] text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search..."
+        className="ml-auto px-2.5 py-1 rounded text-xs border border-[#252525] bg-[#0c0c0c] text-neutral-200 outline-none w-44 focus:border-neutral-600"
+      />
+
+      <span className="text-xs text-neutral-500 whitespace-nowrap">{info}</span>
+    </header>
+  );
+}

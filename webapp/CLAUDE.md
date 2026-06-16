@@ -16,6 +16,25 @@ issue #88). It serves three things:
 - **Tool pages** (`public/digikey-search.html`, `mouser-search.html`,
   `transcripts-viewer.html`) — self-contained static HTML served verbatim by
   Next at `/digikey-search.html` etc. Not React; don't rewrite them.
+- **GitHub Treemap** (`app/ghstars/**`) — `/ghstars`, an interactive repo
+  treemap ported from the third-party **`xiaoxiunique/1k-github-stars`** app
+  (issue #139), with prominent credit to the original author. Source lives under
+  `components/treemap/` + `lib/treemap/`; it's a client island (`page.tsx` is
+  `"use client"`) that fetches its dataset at runtime — `lib/treemap/data.ts`
+  was refactored from a build-time `import` into pure functions taking the
+  fetched `RepoData`. The upstream's separate routes (`/awesome`,
+  `/daily-trading`, `/[lang]`) are collapsed into client state (tabs + drill).
+  Its dark theme is scoped to the route via Tailwind classes — **don't** import
+  the upstream `globals.css` (the light-theme webapp `app/globals.css` stays
+  untouched). Hover metadata is fetched from `github-treemap.pages.dev`.
+
+## Treemap dataset (gitignored)
+
+`/ghstars` fetches `public/treemap-data/repos.json` (~9.4 MB) at runtime. That
+folder is **gitignored** — copy `repos.json` there from a `1k-github-stars`
+checkout for local dev. Because it's never committed, it's absent on Vercel, so
+`/ghstars` shows a graceful "dataset unavailable" empty state in production until
+data hosting is wired up. Don't commit the dataset.
 
 > ⚠️ Next 16 has breaking changes vs. older versions (see [AGENTS.md](AGENTS.md)).
 > Consult `node_modules/next/dist/docs/` before touching framework wiring.
