@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-16
+
+### feat: color /ghstars star-range tiers with a Viridis ramp (issue #141)
+
+- `webapp/lib/treemap/colors.ts`: added `viridis(t)` (6-stop perceptually-uniform ramp, dark purple → bright yellow) and `tierColor(rank, count)`, which maps a tier's star rank to the ramp (highest-star tier → bright end).
+- `webapp/components/treemap/Treemap.tsx`: the detail-view star-range tiers now color by rank via `tierColor(...)` instead of reusing the single GitHub-linguist `detailGroup.color`. The tier layout loop is indexed (`squarify` preserves star-descending order). A webapp-side override only — `repos.json` / dataset generation untouched, and language-overview blocks keep their linguist colors.
+- `webapp/TEST-PLAN.md`: added § 20e covering tier coloring.
+
 ## 2026-06-15
 
 ### feat: embed GitHub treemap as /ghstars route in webapp (issue #139)
