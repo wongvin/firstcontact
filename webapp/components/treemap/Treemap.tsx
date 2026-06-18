@@ -37,15 +37,6 @@ type RepoLayoutItem = SquarifyRect & {
 
 type RepoMeta = Pick<Repo, "createdAt" | "updatedAt">;
 
-type ActiveTooltip = {
-  fullName: string;
-  x: number;
-  y: number;
-  repo: Repo;
-  langName: string;
-  langColor: string;
-};
-
 type RepoMetaIndex = Record<string, [string | null, string | null]>;
 
 function matchesRepoSearch(repo: Repo, query: string, langName: string) {
@@ -173,6 +164,13 @@ export function Treemap({
   const [search, setSearch] = useState("");
   const [hasVisibleData, setHasVisibleData] = useState(true);
   const [fallbackActive, setFallbackActive] = useState(false);
+  // Most-recently-hovered repo (+ its language label/color), surfaced in the
+  // persistent bottom detail bar. Hover-driven (clicking a cell still opens
+  // GitHub); persists after the cursor leaves the treemap until another repo
+  // is hovered.
+  const [detailRepo, setDetailRepo] =
+    useState<{ repo: Repo; langName: string; langColor: string } | null>(null);
+  const detailRepoNameRef = useRef<string | null>(null);
 
   const rectsRef = useRef<RepoRect[]>([]);
   const groupRectsRef = useRef<GroupRect[]>([]);
@@ -182,7 +180,6 @@ export function Treemap({
   const activeMetricRef = useRef<Metric>(initialMetric);
   const tooltipMetaCacheRef = useRef<Map<string, RepoMeta>>(new Map());
   const tooltipMetaIndexRequestRef = useRef<Promise<void> | null>(null);
-  const activeTooltipRef = useRef<ActiveTooltip | null>(null);
   const searchReadyRef = useRef(false);
 
   const metricOptions = availableMetrics.map((metricKey) => METRIC_OPTIONS[metricKey]);
@@ -194,7 +191,6 @@ export function Treemap({
     return `★ ${fmtK(value)}`;
   }, []);
   const hideTooltip = useCallback(() => {
-    activeTooltipRef.current = null;
     tooltipRef.current?.hide();
   }, []);
   const ensureTooltipMetaIndex = useCallback(() => {
@@ -235,18 +231,14 @@ export function Treemap({
       const cachedMeta = tooltipMetaCacheRef.current.get(repo.fullName);
       const tooltipRepo = cachedMeta ? { ...repo, ...cachedMeta } : repo;
 
-      activeTooltipRef.current = {
-        fullName: repo.fullName,
-        x,
-        y,
-        repo,
-        langName,
-        langColor,
-      };
+      // Mirror into the persistent bottom bar, but only when the hovered repo
+      // changes (this runs on every mousemove over the same cell).
+      if (detailRepoNameRef.current !== repo.fullName) {
+        detailRepoNameRef.current = repo.fullName;
+        setDetailRepo({ repo: tooltipRepo, langName, langColor });
+      }
 
-      tooltipRef.current?.show(x, y, tooltipRepo, langName, langColor, {
-        metaLoading: !cachedMeta,
-      });
+      tooltipRef.current?.show(x, y, tooltipRepo);
 
       if (cachedMeta) {
         return;
@@ -256,16 +248,12 @@ export function Treemap({
         const meta = tooltipMetaCacheRef.current.get(repo.fullName);
         if (!meta) return;
 
-        const activeTooltip = activeTooltipRef.current;
-        if (!activeTooltip || activeTooltip.fullName !== repo.fullName) return;
-
-        tooltipRef.current?.show(
-          activeTooltip.x,
-          activeTooltip.y,
-          { ...activeTooltip.repo, ...meta },
-          activeTooltip.langName,
-          activeTooltip.langColor
-        );
+        // The tooltip only shows name + description (no meta), so nothing to
+        // re-render there — just backfill the bottom bar's Created/Updated once
+        // the meta index resolves, if it's still showing this repo.
+        if (detailRepoNameRef.current === repo.fullName) {
+          setDetailRepo({ repo: { ...repo, ...meta }, langName, langColor });
+        }
       });
     },
     [ensureTooltipMetaIndex]
@@ -1126,8 +1114,90 @@ export function Treemap({
           </div>
         )}
       </div>
+      <RepoDetailBar detail={detailRepo} />
       <Panel ref={panelRef} />
       <Tooltip ref={tooltipRef} />
     </>
+  );
+}
+
+function formatBarDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toISOString().slice(0, 10);
+}
+
+// Persistent detail bar pinned to the bottom of the treemap. Hover-driven: it
+// mirrors the hover tooltip's fields (name / owner / description plus language,
+// stars, forks, growth, created, updated) and keeps the last repo visible after
+// the cursor leaves the canvas. Fixed height so the canvas layout above stays
+// stable; the stats sit in fixed-width slots so they hold the same position on
+// the first line as you move between repos.
+function RepoDetailBar({
+  detail,
+}: {
+  detail: { repo: Repo; langName: string; langColor: string } | null;
+}) {
+  if (!detail) {
+    return (
+      <div className="h-20 shrink-0 border-t border-white/10 bg-[#0c0c0c] px-4 py-2.5">
+        <div className="flex h-full items-center text-xs text-neutral-500">
+          Hover a repo to see its details
+        </div>
+      </div>
+    );
+  }
+
+  const { repo, langName, langColor } = detail;
+  const [owner, name] = repo.fullName.split("/");
+
+  return (
+    <div className="h-20 shrink-0 border-t border-white/10 bg-[#0c0c0c] px-4 py-2.5">
+      <div className="flex h-full flex-col">
+        <div className="flex items-baseline gap-4">
+          {/* Name + owner: flexible, truncates so the stats stay put. */}
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <span className="truncate text-sm font-bold text-white">{name || repo.fullName}</span>
+            {owner && name && (
+              <span className="shrink-0 text-xs text-neutral-500">{owner}</span>
+            )}
+          </div>
+          {/* Fixed-width stat slots — same x-position across repos. */}
+          <div className="flex shrink-0 items-baseline gap-4 text-xs text-neutral-400">
+            <span className="flex w-32 items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-full"
+                style={{ background: langColor }}
+              />
+              <span className="truncate">{langName}</span>
+            </span>
+            <span className="w-16 shrink-0">★ {fmtK(repo.stars)}</span>
+            <span className="w-16 shrink-0">⑂ {fmtK(repo.forks)}</span>
+            <span className="w-24 shrink-0">
+              <span className="text-neutral-500">Growth </span>
+              {repo.growth > 0 ? (
+                <span className="text-green-400">+{fmtK(repo.growth)}</span>
+              ) : (
+                "—"
+              )}
+            </span>
+            <span className="w-36 shrink-0">
+              <span className="text-neutral-500">Created </span>
+              {formatBarDate(repo.createdAt)}
+            </span>
+            <span className="w-36 shrink-0">
+              <span className="text-neutral-500">Updated </span>
+              {formatBarDate(repo.updatedAt)}
+            </span>
+          </div>
+        </div>
+        {repo.description && (
+          <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-neutral-400">
+            {repo.description}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

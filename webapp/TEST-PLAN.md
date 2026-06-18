@@ -1201,6 +1201,22 @@ Detail-view star-range tiers are colored by a webapp-side Viridis ramp (`tierCol
 | 20e.4 | Hover/click tiers; click a tier to sub-drill. | Hover lighten/darken shading and black/white label contrast still work; sub-tiers are themselves Viridis-colored by rank. |
 | 20e.5 | Inspect `lib/treemap/data.ts` color logic + `repos.json`. | Unchanged — the override is webapp-only; dataset colors are untouched. |
 
+## 21. Bottom repo-detail panel on `/ghstars` (issue #145)
+
+A persistent, hover-driven bar (`RepoDetailBar` in `components/treemap/Treemap.tsx`) is pinned to the bottom of `/ghstars`. Its first line shows **name**, **owner**, **language** (color dot + name), **★ stars**, **⑂ forks**, **Growth**, **Created**, **Updated**, and the **description** wraps below. The transient floating tooltip is now slimmed to just **name + description** (the bar carries everything else); clicking a cell still opens GitHub.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 21.1 | Load `/ghstars` (local dev with `repos.json` present); don't hover anything yet. | A fixed-height bar at the bottom shows the placeholder "Hover a repo to see its details". |
+| 21.2 | Hover a repo cell in the overview. | First line shows the repo's name (bold) + owner (muted) on the left and language, ★ stars, ⑂ forks, Growth (green when positive), Created and Updated dates on the right; description wraps on line 2 (clamped to ~2 lines). Values match the floating tooltip for the same repo. |
+| 21.3 | Hover several repos in turn, comparing the right-hand stats column. | Each stat (language, stars, forks, growth, created, updated) stays at the **same x-position** regardless of name/owner length or value width — fixed-width slots, no horizontal jitter. |
+| 21.4 | Move the cursor off the canvas (away from any cell). | The bar keeps showing the last-hovered repo — it persists, it does not revert to the placeholder. |
+| 21.5 | Drill into a language (click a group header), then hover a repo cell. | The bar updates for repos in the detail/tier view too; the language dot uses the language color (not the Viridis tier color). |
+| 21.6 | Hover a repo, then hover it again after a moment (lets the `repo-meta.json` index load). | Created/Updated show "—" only until the meta index resolves, then fill in with `YYYY-MM-DD` dates (backfilled while still hovering the same repo). |
+| 21.7 | Hover repos with very long descriptions. | Description is clamped (no overflow); the canvas above does not reflow — bar height is fixed. |
+| 21.8 | Click a repo cell. | GitHub opens in a new tab as before — the bar does not change click behavior. |
+| 21.9 | Hover a repo and inspect the floating tooltip near the cursor. | Tooltip shows only the repo **name** (bold) and **description** — no owner, language, stars, forks, growth, or dates (those live only in the bottom bar). |
+
 ## Exit criteria
 
 A change ships when:
