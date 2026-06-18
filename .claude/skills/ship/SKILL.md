@@ -10,23 +10,22 @@ normally gates on. Run this sequence:
 2. Check that `ChangeLog.md` is staged. If not, ask the user for a one-line
    summary and add an entry under today's date heading with the matching
    conventional prefix (`feat:`, `fix:`, `docs:`, …).
-3. Write the commit using a HEREDOC commit message — never inline — so backticks
-   and parentheses parse correctly. Append `(#N)` to the subject (for
-   multi-issue commits: `(#N, #M)`); do **not** add `Closes #N` or any other
-   `#N` reference in the body. **Keep the whole subject ≤50 chars** so the
-   trailing `(#N)` stays visible in `git log --oneline`, GitHub PR-title
-   fields, and other narrow UIs — if the summary is running long, tighten
-   the wording rather than letting the issue tag get clipped:
-   ```bash
-   git commit -m "$(cat <<'EOF'
+3. Write the commit message to a file (via the Write tool) and commit with
+   `git commit -F <file>` — never inline `-m`, and never a heredoc. Writing the
+   message to a file sidesteps shell-quoting entirely, so backticks,
+   parentheses, and apostrophes (e.g. `repo's`) all survive verbatim. Append
+   `(#N)` to the subject (for multi-issue commits: `(#N, #M)`); do **not** add
+   `Closes #N` or any other `#N` reference in the body. **Keep the whole subject
+   ≤50 chars** so the trailing `(#N)` stays visible in `git log --oneline`,
+   GitHub PR-title fields, and other narrow UIs — if the summary is running
+   long, tighten the wording rather than letting the issue tag get clipped.
+   Message file contents:
+   ```
    <conventional prefix>: <summary> (#N)
 
    <body>
-   EOF
-   )"
    ```
-   If a heredoc fails to parse (rare, with certain shell environments),
-   fall back to `git commit -F <file>` after writing the message to a file.
+   Then: `git commit -F /tmp/<file>` (any path outside the repo is fine).
 4. `git push` to origin.
 5. Derive the issue number from the branch name (`<N>-<slug>`) and post an
    implementation-summary comment via heredoc stdin:
@@ -70,6 +69,7 @@ Rules:
   the issue happens elsewhere (PR body, manual `gh issue close`).
 - Subject budget ≤50 chars total (including the `(#N)` suffix) — if it spills,
   shorten the summary, not the suffix.
-- Never bypass the heredoc commit-message path — inline `-m` mangles
-  backticks/parens.
+- Always commit via `git commit -F <file>` with the message written to a file
+  first — never inline `-m` (mangles backticks/parens) and never a heredoc
+  (an apostrophe in the body trips the shell eval wrapper).
 - Don't delete branches as part of `/ship` — that's `/cleanup-branches`.
