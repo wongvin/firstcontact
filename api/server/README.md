@@ -26,6 +26,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+> **Already have a `.venv`?** Re-run the install whenever `requirements.txt`
+> changes (e.g. after `git pull`) so new deps land — an existing venv won't
+> pick them up on its own:
+>
+> ```bash
+> source .venv/bin/activate
+> pip install -r requirements.txt
+> ```
+>
+> A missing dep surfaces as a `ModuleNotFoundError` (e.g. `No module named
+> 'google'`) only when the route that imports it is hit, not at startup.
+
 ## Run
 
 ```bash

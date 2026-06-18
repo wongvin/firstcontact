@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-17
+
+### docs: document local-dev setup gotchas (issue #144)
+
+- `webapp/README.md`: added a Node.js ≥ 20.9 prerequisite note and a Troubleshooting section for the WSL failure (old system Node + npm-9 optional-deps bug → Next refusing to start / Tailwind "Cannot find native binding"), with the nvm-based fix.
+- `webapp/README.md`: documented the `/ghstars` treemap dataset with a verified `curl` command to fetch `repos.json` into `public/treemap-data/`.
+- `api/server/README.md`: noted that an existing `.venv` must be re-synced (`pip install -r requirements.txt`) when `requirements.txt` changes, since a missing dep surfaces as a runtime `ModuleNotFoundError`, not a startup error.
+
 ## 2026-06-16
 
 ### feat: color /ghstars star-range tiers with a Viridis ramp (issue #141)
