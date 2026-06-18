@@ -32,6 +32,10 @@ Does not require an issue:
   that issue instead)
 - Reformatting / wording-only doc edits
 
+Prefix every new issue title with the sub-project it concerns, followed by a
+colon: `webapp:` for the webapp target, `iOS:` for the ios target (e.g.
+`webapp: Add dark-mode toggle`, `iOS: Pull-to-refresh on news list`).
+
 Format issue bodies with a short rationale and a `### Requirements` checklist —
 match the style of issues #1–#5.
 
