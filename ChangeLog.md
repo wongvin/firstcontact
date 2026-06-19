@@ -8,6 +8,12 @@
 - `webapp/README.md`: documented the `/ghstars` treemap dataset with a verified `curl` command to fetch `repos.json` into `public/treemap-data/`.
 - `api/server/README.md`: noted that an existing `.venv` must be re-synced (`pip install -r requirements.txt`) when `requirements.txt` changes, since a missing dep surfaces as a runtime `ModuleNotFoundError`, not a startup error.
 
+### feat: bottom repo-detail panel on /ghstars (issue #145)
+
+- `webapp/components/treemap/Treemap.tsx`: added a persistent, hover-driven detail bar (`RepoDetailBar`) pinned to the bottom of the `/ghstars` page. It mirrors the hover tooltip's fields — name, owner, description, plus language (color dot + name), ★ stars, ⑂ forks, Growth, Created and Updated dates. The stats sit in fixed-width slots on the first line so they hold the same x-position as you move between repos; the description wraps below (clamped to 2 lines). Sourced from new `detailRepo` state set inside `showRepoTooltip` (so it reuses the language label/color and the lazily-fetched created/updated meta, backfilling once the meta index resolves). Persists the last repo after the cursor leaves the canvas; placeholder before any hover; fixed height keeps the canvas layout stable. Clicking a cell still opens GitHub.
+- `webapp/components/treemap/Tooltip.tsx`: slimmed the floating hover tooltip to just the repo **name + description** now that the bottom bar carries the rest — dropped owner, language, stars, forks, growth, and created/updated from it. `TooltipHandle.show` simplified to `(x, y, repo)`; removed the now-dead `ActiveTooltip`/`activeTooltipRef` and the meta-driven tooltip re-render in `Treemap.tsx` (the bar's date backfill stays).
+- `webapp/TEST-PLAN.md`: added § 21 covering the detail bar.
+
 ## 2026-06-16
 
 ### feat: color /ghstars star-range tiers with a Viridis ramp (issue #141)
