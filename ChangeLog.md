@@ -2,6 +2,12 @@
 
 ## 2026-06-17
 
+### docs: document local-dev setup gotchas (issue #144)
+
+- `webapp/README.md`: added a Node.js ≥ 20.9 prerequisite note and a Troubleshooting section for the WSL failure (old system Node + npm-9 optional-deps bug → Next refusing to start / Tailwind "Cannot find native binding"), with the nvm-based fix.
+- `webapp/README.md`: documented the `/ghstars` treemap dataset with a verified `curl` command to fetch `repos.json` into `public/treemap-data/`.
+- `api/server/README.md`: noted that an existing `.venv` must be re-synced (`pip install -r requirements.txt`) when `requirements.txt` changes, since a missing dep surfaces as a runtime `ModuleNotFoundError`, not a startup error.
+
 ### feat: bottom repo-detail panel on /ghstars (issue #145)
 
 - `webapp/components/treemap/Treemap.tsx`: added a persistent, hover-driven detail bar (`RepoDetailBar`) pinned to the bottom of the `/ghstars` page. It mirrors the hover tooltip's fields — name, owner, description, plus language (color dot + name), ★ stars, ⑂ forks, Growth, Created and Updated dates. The stats sit in fixed-width slots on the first line so they hold the same x-position as you move between repos; the description wraps below (clamped to 2 lines). Sourced from new `detailRepo` state set inside `showRepoTooltip` (so it reuses the language label/color and the lazily-fetched created/updated meta, backfilling once the meta index resolves). Persists the last repo after the cursor leaves the canvas; placeholder before any hover; fixed height keeps the canvas layout stable. Clicking a cell still opens GitHub.
