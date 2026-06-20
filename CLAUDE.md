@@ -39,6 +39,33 @@ colon: `webapp:` for the webapp target, `iOS:` for the ios target (e.g.
 Format issue bodies with a short rationale and a `### Requirements` checklist —
 match the style of issues #1–#5.
 
+#### Cross-repo work
+
+[Project 1](https://github.com/users/wongvin/projects/1) is a user-level board,
+so it can hold issues from any of your repos — keep it the single hub; never
+spin up a second board per repo. Extend the title-prefix rule with a prefix per
+external target (e.g. `memory:` for `firstcontact-claude-memory`, or
+`<repo>:` generally).
+
+- **Work lands mostly in one repo** — file the issue in that repo, then add it
+  to Project 1:
+
+  ```bash
+  gh issue create --repo wongvin/<repo> --title "<prefix>: ..." --body-file -
+  gh project item-add 1 --owner wongvin --url <issue-url>
+  ```
+
+- **Tightly coupled — one logical change across two repos** (default): file a
+  single parent issue in the primary repo, work a branch + PR in each repo, and
+  reference both PRs from the parent issue. The close comment lists both
+  (`Shipped in wongvin/repoA#N` and `wongvin/repoB#M`).
+
+- **Loosely coupled — separable deliverables**: file one issue per repo,
+  cross-link them, add both to Project 1, and close each independently.
+
+Always cross-link the related issues/PRs in both directions (see the
+cross-linking rule applied across repos).
+
 ### Tracking active work
 
 The project board's Status field tracks where each issue is in its lifecycle:
