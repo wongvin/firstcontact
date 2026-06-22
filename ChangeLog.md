@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-21
+
+### fix: full-text scraper misses body on multi-`<article>` pages (issue #152)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: `extractReadableText` no longer blindly scopes to the first `<article>` region. It now compares the richest `<article>` region against the whole stripped document and only scopes to the article when it holds ≥ half the page's readable text — otherwise harvests from the whole doc. Fixes Business Insider (and similar) pages that scatter many small `<article>` promo cards with the real body outside all of them; the detail screen previously fell back to GNews's truncated `content`. No regression on single-`<article>` or no-`<article>` pages.
+
 ## 2026-06-17
 
 ### docs: document local-dev setup gotchas (issue #144)

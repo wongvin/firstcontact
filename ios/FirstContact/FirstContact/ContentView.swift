@@ -1256,24 +1256,43 @@ struct ContentView: View {
         }
     }
 
-    // Heuristic readability extraction: strip non-content blocks, prefer the <article>
-    // region, then collect block-level text. Good across most news sites, not perfect.
+    // Heuristic readability extraction: strip non-content blocks, then collect block-level text
+    // from the best scope. Good across most news sites, not perfect.
     static func extractReadableText(from html: String) -> String {
         let stripped = removeBlocks(
             html,
             tags: ["script", "style", "head", "noscript", "svg",
                    "header", "footer", "nav", "aside", "form", "figure", "button"])
-        // Prefer the first <article>…</article> region when the page has one.
-        let scope = captures(stripped, pattern: "<article\\b[^>]*>(.*?)</article>", group: 1).first ?? stripped
-        let paragraphs = captures(scope, pattern: "<(p|h1|h2|h3|li)\\b[^>]*>(.*?)</\\1>", group: 2)
-            .map { collapseWhitespace(decodeEntities(stripTags($0))) }
-            .filter { $0.count >= 40 }          // drop nav/ad/byline scraps
-            .filter { !looksLikeMarkup($0) }    // drop escaped-HTML/JSON blobs that survived stripping
+        // Pick the scope to harvest paragraphs from. Pages vary: some wrap the body in one
+        // <article> (related-link lists / sidebars sit outside it, so scoping helps), others
+        // scatter many small <article> promo cards with the real body outside all of them
+        // (e.g. Business Insider). So compare the richest <article> region against the whole
+        // doc — only scope to the article when it holds most of the page's readable text;
+        // otherwise the body isn't inside one and the whole doc is the better source.
+        let docParagraphs = readableParagraphs(in: stripped)
+        let articleParagraphs = captures(stripped, pattern: "<article\\b[^>]*>(.*?)</article>", group: 1)
+            .map { readableParagraphs(in: $0) }
+            .max { paragraphCharCount($0) < paragraphCharCount($1) } ?? []
+        let docCount = paragraphCharCount(docParagraphs)
+        let useArticle = docCount > 0 && paragraphCharCount(articleParagraphs) >= docCount / 2
+        let paragraphs = useArticle ? articleParagraphs : docParagraphs
         if !paragraphs.isEmpty {
             return paragraphs.joined(separator: "\n\n")
         }
-        // Fallback: strip every tag from the scope and return whatever text remains.
-        return collapseWhitespace(decodeEntities(stripTags(scope)))
+        // Fallback: strip every tag and return whatever text remains.
+        return collapseWhitespace(decodeEntities(stripTags(stripped)))
+    }
+
+    // Block-level text in a scope, cleaned and filtered down to body-prose candidates.
+    private static func readableParagraphs(in scope: String) -> [String] {
+        captures(scope, pattern: "<(p|h1|h2|h3|li)\\b[^>]*>(.*?)</\\1>", group: 2)
+            .map { collapseWhitespace(decodeEntities(stripTags($0))) }
+            .filter { $0.count >= 40 }          // drop nav/ad/byline scraps
+            .filter { !looksLikeMarkup($0) }    // drop escaped-HTML/JSON blobs that survived stripping
+    }
+
+    private static func paragraphCharCount(_ paragraphs: [String]) -> Int {
+        paragraphs.reduce(0) { $0 + $1.count }
     }
 
     private static func removeBlocks(_ html: String, tags: [String]) -> String {
