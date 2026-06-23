@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import WebKit
 import GoogleGenerativeAI
 
 struct Quote: Codable {
@@ -116,6 +117,103 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+// MARK: - WebKit page fetch (Cloudflare / bot-wall fallback)
+
+// Loads a URL in a hidden WKWebView and returns the rendered HTML. Used as a fallback when
+// a plain URLSession GET is blocked (e.g. Cloudflare 403s URLSession on its client
+// fingerprint but serves a real WebKit engine). The web view runs the page's JS — including
+// any Cloudflare challenge — so we read the DOM only after navigation settles.
+@MainActor
+final class WebPageFetcher: NSObject, WKNavigationDelegate {
+
+    // Convenience entry point: one fetch per call, self-retained for its lifetime.
+    static func html(from url: URL, timeout: TimeInterval = 25) async -> String? {
+        await WebPageFetcher().load(url, timeout: timeout)
+    }
+
+    private var webView: WKWebView?
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var pollTask: Task<Void, Never>?
+    private var finished = false
+
+    private func load(_ url: URL, timeout: TimeInterval) async -> String? {
+        await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            continuation = cont
+
+            let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+            webView.navigationDelegate = self
+            webView.customUserAgent =
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            // Attach off-screen to the key window so the page's JS timers actually run
+            // (WebKit throttles script in a web view that isn't in a window) — needed for
+            // Cloudflare's challenge to complete.
+            if let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap({ $0.windows })
+                .first(where: { $0.isKeyWindow }) {
+                webView.isHidden = true
+                window.addSubview(webView)
+            }
+            self.webView = webView
+            webView.load(URLRequest(url: url, timeoutInterval: timeout))
+        }
+    }
+
+    // Start polling once the first navigation finishes. A Cloudflare interstitial loads first
+    // and then auto-navigates to the real page once its JS challenge passes, so we can't just
+    // read the DOM on the first didFinish — we poll until the content is no longer a challenge
+    // page (or the timeout elapses).
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in await self?.pollUntilSettled() }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        finish(nil)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        finish(nil)
+    }
+
+    private func pollUntilSettled() async {
+        // Give the page a few seconds to either render real content or clear a quick
+        // interstitial. An interactive Cloudflare challenge won't auto-clear in a hidden
+        // web view, so we bail rather than block — the caller then offers "Open in Safari".
+        for _ in 0..<6 {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if finished { return }
+            guard let webView else { return }
+            let html = try? await webView.evaluateJavaScript("document.documentElement.outerHTML") as? String
+            if let html, !Self.looksLikeChallenge(html) {
+                finish(html)
+                return
+            }
+        }
+        finish(nil)   // still challenged / no real content — fall through to the Safari fallback
+    }
+
+    // Cloudflare / generic interstitial markers. Used to keep waiting rather than scraping
+    // "checking your connection…" as if it were the article body.
+    private static func looksLikeChallenge(_ html: String) -> Bool {
+        let needles = ["challenge-platform", "cf-chl", "_cf_chl", "cf-browser-verification",
+                       "Just a moment", "Checking your connection", "checking your connection",
+                       "Enable JavaScript and cookies to continue"]
+        return needles.contains { html.contains($0) }
+    }
+
+    private func finish(_ html: String?) {
+        guard !finished else { return }
+        finished = true
+        pollTask?.cancel()
+        webView?.navigationDelegate = nil
+        webView?.removeFromSuperview()
+        webView = nil
+        continuation?.resume(returning: html)
+        continuation = nil
     }
 }
 
@@ -989,6 +1087,28 @@ struct ContentView: View {
             .padding(.top, 4)
         case .failed:
             truncatedContent(article)
+            openInSafariLink(article)
+        }
+    }
+
+    // Shown when the full body can't be scraped (e.g. a publisher behind a Cloudflare /
+    // bot-wall that blocks URLSession and serves an interactive challenge our hidden
+    // WKWebView can't clear). Opens the source in Safari, which passes the challenge natively.
+    @ViewBuilder
+    private func openInSafariLink(_ article: Article) -> some View {
+        if let urlString = article.url, let url = URL(string: urlString) {
+            Link(destination: url) {
+                HStack(spacing: 6) {
+                    Text("Open full article in Safari")
+                    Image(systemName: "arrow.up.right.square")
+                }
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 16)
+                .background(.white.opacity(0.18), in: Capsule())
+            }
+            .padding(.top, 4)
         }
     }
 
@@ -1237,23 +1357,40 @@ struct ContentView: View {
             return
         }
         articleTextState = .loading
-        do {
-            var request = URLRequest(url: url, timeoutInterval: 15)
-            // Some sites serve a stripped page (or block) the default URLSession UA.
-            request.setValue(
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
-                forHTTPHeaderField: "User-Agent")
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-            let html = String(decoding: data, as: UTF8.self)
+        // Fast path: a plain URLSession GET. Works for most publishers.
+        if let html = await fetchHTMLDirect(url) {
             let text = Self.extractReadableText(from: html)
-            guard !text.isEmpty else { throw URLError(.cannotParseResponse) }
-            articleTextState = .loaded(text)
-        } catch {
-            articleTextState = .failed
+            if !text.isEmpty {
+                articleTextState = .loaded(text)
+                return
+            }
         }
+        // Fallback: some publishers (e.g. phys.org, NYT) sit behind Cloudflare/bot walls
+        // that 403 URLSession on its client fingerprint regardless of User-Agent, but
+        // serve normally to a real WebKit engine. Retry through a hidden WKWebView, which
+        // presents a genuine Safari fingerprint and runs any JS challenge, then extract
+        // from the rendered DOM.
+        if let html = await WebPageFetcher.html(from: url),
+           case let text = Self.extractReadableText(from: html), !text.isEmpty {
+            articleTextState = .loaded(text)
+            return
+        }
+        articleTextState = .failed
+    }
+
+    // Direct URLSession fetch. Returns the page HTML on a 200, nil on any failure/non-200
+    // (the caller then tries the WebKit fallback).
+    private func fetchHTMLDirect(_ url: URL) async -> String? {
+        var request = URLRequest(url: url, timeoutInterval: 15)
+        // Some sites serve a stripped page (or block) the default URLSession UA.
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            return nil
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     // Heuristic readability extraction: strip non-content blocks, then collect block-level text

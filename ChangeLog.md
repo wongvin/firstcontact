@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-06-22
+
+### feat: WebKit fallback + "Open in Safari" for blocked article fetches (issue #154)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the full-text scraper now has a three-tier fetch. (1) `URLSession` GET (fast path, unchanged for most publishers). (2) On failure/non-200, a hidden `WKWebView` (`WebPageFetcher`) retries with a real Safari fingerprint — recovering sites that 403 `URLSession` on its client fingerprint but aren't behind an interactive challenge. (3) When both fail — e.g. phys.org's Cloudflare "checking your connection" challenge, which a hidden web view can't clear (verified on simulator + device) — the detail screen's `.failed` state now shows an **"Open full article in Safari"** link alongside the truncated `content`, so the article is still reachable in a browser that passes the challenge natively. `WebPageFetcher` detects challenge interstitials and bails fast rather than blocking.
+
 ## 2026-06-21
 
 ### fix: full-text scraper misses body on multi-`<article>` pages (issue #152)
