@@ -2,6 +2,10 @@
 
 ## 2026-06-22
 
+### feat: selectable full-text article body (issue #156)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the loaded full-text body is now rendered by a read-only, selectable `UITextView` (`SelectableText`, a `UIViewRepresentable`) instead of `Text`, giving native cursor-based selection — draggable selection handles, a bright-cyan selection highlight + cursor tint (legible over the indigo/purple gradient, where the default system tint is muddy), and the magnifier loupe — for selecting/copying article text. Non-scrolling so it still sizes to content inside the detail ScrollView. The detail screen's swipe-to-dismiss gesture is suspended (via `GestureMask` keyed off a selection-active flag the text view reports) while the selection handles are in use, so dragging a cursor horizontally is no longer misread as a dismiss swipe.
+
 ### feat: WebKit fallback + "Open in Safari" for blocked article fetches (issue #154)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the full-text scraper now has a three-tier fetch. (1) `URLSession` GET (fast path, unchanged for most publishers). (2) On failure/non-200, a hidden `WKWebView` (`WebPageFetcher`) retries with a real Safari fingerprint — recovering sites that 403 `URLSession` on its client fingerprint but aren't behind an interactive challenge. (3) When both fail — e.g. phys.org's Cloudflare "checking your connection" challenge, which a hidden web view can't clear (verified on simulator + device) — the detail screen's `.failed` state now shows an **"Open full article in Safari"** link alongside the truncated `content`, so the article is still reachable in a browser that passes the challenge natively. `WebPageFetcher` detects challenge interstitials and bails fast rather than blocking.

@@ -120,6 +120,65 @@ struct FlowLayout: Layout {
     }
 }
 
+// A read-only, selectable UITextView wrapped for SwiftUI. Gives the article body iOS's
+// native cursor-based selection — draggable selection handles and the magnifier loupe —
+// which Text().textSelection(.enabled) doesn't fully provide. Non-scrolling so it sizes to
+// its content inside the surrounding ScrollView.
+struct SelectableText: UIViewRepresentable {
+    let text: String
+    var font: UIFont = .systemFont(ofSize: 16)
+    var color: UIColor = UIColor.white.withAlphaComponent(0.9)
+    // Drives the selection highlight + cursor handles. A bright cyan reads clearly over the
+    // app's indigo/purple gradient (the default system tint is muddy against it) and keeps the
+    // white body text legible under the translucent selection overlay.
+    var tint: UIColor = UIColor(red: 0.30, green: 0.82, blue: 0.95, alpha: 1.0)
+    // Reports whether a non-empty selection is active, so the caller can suspend its own
+    // swipe gestures while the user is dragging the selection handles.
+    var onSelectionChange: ((Bool) -> Void)? = nil
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.delegate = context.coordinator
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.tintColor = tint
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        view.text = text
+        view.font = font
+        view.textColor = color
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelectionChange: onSelectionChange) }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        let onSelectionChange: ((Bool) -> Void)?
+        init(onSelectionChange: ((Bool) -> Void)?) { self.onSelectionChange = onSelectionChange }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            let active = textView.selectedTextRange.map { !$0.isEmpty } ?? false
+            onSelectionChange?(active)
+        }
+    }
+
+    // Give SwiftUI an exact height for the proposed width so the body lays out correctly
+    // within the column (a non-scrolling text view's intrinsic height depends on width).
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? uiView.bounds.width
+        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: fitted.height)
+    }
+}
+
 // MARK: - WebKit page fetch (Cloudflare / bot-wall fallback)
 
 // Loads a URL in a hidden WKWebView and returns the rendered HTML. Used as a fallback when
@@ -286,6 +345,7 @@ struct ContentView: View {
     @State private var keywordTermCache: [String: String] = [:] // key-term panel's Gemini term by article.url (session memory)
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
+    @State private var textSelectionActive = false   // true while the body's selection handles are in use
     @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
     @State private var showKeywordPanel = false      // drives panel presentation (article optional)
     @State private var keywordState: KeywordState = .loading
@@ -752,7 +812,8 @@ struct ContentView: View {
         .foregroundStyle(.white)
         // A horizontal swipe (either direction) dismisses, like the back chevron.
         // simultaneousGesture so the body's vertical scrolling still works; we only
-        // act on horizontal-dominant swipes.
+        // act on horizontal-dominant swipes. Suspended (`.subviews`) while the body's
+        // selection handles are active, so dragging a cursor isn't read as a dismiss swipe.
         .simultaneousGesture(
             DragGesture(minimumDistance: 20)
                 .onEnded { value in
@@ -760,7 +821,8 @@ struct ContentView: View {
                        abs(value.translation.width) > 50 {
                         withAnimation { detailArticle = nil }
                     }
-                }
+                },
+            including: textSelectionActive ? .subviews : .all
         )
         .task(id: article.url) { await loadFullText(article) }
     }
@@ -1072,10 +1134,9 @@ struct ContentView: View {
     private func articleBody(_ article: Article) -> some View {
         switch articleTextState {
         case .loaded(let text):
-            Text(text)
-                .font(.system(size: 16))
-                .opacity(0.9)
-                .fixedSize(horizontal: false, vertical: true)
+            // UITextView-backed so the body supports native cursor-based selection.
+            SelectableText(text: text) { active in textSelectionActive = active }
+                .frame(maxWidth: .infinity, alignment: .leading)
         case .loading:
             truncatedContent(article)
             HStack(spacing: 8) {
@@ -1352,6 +1413,7 @@ struct ContentView: View {
     // MARK: - Full article text (client-side scrape of article.url)
 
     private func loadFullText(_ article: Article) async {
+        textSelectionActive = false   // reset per article so a stale selection can't block dismiss
         guard let urlString = article.url, let url = URL(string: urlString) else {
             articleTextState = .failed
             return
