@@ -346,6 +346,9 @@ struct ContentView: View {
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
     @State private var textSelectionActive = false   // true while the body's selection handles are in use
+    // Article URLs whose full-text fetch failed (only reachable via "Open in Safari"). Session
+    // memory so reopening one skips the costly WKWebView retry that can't beat its bot wall.
+    @State private var safariOnlyArticleURLs: Set<String> = []
     @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
     @State private var showKeywordPanel = false      // drives panel presentation (article optional)
     @State private var keywordState: KeywordState = .loading
@@ -1445,11 +1448,20 @@ struct ContentView: View {
         // serve normally to a real WebKit engine. Retry through a hidden WKWebView, which
         // presents a genuine Safari fingerprint and runs any JS challenge, then extract
         // from the rendered DOM.
-        if let html = await WebPageFetcher.html(from: url),
+        //
+        // Skip this for an article we've already seen fail: once it fell back to "Open in
+        // Safari", we know its full text requires Safari, and the WKWebView retry can't beat
+        // the bot wall a second time (it never clears Cloudflare's interactive challenge) —
+        // so re-running its ~9s attempt on reopen is pure waste. Go straight to .failed.
+        if !safariOnlyArticleURLs.contains(urlString),
+           let html = await WebPageFetcher.html(from: url),
            case let text = Self.extractReadableText(from: html), !text.isEmpty {
             articleTextState = .loaded(text)
             return
         }
+        // Full text unavailable — remember it so the next open of this article skips the
+        // WKWebView attempt above and lands straight on the Safari link.
+        safariOnlyArticleURLs.insert(urlString)
         articleTextState = .failed
     }
 
