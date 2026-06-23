@@ -2,6 +2,10 @@
 
 ## 2026-06-22
 
+### perf: skip WKWebView retry when reopening a Safari-only article (issue #160)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: `loadFullText` now records (session-scoped `safariOnlyArticleURLs`) any article whose full-text fetch failed and fell back to the "Open full article in Safari" link. Reopening that same article skips the ~9s hidden-`WKWebView` retry — which can't clear an interactive Cloudflare challenge anyway — and lands straight on the Safari link. First-time behavior (URLSession → WKWebView → Safari) is unchanged; the fast URLSession path still runs on reopen, so a recovered site still loads inline.
+
 ### feat: cream/dark color scheme for the news views (issue #158)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the news views — article cards, the full-article detail screen, the related-news feed, and news loading/empty/failed states — now render on a warm cream background (`#F0EDE6`) with dark text (`#292826`) for a clean reading-app look, replacing the indigo/purple gradient + white text on those screens. The selectable body switches to dark text with a dark-gray selection tint; the image placeholder and "Open in Safari" affordance adapt to the light theme. The home screen (quote, 30-day summary, issues) keeps the gradient. Added `newsBackground`/`newsText` palette constants.
