@@ -372,6 +372,13 @@ struct ContentView: View {
     private static let wordLimit = 50
     private static let viewCount = 3
     private static let newsCategories = ["general", "technology", "science"]
+    // Cream / dark reading theme for the news views (article cards, detail, related feed,
+    // news status). The home screen keeps the indigo/purple gradient.
+    private static let newsBackground = Color(red: 0.941, green: 0.929, blue: 0.902)  // #F0EDE6
+    private static let newsText = Color(red: 0.16, green: 0.157, blue: 0.149)         // #292826
+    private static let newsTextUIColor = UIColor(red: 0.16, green: 0.157, blue: 0.149, alpha: 1)
+    // Dark-gray selection tint: dark grab-handles + a light-gray translucent highlight fill.
+    private static let newsSelectionTint = UIColor(white: 0.20, alpha: 1)
     private static func wipText(_ view: Int) -> String { "View \(view + 1): Work in progress" }
     private static let geminiSystemPrompt = """
         You write concise editorial summaries of software engineering work. \
@@ -736,7 +743,8 @@ struct ContentView: View {
             }
         }
         .ignoresSafeArea(edges: .top)
-        .foregroundStyle(.white)
+        .background(Self.newsBackground.ignoresSafeArea())
+        .foregroundStyle(Self.newsText)
         .contentShape(Rectangle())
         .onTapGesture { withAnimation { detailArticle = article } }
         // Long-press an article (any non-home screen) opens the keyword panel, pre-filled
@@ -809,7 +817,8 @@ struct ContentView: View {
                 }
             }
         }
-        .foregroundStyle(.white)
+        .background(Self.newsBackground.ignoresSafeArea())
+        .foregroundStyle(Self.newsText)
         // A horizontal swipe (either direction) dismisses, like the back chevron.
         // simultaneousGesture so the body's vertical scrolling still works; we only
         // act on horizontal-dominant swipes. Suspended (`.subviews`) while the body's
@@ -1135,12 +1144,14 @@ struct ContentView: View {
         switch articleTextState {
         case .loaded(let text):
             // UITextView-backed so the body supports native cursor-based selection.
-            SelectableText(text: text) { active in textSelectionActive = active }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            SelectableText(text: text, color: Self.newsTextUIColor, tint: Self.newsSelectionTint) { active in
+                textSelectionActive = active
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .loading:
             truncatedContent(article)
             HStack(spacing: 8) {
-                ProgressView().tint(.white)
+                ProgressView().tint(Self.newsText)
                 Text("Loading full article\u{2026}")
                     .font(.system(size: 14))
                     .opacity(0.7)
@@ -1164,10 +1175,10 @@ struct ContentView: View {
                     Image(systemName: "arrow.up.right.square")
                 }
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Self.newsText)
                 .padding(.vertical, 10)
                 .padding(.horizontal, 16)
-                .background(.white.opacity(0.18), in: Capsule())
+                .background(Self.newsText.opacity(0.1), in: Capsule())
             }
             .padding(.top, 4)
         }
@@ -1193,7 +1204,7 @@ struct ContentView: View {
         VStack(spacing: 12) {
             switch state {
             case .loading:
-                ProgressView().tint(.white)
+                ProgressView().tint(Self.newsText)
                 Text("Loading latest news\u{2026}")
             case .missingKey:
                 Text("Set GNEWS_API_KEY in Secrets.xcconfig — see ios/CLAUDE.md.")
@@ -1207,9 +1218,10 @@ struct ContentView: View {
             }
         }
         .font(.system(size: 15))
-        .foregroundStyle(.white)
+        .foregroundStyle(Self.newsText)
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Self.newsBackground.ignoresSafeArea())
     }
 
     private var newsStatusScreen: some View {
@@ -1242,7 +1254,7 @@ struct ContentView: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
-            .foregroundStyle(.white)
+            .foregroundStyle(Self.newsText)
 
             Group {
                 if !feed.articles.isEmpty, feed.index < feed.articles.count {
@@ -1255,6 +1267,7 @@ struct ContentView: View {
             .contentShape(Rectangle())
             .gesture(spawnedFeedSwipe(count: feed.articles.count))
         }
+        .background(Self.newsBackground.ignoresSafeArea())
     }
 
     // Nav-axis paging within the spawned feed (wraps among its articles). Cross-axis ignored.
@@ -1278,7 +1291,7 @@ struct ContentView: View {
                 case .success(let image):
                     image.resizable().scaledToFill()
                 case .empty:
-                    ZStack { imagePlaceholder; ProgressView().tint(.white) }
+                    ZStack { imagePlaceholder; ProgressView().tint(Self.newsText) }
                 case .failure:
                     imagePlaceholder
                 @unknown default:
@@ -1292,11 +1305,11 @@ struct ContentView: View {
 
     private var imagePlaceholder: some View {
         Rectangle()
-            .fill(.white.opacity(0.1))
+            .fill(Self.newsText.opacity(0.06))
             .overlay(
                 Image(systemName: "newspaper")
                     .font(.system(size: 40))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Self.newsText.opacity(0.35))
             )
     }
 

@@ -2,6 +2,10 @@
 
 ## 2026-06-22
 
+### feat: cream/dark color scheme for the news views (issue #158)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the news views — article cards, the full-article detail screen, the related-news feed, and news loading/empty/failed states — now render on a warm cream background (`#F0EDE6`) with dark text (`#292826`) for a clean reading-app look, replacing the indigo/purple gradient + white text on those screens. The selectable body switches to dark text with a dark-gray selection tint; the image placeholder and "Open in Safari" affordance adapt to the light theme. The home screen (quote, 30-day summary, issues) keeps the gradient. Added `newsBackground`/`newsText` palette constants.
+
 ### feat: selectable full-text article body (issue #156)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: the loaded full-text body is now rendered by a read-only, selectable `UITextView` (`SelectableText`, a `UIViewRepresentable`) instead of `Text`, giving native cursor-based selection — draggable selection handles, a bright-cyan selection highlight + cursor tint (legible over the indigo/purple gradient, where the default system tint is muddy), and the magnifier loupe — for selecting/copying article text. Non-scrolling so it still sizes to content inside the detail ScrollView. The detail screen's swipe-to-dismiss gesture is suspended (via `GestureMask` keyed off a selection-active flag the text view reports) while the selection handles are in use, so dragging a cursor horizontally is no longer misread as a dismiss swipe.
