@@ -1228,6 +1228,17 @@ The DigiKey search result (`public/digikey-search.html` → local backend `/digi
 | 22.3 | Inspect the `/digikey/pricing` JSON response (DevTools Network, or curl). | Response includes an `image_url` field — a `mm.digikey.com` `…_sml(200x200).jpg` URL for parts with a photo, `null` otherwise. |
 | 22.4 | Stop the backend and search. | Unchanged from before: the "backend unreachable" error message shows (the image feature doesn't affect the offline path). |
 
+## 23. Mouser search product image (issue #164)
+
+The Mouser search result (`public/mouser-search.html` → local backend `/mouser/pricing`) shows the part's product photo above the price, mirroring the DigiKey page (§ 22). Mouser includes the photo inline on the Part (`ImagePath`), so the backend returns it as `image_url` with no extra request. Requires the local backend running (`localhost:8001`).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 23.1 | With the backend running, open `/mouser-search.html` and search `NE555P`. | A product photo (the PDIP-8 package) appears on a white rounded chip above the `Qty → $price` headline; price and part numbers render as before. |
+| 23.2 | Search a part Mouser has no photo for (or temporarily point the image at a 404). | No image is shown; the price/part-number result still renders normally (no broken-image icon, no error). |
+| 23.3 | Inspect the `/mouser/pricing` JSON response (DevTools Network, or curl). | Response includes an `image_url` field — a `mouser.com` image URL for parts with a photo, `null` otherwise. |
+| 23.4 | Stop the backend and search. | Unchanged: the "backend unreachable" error message shows (the image feature doesn't affect the offline path). |
+
 ## Exit criteria
 
 A change ships when:

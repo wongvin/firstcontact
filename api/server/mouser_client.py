@@ -128,4 +128,6 @@ async def get_pricing(manufacturer_part_number: str) -> dict[str, Any]:
         "unit_price": selected["unit_price"],
         "tier_quantity": selected["quantity"],
         "tiers": tiers,
+        # Mouser includes the product photo inline on the Part (no separate media call).
+        "image_url": matched.get("ImagePath") or None,
     }

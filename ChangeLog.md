@@ -2,6 +2,12 @@
 
 ## 2026-06-26
 
+### feat: product image in Mouser search result (issue #164)
+
+- `api/server/mouser_client.py`: `get_pricing` returns the matched part's inline `ImagePath` as `image_url` (Mouser includes the photo on the Part, so no extra request — unlike DigiKey's separate media call); `null` when absent.
+- `webapp/public/mouser-search.html`: renders `image_url` on a white rounded chip above the price headline; silently omits it when absent or unloadable. Mirrors the DigiKey tool page (#162).
+- `webapp/TEST-PLAN.md`: added § 23.
+
 ### feat: product image in DigiKey search result (issue #162)
 
 - `api/server/digikey_client.py`: `get_pricing` now also calls DigiKey's ProductMedia endpoint (`/products/v4/search/{pn}/media`) best-effort in the same session and returns the product photo URL as `image_url` (the "Product Photos" `SmallPhoto`, 200×200; falls back to full-res `Url`/`Thumbnail`). A media failure returns `null` and never blocks pricing. Refactored the request headers into a shared `_api_headers` helper.
