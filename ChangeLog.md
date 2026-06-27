@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-26
+
+### feat: product image in DigiKey search result (issue #162)
+
+- `api/server/digikey_client.py`: `get_pricing` now also calls DigiKey's ProductMedia endpoint (`/products/v4/search/{pn}/media`) best-effort in the same session and returns the product photo URL as `image_url` (the "Product Photos" `SmallPhoto`, 200×200; falls back to full-res `Url`/`Thumbnail`). A media failure returns `null` and never blocks pricing. Refactored the request headers into a shared `_api_headers` helper.
+- `webapp/public/digikey-search.html`: renders `image_url` on a white rounded chip above the price headline; silently omits it when absent or if the image fails to load.
+- `webapp/TEST-PLAN.md`: added § 22.
+
 ## 2026-06-22
 
 ### perf: skip WKWebView retry when reopening a Safari-only article (issue #160)

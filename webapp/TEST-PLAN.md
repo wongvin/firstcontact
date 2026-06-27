@@ -1217,6 +1217,17 @@ A persistent, hover-driven bar (`RepoDetailBar` in `components/treemap/Treemap.t
 | 21.8 | Click a repo cell. | GitHub opens in a new tab as before — the bar does not change click behavior. |
 | 21.9 | Hover a repo and inspect the floating tooltip near the cursor. | Tooltip shows only the repo **name** (bold) and **description** — no owner, language, stars, forks, growth, or dates (those live only in the bottom bar). |
 
+## 22. DigiKey search product image (issue #162)
+
+The DigiKey search result (`public/digikey-search.html` → local backend `/digikey/pricing`) shows the part's product photo above the price. The backend fetches DigiKey's ProductMedia endpoint best-effort and returns `image_url` (the "Product Photos" `SmallPhoto`); the page renders it on a white chip, and silently omits it when absent. Requires the local backend running (`localhost:8001`).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 22.1 | With the backend running, open `/digikey-search.html` and search `STM32F407VGT6`. | A product photo (the LQFP chip) appears on a white rounded chip above the `Qty → $price` headline; price and part numbers render as before. |
+| 22.2 | Search a part DigiKey has no photo for (or temporarily point the image at a 404). | No image is shown; the price/part-number result still renders normally (no broken-image icon, no error). |
+| 22.3 | Inspect the `/digikey/pricing` JSON response (DevTools Network, or curl). | Response includes an `image_url` field — a `mm.digikey.com` `…_sml(200x200).jpg` URL for parts with a photo, `null` otherwise. |
+| 22.4 | Stop the backend and search. | Unchanged from before: the "backend unreachable" error message shows (the image feature doesn't affect the offline path). |
+
 ## Exit criteria
 
 A change ships when:
