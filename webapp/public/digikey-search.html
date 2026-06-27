@@ -96,6 +96,17 @@
       margin-top: 1.5rem;
       min-height: 5rem;
     }
+    .product-image {
+      display: block;
+      margin: 0 auto 1rem;
+      width: 140px;
+      height: 140px;
+      object-fit: contain;
+      background: white;
+      border-radius: 0.5rem;
+      padding: 0.5rem;
+      box-sizing: border-box;
+    }
     .headline {
       display: flex;
       align-items: baseline;
@@ -152,6 +163,16 @@
 
     function renderResult(data) {
       result.replaceChildren();
+
+      if (data.image_url) {
+        const img = document.createElement('img');
+        img.className = 'product-image';
+        img.src = data.image_url;
+        img.alt = data.manufacturer_part_number + ' product photo';
+        img.referrerPolicy = 'no-referrer';
+        img.onerror = () => img.remove();   // drop silently if the image can't load
+        result.appendChild(img);
+      }
 
       const headline = document.createElement('div');
       headline.className = 'headline';
