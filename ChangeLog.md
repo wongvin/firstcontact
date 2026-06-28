@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-06-27
+
+### feat: treemap tile hints on touch devices (issue #166)
+
+- `webapp/components/treemap/Treemap.tsx`: the `/ghstars` treemap is canvas-rendered and only surfaced hints via `onMouseMove`, so iPad/iOS (no pointer) never showed them usably. Added pointer-event handlers (gated on `pointerType`; the synthesized post-tap mouse events iOS fires are ignored so desktop hover/click is unchanged): a first tap reveals a tile's hint — bottom detail bar + an interactive floating hint near the tap — and highlights the tile. Opening the repo happens via a second tap on the same tile or a tap on the floating hint; the floating hint can be dragged to uncover the tiles it covers. Taps on headers/groups/"more" navigate as before; a tap on empty space dismisses. Taps are distinguished from drags by movement, and the canvas gets `touch-action: manipulation`.
+- `webapp/components/treemap/Tooltip.tsx`: the floating hint takes an optional `interactive` mode (pointer-events enabled, "Tap to open · drag to move" affordance) with its own tap/drag pointer handlers and an `onActivate` callback; hover mode stays click-through.
+- `webapp/TEST-PLAN.md`: added § 24.
+
 ## 2026-06-26
 
 ### feat: product image in Mouser search result (issue #164)

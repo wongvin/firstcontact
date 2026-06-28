@@ -176,6 +176,13 @@ export function Treemap({
   const groupRectsRef = useRef<GroupRect[]>([]);
   const hoveredIdxRef = useRef(-1);
   const hoveredGroupRef = useRef(-1);
+  // Touch: swallow the click iOS synthesizes after a tap (we handle taps in the
+  // pointer handlers), plus the pointerdown position for tap-vs-drag detection.
+  const suppressClickRef = useRef(false);
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Last pointer kind seen, so the synthesized mouse events iOS fires after a
+  // tap don't drive the hover-only code paths.
+  const lastPointerTypeRef = useRef<string>("mouse");
   const allReposRef = useRef<Repo[]>([]); // for detail panel
   const activeMetricRef = useRef<Metric>(initialMetric);
   const tooltipMetaCacheRef = useRef<Map<string, RepoMeta>>(new Map());
@@ -227,7 +234,7 @@ export function Treemap({
     return request;
   }, []);
   const showRepoTooltip = useCallback(
-    (x: number, y: number, repo: Repo, langName: string, langColor: string) => {
+    (x: number, y: number, repo: Repo, langName: string, langColor: string, floating = true, interactive = false) => {
       const cachedMeta = tooltipMetaCacheRef.current.get(repo.fullName);
       const tooltipRepo = cachedMeta ? { ...repo, ...cachedMeta } : repo;
 
@@ -238,7 +245,9 @@ export function Treemap({
         setDetailRepo({ repo: tooltipRepo, langName, langColor });
       }
 
-      tooltipRef.current?.show(x, y, tooltipRepo);
+      // On touch the floating hint is interactive (tap to open, drag to move it
+      // off the tiles it covers); on hover it's a plain click-through tooltip.
+      if (floating) tooltipRef.current?.show(x, y, tooltipRepo, interactive);
 
       if (cachedMeta) {
         return;
@@ -866,6 +875,9 @@ export function Treemap({
   // ── Mouse events ──
   const onMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Ignore the one-shot mousemove iOS synthesizes on tap — touch is driven
+      // by the pointer handlers, which show an interactive hint instead.
+      if (lastPointerTypeRef.current === "touch") return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -970,6 +982,8 @@ export function Treemap({
   );
 
   const onMouseLeave = useCallback(() => {
+    // Don't let a synthesized mouseleave tear down a touch reveal.
+    if (lastPointerTypeRef.current === "touch") return;
     hoveredIdxRef.current = -1;
     hoveredGroupRef.current = -1;
     hideTooltip();
@@ -978,14 +992,10 @@ export function Treemap({
     render();
   }, [hideTooltip, render]);
 
-  const onClick = useCallback(
-    (e: React.MouseEvent) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-
+  // Open the hit repo on GitHub, or drill into a tapped header/group/"more"
+  // cell. Shared by mouse clicks and the second tap of a touch interaction.
+  const openOrNavigate = useCallback(
+    (mx: number, my: number) => {
       if (mode === "detail") {
         // Header click → navigate to sub-tier
         const hdrHit = hitHeader(mx, my);
@@ -1046,6 +1056,95 @@ export function Treemap({
     [mode, onOpenLang, onOpenTier]
   );
 
+  const onClick = useCallback(
+    (e: React.MouseEvent) => {
+      // iOS fires a synthetic click after a tap; the pointer handlers already
+      // dealt with it, so swallow this one.
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      openOrNavigate(e.clientX - rect.left, e.clientY - rect.top);
+    },
+    [openOrNavigate]
+  );
+
+  // ── Touch events ──
+  // No hover on touch, so a tap reveals the tile's hint in the bottom detail
+  // bar (two-stage: tap to reveal, tap the same tile again to open on GitHub).
+  // Gated on pointerType so mouse behaviour above is untouched.
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    lastPointerTypeRef.current = e.pointerType;
+    if (e.pointerType === "mouse") return;
+    suppressClickRef.current = false;
+    pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      lastPointerTypeRef.current = e.pointerType;
+      if (e.pointerType === "mouse") return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Treat a moved finger as a scroll/drag, not a tap.
+      const down = pointerDownPosRef.current;
+      pointerDownPosRef.current = null;
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) return;
+
+      // We handle the tap here; suppress the click iOS synthesizes next.
+      suppressClickRef.current = true;
+
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const gRects = groupRectsRef.current;
+
+      const hdrHit = hitHeader(mx, my);
+      const repoHit = hdrHit < 0 ? hitRepo(mx, my) : -1;
+
+      if (repoHit >= 0) {
+        const r = rectsRef.current[repoHit];
+        const gi = gRects[r.groupIdx!];
+        const repo = gi?.allRepos[r.idx];
+        if (!repo) return;
+        if (detailRepoNameRef.current === repo.fullName) {
+          // Second tap on the already-revealed tile → open it.
+          window.open(`https://github.com/${repo.fullName}`, "_blank");
+          return;
+        }
+        // First tap → reveal hint (interactive floating hint + detail bar) and
+        // highlight the tile.
+        hoveredIdxRef.current = r.idx;
+        hoveredGroupRef.current = r.groupIdx!;
+        panelRef.current?.hide();
+        showRepoTooltip(e.clientX, e.clientY, repo, gi.lang, gi.color, true, true);
+        render();
+        return;
+      }
+
+      // Tapping a header / group / "more" cell navigates, same as a click.
+      if (hdrHit >= 0 || hitOthers(mx, my) >= 0 || hitGroup(mx, my) >= 0) {
+        openOrNavigate(mx, my);
+        return;
+      }
+
+      // Tap on empty space → dismiss the current selection.
+      if (detailRepoNameRef.current !== null) {
+        detailRepoNameRef.current = null;
+        hoveredIdxRef.current = -1;
+        hoveredGroupRef.current = -1;
+        setDetailRepo(null);
+        hideTooltip();
+        render();
+      }
+    },
+    [hideTooltip, openOrNavigate, render, showRepoTooltip]
+  );
+
   const breadcrumb: HeaderBreadcrumbItem[] =
     breadcrumbOverride ??
     (mode === "overview"
@@ -1092,7 +1191,10 @@ export function Treemap({
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
           onClick={onClick}
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
           className="block w-full h-full"
+          style={{ touchAction: "manipulation" }}
         />
         {fallbackActive && fallbackNotice && (
           <div className="absolute left-4 top-4 z-10 max-w-md rounded-2xl border border-[#2b3e45] bg-[rgba(12,12,12,0.88)] px-4 py-3 shadow-2xl backdrop-blur-xl">
@@ -1116,7 +1218,10 @@ export function Treemap({
       </div>
       <RepoDetailBar detail={detailRepo} />
       <Panel ref={panelRef} />
-      <Tooltip ref={tooltipRef} />
+      <Tooltip
+        ref={tooltipRef}
+        onActivate={(fullName) => window.open(`https://github.com/${fullName}`, "_blank")}
+      />
     </>
   );
 }
