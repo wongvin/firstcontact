@@ -1277,6 +1277,21 @@ Activating a `/ghstars` repo tile opens the project's README in an in-app side p
 | 25.13 | Desktop: with a README open, press-drag the floating hint with the mouse. | The hint is draggable (cursor: grab, "Drag to move" label) and stays where released, uncovering tiles beneath — same as touch. (The non-locked hover tooltip remains click-through / non-draggable.) |
 | 25.14 | Drag the hint somewhere, then re-select the **same** open tile (click/tap it) or tap the hint itself. | The hint stays exactly where it was dragged — it is **not** repositioned back to the tile. The panel is unchanged (no reload). Selecting a *different* tile still re-anchors the hint to that tile. |
 
+## 26. Raw-HTML images in the treemap README panel (issue #170)
+
+`ReadmePanel.tsx` now runs `rehype-raw` (parses raw HTML embedded in the README) followed by `rehype-sanitize` (with a schema that additionally allows `<picture>`/`<source>` and the `align` attribute on `img`/`p`/`div`). This makes images that READMEs embed as **raw HTML** — centred logos (`<p align="center"><img src=…>`), `<picture>` blocks, badge rows — render in the panel; previously `react-markdown` silently dropped all raw HTML. Markdown-syntax images (`![](…)`) continue to work as before, and the existing `makeUrlTransform` still rewrites relative `src` values (markdown **and** raw-HTML) to `raw.githubusercontent.com/<repo>/HEAD/…`.
+
+Good repos to exercise this: any with a prominent header logo embedded via `<p align="center"><img …>` (e.g. `facebook/react`, `vercel/next.js`), and any using a `<picture>` light/dark logo (e.g. `vitejs/vite`).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 26.1 | Open the README for a repo whose header logo is embedded via raw HTML `<img>` (e.g. `facebook/react`). | The logo image renders in the panel (previously it was missing). |
+| 26.2 | Open a README that uses a `<picture>` element with `<source>` for a light/dark logo (e.g. `vitejs/vite`). | An appropriate logo renders (the browser picks a `<source>` per `prefers-color-scheme`); no broken-image icon. |
+| 26.3 | Open a README with a centred badge/logo row using `<p align="center">` or `<div align="center">`. | The images render and stay horizontally centred (the `align` attribute survives sanitisation). |
+| 26.4 | For a raw-HTML `<img>` with a **relative** `src` (e.g. `src="docs/logo.png"`), inspect the rendered element. | `src` resolves to `https://raw.githubusercontent.com/<repo>/HEAD/docs/logo.png` — same rewrite path as markdown images. |
+| 26.5 | Regression: re-run § 25 (markdown rendering, relative markdown images/links, no-README, scrolling). | All § 25 cases still pass — adding the rehype plugins didn't regress markdown rendering. |
+| 26.6 | Security: open a README and confirm no script/iframe/event-handler HTML executes (sanitisation). Inspect a README known to contain HTML comments or unusual tags. | No `<script>`/`<iframe>` runs; no console errors from injected HTML — `rehype-sanitize` strips disallowed tags/attributes. |
+
 ## Exit criteria
 
 A change ships when:

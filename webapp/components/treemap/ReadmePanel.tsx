@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
 interface ReadmePanelProps {
   fullName: string;
@@ -24,6 +26,42 @@ function makeUrlTransform(fullName: string) {
       : `https://github.com/${fullName}/blob/HEAD/${clean}`;
   };
 }
+
+// react-markdown's urlTransform only runs on src/href, not on a <source>'s
+// srcSet, so relative <picture> sources (e.g. a dark-mode logo) would 404.
+// Rewrite each candidate here. A srcset is a comma-separated list of
+// "<url> [descriptor]" entries; leave absolute and data: URLs alone.
+function rewriteSrcset(srcset: string, fullName: string): string {
+  return srcset
+    .split(",")
+    .map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return trimmed;
+      const [url, ...descriptor] = trimmed.split(/\s+/);
+      const resolved = /^(https?:|data:)/i.test(url)
+        ? url
+        : `https://raw.githubusercontent.com/${fullName}/HEAD/${url.replace(/^\.?\//, "")}`;
+      return [resolved, ...descriptor].join(" ");
+    })
+    .join(", ");
+}
+
+// READMEs are untrusted third-party content, so enabling raw HTML (rehype-raw)
+// requires sanitizing it. Start from the GitHub schema and additionally allow
+// the image markup READMEs lean on — <picture>/<source> and the alignment
+// attributes used to centre logos. Relative src values survive sanitisation
+// (no protocol) and are rewritten to raw.githubusercontent.com by urlTransform.
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "picture", "source"],
+  attributes: {
+    ...defaultSchema.attributes,
+    img: [...(defaultSchema.attributes?.img ?? []), "loading", "align"],
+    source: ["srcSet", "srcset", "media", "sizes", "type", "width", "height"],
+    p: [...(defaultSchema.attributes?.p ?? []), "align"],
+    div: [...(defaultSchema.attributes?.div ?? []), "align"],
+  },
+};
 
 const mdComponents = {
   a: (props: React.ComponentProps<"a">) => (
@@ -66,6 +104,17 @@ const mdComponents = {
   td: (props: React.ComponentProps<"td">) => <td {...props} className="border border-white/15 px-3 py-1.5 text-neutral-300" />,
   hr: (props: React.ComponentProps<"hr">) => <hr {...props} className="my-5 border-white/10" />,
 };
+
+// <source> needs fullName to resolve relative srcSet candidates, so it's built
+// per-repo and merged into mdComponents at render time.
+function makeSourceComponent(fullName: string) {
+  const SourceComponent = (props: React.ComponentProps<"source">) => {
+    const srcSet = props.srcSet ? rewriteSrcset(props.srcSet, fullName) : props.srcSet;
+    return <source {...props} srcSet={srcSet} />;
+  };
+  SourceComponent.displayName = "ReadmeSource";
+  return SourceComponent;
+}
 
 export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
   const [state, setState] = useState<{ status: "loading" | "ok" | "error"; text: string; message: string }>({
@@ -137,7 +186,12 @@ export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
         {state.status === "error" && <div className="text-sm text-neutral-400">{state.message}</div>}
         {state.status === "ok" && (
           <div className="text-sm break-words">
-            <Markdown remarkPlugins={[remarkGfm]} urlTransform={makeUrlTransform(fullName)} components={mdComponents}>
+            <Markdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+              urlTransform={makeUrlTransform(fullName)}
+              components={{ ...mdComponents, source: makeSourceComponent(fullName) }}
+            >
               {state.text}
             </Markdown>
           </div>
