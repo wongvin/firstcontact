@@ -1256,6 +1256,27 @@ On `/ghstars` the treemap is canvas-rendered and only surfaced hints via mouse h
 | 24.9 | On a **desktop browser with a mouse**, hover and click repo tiles as before. | Unchanged: hover shows the click-through floating tooltip + detail bar; a single click opens GitHub immediately (no reveal-first behavior, no double-open). The hover tooltip shows no "Tap to open" line and cannot be dragged. |
 | 24.10 | On a touchscreen laptop, use the trackpad to click a tile, then separately tap the same tile via touch. | Trackpad click opens immediately (mouse path); touch tap reveals first with the interactive hint (touch path) — each input type behaves per its kind. |
 
+## 25. README side panel on the treemap (issue #168)
+
+Activating a `/ghstars` repo tile opens the project's README in an in-app side panel (`components/treemap/ReadmePanel.tsx`) instead of opening github.com — for **both** mouse and touch. The panel takes half the screen on the side **opposite** the activated tile, has a scrollable body and a top bar (repo name + close button), and renders the README via `react-markdown`. The floating hint slides out of the panel's half. While the panel is open the selection is **locked** onto the activated tile (it stays highlighted and its hint stays visible as the mouse moves / leaves), but tiles remain selectable: clicking (desktop) or tapping (touch) another tile replaces the panel with that tile's README and re-locks onto it. README is fetched from `https://api.github.com/repos/{full_name}/readme` (raw); unauthenticated GitHub API allows ~60 req/hr.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 25.1 | Desktop: click a repo tile on the **left** half of the screen. | A panel opens on the **right** half (full height), showing that repo's README rendered as formatted markdown (headings, code, lists, links). github.com does **not** open in a new tab. |
+| 25.2 | Desktop: click a repo tile on the **right** half. | The panel opens on the **left** half. |
+| 25.3 | With the panel open, observe the floating hover hint as you move over tiles in the visible half. | The hint stays within the visible half — it never slides under the panel. |
+| 25.4 | Click the **×** close button in the panel's top bar (or press **Esc**). | The panel closes; the treemap is fully visible again. |
+| 25.5 | Touch: tap a tile to reveal the hint, then tap the **same tile** again (or tap the **floating hint**). | The README panel opens on the half opposite the tile; the floating hint is moved horizontally so it isn't covered. |
+| 25.6 | Open the README for a repo with a long README, then scroll the panel body. | The body scrolls independently; the top bar (name + close) stays pinned. |
+| 25.7 | Open the README for a repo that has **no README** (or while rate-limited). | The panel shows a graceful message ("This repository has no README." / rate-limit notice) instead of crashing or showing a blank panel. |
+| 25.8 | In a README with relative image/links, check an image and an internal link. | Relative images resolve against `raw.githubusercontent.com/<repo>/HEAD/…`; relative links open `github.com/<repo>/blob/HEAD/…` in a new tab. |
+| 25.9 | Click the repo name in the panel's top bar. | Opens `github.com/<repo>` in a new tab (the only remaining path to GitHub). |
+| 25.10 | Desktop: open a README, then (without closing) click a **different** tile in the visible half. | The panel updates to the new repo's README (remounts, reloads), and the highlight + hint re-lock onto the new tile; the side stays consistent with the visible half. |
+| 25.11 | Desktop: with a README open, move the mouse over other tiles and off the canvas entirely. | The originally-selected tile stays highlighted and its hint stays visible the whole time — neither follows the cursor nor clears on mouse-leave. |
+| 25.12 | Touch: with a README open, tap a **different** tile (single tap). | The panel is replaced with the new tile's README and the selection re-locks onto it — matching the desktop click. Tapping empty space keeps the panel open (close it via × / Esc). The floating hint stays draggable throughout. |
+| 25.13 | Desktop: with a README open, press-drag the floating hint with the mouse. | The hint is draggable (cursor: grab, "Drag to move" label) and stays where released, uncovering tiles beneath — same as touch. (The non-locked hover tooltip remains click-through / non-draggable.) |
+| 25.14 | Drag the hint somewhere, then re-select the **same** open tile (click/tap it) or tap the hint itself. | The hint stays exactly where it was dragged — it is **not** repositioned back to the tile. The panel is unchanged (no reload). Selecting a *different* tile still re-anchors the hint to that tile. |
+
 ## Exit criteria
 
 A change ships when:

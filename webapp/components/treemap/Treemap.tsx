@@ -7,6 +7,7 @@ import { getRepoValue } from "@/lib/treemap/metrics";
 import { Header, type HeaderBreadcrumbItem, type TreemapView } from "./Header";
 import { Panel, type PanelHandle } from "./Panel";
 import { Tooltip, type TooltipHandle } from "./Tooltip";
+import { ReadmePanel } from "./ReadmePanel";
 import type { Repo, GroupData, Metric, RepoRect, GroupRect, Rect } from "@/lib/treemap/types";
 
 type SquarifyRect = {
@@ -172,6 +173,14 @@ export function Treemap({
     useState<{ repo: Repo; langName: string; langColor: string } | null>(null);
   const detailRepoNameRef = useRef<string | null>(null);
 
+  // README side panel: which repo it shows + which half it occupies. Opening it
+  // replaces the old "open on GitHub" action for both mouse and touch.
+  const [readme, setReadme] = useState<{ fullName: string; side: "left" | "right" } | null>(null);
+  const panelSideRef = useRef<"left" | "right" | null>(null);
+  // While the panel is open the selection is locked onto this tile: hover/leave
+  // don't move the highlight or hint until the panel closes.
+  const lockedRef = useRef<{ idx: number; group: number } | null>(null);
+
   const rectsRef = useRef<RepoRect[]>([]);
   const groupRectsRef = useRef<GroupRect[]>([]);
   const hoveredIdxRef = useRef(-1);
@@ -247,7 +256,8 @@ export function Treemap({
 
       // On touch the floating hint is interactive (tap to open, drag to move it
       // off the tiles it covers); on hover it's a plain click-through tooltip.
-      if (floating) tooltipRef.current?.show(x, y, tooltipRepo, interactive);
+      // When the README panel is open, keep the hint out of the panel's half.
+      if (floating) tooltipRef.current?.show(x, y, tooltipRepo, interactive, panelSideRef.current);
 
       if (cachedMeta) {
         return;
@@ -808,6 +818,53 @@ export function Treemap({
     ctx.restore();
   }, [mode, formatMetricValue, getMetricValue]);
 
+  // Screen-space center of a tile, for positioning the panel + locked hint.
+  const tileCenterX = (r: RepoRect) => (canvasRef.current?.getBoundingClientRect().left ?? 0) + r.x + r.w / 2;
+  const tileCenterY = (r: RepoRect) => (canvasRef.current?.getBoundingClientRect().top ?? 0) + r.y + r.h / 2;
+  const findRect = (idx: number, groupIdx: number) =>
+    rectsRef.current.find((rr) => rr.idx === idx && rr.groupIdx === groupIdx) ?? null;
+
+  // Open the README panel for a tile and lock the selection onto it. The panel
+  // takes the half opposite the tile; the hint is re-anchored to the tile and
+  // clamped clear of the panel; the highlight + hint stay put until close.
+  const openReadme = useCallback(
+    (idx: number, groupIdx: number) => {
+      // Re-selecting the already-open tile (or tapping its hint) is a no-op — keep
+      // the panel and leave the hint wherever the user dragged it.
+      const locked = lockedRef.current;
+      if (locked && locked.idx === idx && locked.group === groupIdx) return;
+      const gi = groupRectsRef.current[groupIdx];
+      const repo = gi?.allRepos[idx];
+      if (!repo) return;
+      const r = findRect(idx, groupIdx);
+      const x = r ? tileCenterX(r) : window.innerWidth / 2;
+      const y = r ? tileCenterY(r) : window.innerHeight / 2;
+      const side = x < window.innerWidth / 2 ? "right" : "left";
+      panelSideRef.current = side;
+      lockedRef.current = { idx, group: groupIdx };
+      hoveredIdxRef.current = idx;
+      hoveredGroupRef.current = groupIdx;
+      panelRef.current?.hide();
+      // While a panel is open the hint is interactive (draggable) on both mouse
+      // and touch, so it can be moved off the tiles it covers.
+      showRepoTooltip(x, y, repo, gi.lang, gi.color, true, true);
+      setReadme({ fullName: repo.fullName, side });
+      render();
+    },
+    [render, showRepoTooltip]
+  );
+
+  const closeReadme = useCallback(() => {
+    panelSideRef.current = null;
+    lockedRef.current = null;
+    setReadme(null);
+    hoveredIdxRef.current = -1;
+    hoveredGroupRef.current = -1;
+    detailRepoNameRef.current = null;
+    hideTooltip();
+    render();
+  }, [hideTooltip, render]);
+
   // ── Resize ──
   const resize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -878,6 +935,9 @@ export function Treemap({
       // Ignore the one-shot mousemove iOS synthesizes on tap — touch is driven
       // by the pointer handlers, which show an interactive hint instead.
       if (lastPointerTypeRef.current === "touch") return;
+      // While the README panel is open the selection is locked — don't let hover
+      // move the highlight or hint off the open repo's tile.
+      if (lockedRef.current) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -982,8 +1042,9 @@ export function Treemap({
   );
 
   const onMouseLeave = useCallback(() => {
-    // Don't let a synthesized mouseleave tear down a touch reveal.
-    if (lastPointerTypeRef.current === "touch") return;
+    // Don't let a synthesized mouseleave tear down a touch reveal, and keep the
+    // locked selection while the README panel is open.
+    if (lastPointerTypeRef.current === "touch" || lockedRef.current) return;
     hoveredIdxRef.current = -1;
     hoveredGroupRef.current = -1;
     hideTooltip();
@@ -1010,13 +1071,11 @@ export function Treemap({
           }
           return;
         }
-        // Repo click → open GitHub
+        // Repo click → open the README panel
         const hit = hitRepo(mx, my);
         if (hit >= 0) {
           const r = rectsRef.current[hit];
-          const gi = groupRectsRef.current[r.groupIdx!];
-          const repo = gi?.allRepos[r.idx];
-          if (repo) window.open(`https://github.com/${repo.fullName}`, "_blank");
+          openReadme(r.idx, r.groupIdx!);
           return;
         }
         // "More" click → navigate to sub-tier
@@ -1041,9 +1100,7 @@ export function Treemap({
         const repoHit = hitRepo(mx, my);
         if (repoHit >= 0) {
           const r = rectsRef.current[repoHit];
-          const gi = groupRectsRef.current[r.groupIdx!];
-          const repo = gi?.allRepos[r.idx];
-          if (repo) window.open(`https://github.com/${repo.fullName}`, "_blank");
+          openReadme(r.idx, r.groupIdx!);
           return;
         }
         const gh = hitGroup(mx, my);
@@ -1053,7 +1110,7 @@ export function Treemap({
         }
       }
     },
-    [mode, onOpenLang, onOpenTier]
+    [mode, onOpenLang, onOpenTier, openReadme]
   );
 
   const onClick = useCallback(
@@ -1111,9 +1168,15 @@ export function Treemap({
         const gi = gRects[r.groupIdx!];
         const repo = gi?.allRepos[r.idx];
         if (!repo) return;
+        // When a panel is open, a tap on any tile replaces it with that tile's
+        // README — single tap, matching the desktop click behaviour.
+        if (lockedRef.current) {
+          openReadme(r.idx, r.groupIdx!);
+          return;
+        }
         if (detailRepoNameRef.current === repo.fullName) {
-          // Second tap on the already-revealed tile → open it.
-          window.open(`https://github.com/${repo.fullName}`, "_blank");
+          // Second tap on the already-revealed tile → open its README.
+          openReadme(r.idx, r.groupIdx!);
           return;
         }
         // First tap → reveal hint (interactive floating hint + detail bar) and
@@ -1132,8 +1195,9 @@ export function Treemap({
         return;
       }
 
-      // Tap on empty space → dismiss the current selection.
-      if (detailRepoNameRef.current !== null) {
+      // Tap on empty space → dismiss the current selection, unless a panel is
+      // open (then keep it; close it via the panel's × / Esc).
+      if (!lockedRef.current && detailRepoNameRef.current !== null) {
         detailRepoNameRef.current = null;
         hoveredIdxRef.current = -1;
         hoveredGroupRef.current = -1;
@@ -1142,7 +1206,7 @@ export function Treemap({
         render();
       }
     },
-    [hideTooltip, openOrNavigate, render, showRepoTooltip]
+    [hideTooltip, openOrNavigate, openReadme, render, showRepoTooltip]
   );
 
   const breadcrumb: HeaderBreadcrumbItem[] =
@@ -1220,8 +1284,9 @@ export function Treemap({
       <Panel ref={panelRef} />
       <Tooltip
         ref={tooltipRef}
-        onActivate={(fullName) => window.open(`https://github.com/${fullName}`, "_blank")}
+        onActivate={() => openReadme(hoveredIdxRef.current, hoveredGroupRef.current)}
       />
+      {readme && <ReadmePanel key={readme.fullName} fullName={readme.fullName} side={readme.side} onClose={closeReadme} />}
     </>
   );
 }

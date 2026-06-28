@@ -3,14 +3,30 @@
 import { useRef, forwardRef, useImperativeHandle } from "react";
 import type { Repo } from "@/lib/treemap/types";
 
+// Half of the screen to keep the hint out of (the half the README panel
+// occupies), or null when no panel is open.
+type AvoidSide = "left" | "right" | null;
+
 export interface TooltipHandle {
-  show: (x: number, y: number, repo: Repo, interactive?: boolean) => void;
+  show: (x: number, y: number, repo: Repo, interactive?: boolean, avoid?: AvoidSide) => void;
   hide: () => void;
+  // Slide the currently-shown hint horizontally out of `avoid`'s half.
+  nudgeIntoHalf: (avoid: AvoidSide) => void;
 }
 
 interface TooltipProps {
-  // Called when an interactive (touch) hint is tapped rather than dragged.
-  onActivate?: (fullName: string) => void;
+  // Called when an interactive (touch) hint is tapped rather than dragged;
+  // `x` is the hint's center, used to pick which side the panel opens on.
+  onActivate?: (fullName: string, x: number) => void;
+}
+
+// Clamp a left coordinate so a `width`-wide box stays in the half NOT covered
+// by `avoid`.
+function clampLeft(left: number, width: number, avoid: AvoidSide) {
+  const half = window.innerWidth / 2;
+  if (avoid === "right") return Math.max(8, Math.min(left, half - width - 12));
+  if (avoid === "left") return Math.min(window.innerWidth - width - 8, Math.max(left, half + 12));
+  return left;
 }
 
 function escapeHtml(value: string) {
@@ -30,7 +46,7 @@ export const Tooltip = forwardRef<TooltipHandle, TooltipProps>(function Tooltip(
   const dragRef = useRef<{ offX: number; offY: number; startX: number; startY: number; moved: boolean; id: number } | null>(null);
 
   useImperativeHandle(ref, () => ({
-    show(x, y, repo, interactive = false) {
+    show(x, y, repo, interactive = false, avoid = null) {
       const el = elRef.current;
       if (!el) return;
       repoRef.current = repo;
@@ -41,7 +57,7 @@ export const Tooltip = forwardRef<TooltipHandle, TooltipProps>(function Tooltip(
       el.innerHTML = `
         <div class="font-bold text-[15px]">${safeName}</div>
         ${safeDescription ? `<div class="mt-0.5 text-xs text-neutral-400 leading-relaxed">${safeDescription}</div>` : ""}
-        ${interactive ? `<div class="mt-1.5 text-[11px] text-neutral-500">Tap to open · drag to move</div>` : ""}`;
+        ${interactive ? `<div class="mt-1.5 text-[11px] text-neutral-500">Drag to move</div>` : ""}`;
 
       // Interactive (touch) hints receive pointer events so they can be tapped
       // or dragged; hover (mouse) hints stay click-through.
@@ -55,12 +71,19 @@ export const Tooltip = forwardRef<TooltipHandle, TooltipProps>(function Tooltip(
       if (tx + 380 > window.innerWidth) tx = x - 390;
       const height = el.offsetHeight || 80;
       if (ty + height > window.innerHeight) ty = y - height - 16;
+      tx = clampLeft(tx, el.offsetWidth || 380, avoid);
       el.style.left = tx + "px";
       el.style.top = ty + "px";
     },
     hide() {
       if (elRef.current) elRef.current.style.display = "none";
       repoRef.current = null;
+    },
+    nudgeIntoHalf(avoid) {
+      const el = elRef.current;
+      if (!el || el.style.display === "none") return;
+      const left = parseFloat(el.style.left) || 0;
+      el.style.left = clampLeft(left, el.offsetWidth || 380, avoid) + "px";
     },
   }));
 
@@ -95,8 +118,12 @@ export const Tooltip = forwardRef<TooltipHandle, TooltipProps>(function Tooltip(
     if (!d || !el) return;
     el.releasePointerCapture(d.id);
     dragRef.current = null;
-    // A press that didn't move is a tap → open the repo.
-    if (!d.moved && repoRef.current) onActivate?.(repoRef.current.fullName);
+    // A press that didn't move is a tap → open the repo. Pass the hint's center
+    // x so the panel can open on the opposite half.
+    if (!d.moved && repoRef.current) {
+      const rect = el.getBoundingClientRect();
+      onActivate?.(repoRef.current.fullName, rect.left + rect.width / 2);
+    }
   };
 
   return (

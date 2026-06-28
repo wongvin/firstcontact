@@ -1,11 +1,21 @@
 # Changelog
 
+## 2026-06-28
+
+### feat: README side panel on the treemap (issue #168)
+
+- `webapp/components/treemap/ReadmePanel.tsx`: new component. Activating a `/ghstars` repo tile now opens the project's README in an in-app panel instead of opening github.com. The panel occupies one half of the screen (full height, scrollable body, top bar with the repo name + a close button; Esc also closes), fetches the README from the GitHub API (`/repos/{full_name}/readme`, `Accept: application/vnd.github.raw`), and renders it with `react-markdown` + `remark-gfm` (React elements, no `dangerouslySetInnerHTML`). README-relative image/link URLs are resolved against the repo; loading/missing/rate-limited states degrade gracefully.
+- `webapp/components/treemap/Treemap.tsx`: the three "open on GitHub" actions (desktop click, touch second-tap, tap on the floating hint) now call `openReadme`. The panel opens on the half **opposite** the activated tile (`tileCenterX`), and the floating hint is re-anchored to the tile and slid horizontally out of the panel's half. While the panel is open the selection is **locked** (`lockedRef`): hover/mouse-leave no longer move the highlight or hint off the open repo's tile. Tiles stay selectable though — clicking (desktop) or tapping (touch) another tile replaces the panel with that tile's README and re-locks onto it; closing clears the lock and resets the highlight/hint. Re-selecting the already-open tile (or tapping its hint) is a no-op, so a dragged hint keeps its position instead of snapping back to the tile.
+- `webapp/components/treemap/Tooltip.tsx`: `show` takes an `avoid` side and there's a new `nudgeIntoHalf` so the hint stays clear of the panel; `onActivate` now passes the hint's center x.
+- `webapp/package.json`: added `react-markdown` + `remark-gfm`.
+- `webapp/TEST-PLAN.md`: added § 25.
+
 ## 2026-06-27
 
 ### feat: treemap tile hints on touch devices (issue #166)
 
 - `webapp/components/treemap/Treemap.tsx`: the `/ghstars` treemap is canvas-rendered and only surfaced hints via `onMouseMove`, so iPad/iOS (no pointer) never showed them usably. Added pointer-event handlers (gated on `pointerType`; the synthesized post-tap mouse events iOS fires are ignored so desktop hover/click is unchanged): a first tap reveals a tile's hint — bottom detail bar + an interactive floating hint near the tap — and highlights the tile. Opening the repo happens via a second tap on the same tile or a tap on the floating hint; the floating hint can be dragged to uncover the tiles it covers. Taps on headers/groups/"more" navigate as before; a tap on empty space dismisses. Taps are distinguished from drags by movement, and the canvas gets `touch-action: manipulation`.
-- `webapp/components/treemap/Tooltip.tsx`: the floating hint takes an optional `interactive` mode (pointer-events enabled, "Tap to open · drag to move" affordance) with its own tap/drag pointer handlers and an `onActivate` callback; hover mode stays click-through.
+- `webapp/components/treemap/Tooltip.tsx`: the floating hint takes an optional `interactive` mode (pointer-events enabled, "Drag to move" affordance) with its own tap/drag pointer handlers and an `onActivate` callback; hover mode stays click-through. The locked hint shown while a panel is open is interactive on **both** mouse and touch, so it's draggable with the mouse too.
 - `webapp/TEST-PLAN.md`: added § 24.
 
 ## 2026-06-26
