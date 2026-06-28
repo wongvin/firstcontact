@@ -2,6 +2,12 @@
 
 ## 2026-06-28
 
+### feat: render raw-HTML images in the treemap README panel (issue #170)
+
+- `webapp/components/treemap/ReadmePanel.tsx`: README markdown is rendered by `react-markdown`, which silently drops all raw HTML — so images that READMEs embed as raw HTML (centred logos via `<p align="center"><img>`, `<picture>` blocks, badge rows) never appeared. Added `rehype-raw` (parses the raw HTML into nodes the `img` styling + `urlTransform` apply to) followed by `rehype-sanitize` with a schema that additionally allows `<picture>`/`<source>` and the `align` attribute on `img`/`p`/`div` (READMEs are untrusted, so raw HTML must be sanitised). Added a `<source>` component override that rewrites relative `srcSet` candidates to `raw.githubusercontent.com` (react-markdown's `urlTransform` only runs on `src`/`href`). Markdown-syntax images and the existing relative-URL rewriting are unchanged.
+- `webapp/package.json`: added `rehype-raw` + `rehype-sanitize`.
+- `webapp/TEST-PLAN.md`: added § 26.
+
 ### feat: README side panel on the treemap (issue #168)
 
 - `webapp/components/treemap/ReadmePanel.tsx`: new component. Activating a `/ghstars` repo tile now opens the project's README in an in-app panel instead of opening github.com. The panel occupies one half of the screen (full height, scrollable body, top bar with the repo name + a close button; Esc also closes), fetches the README from the GitHub API (`/repos/{full_name}/readme`, `Accept: application/vnd.github.raw`), and renders it with `react-markdown` + `remark-gfm` (React elements, no `dangerouslySetInnerHTML`). README-relative image/link URLs are resolved against the repo; loading/missing/rate-limited states degrade gracefully.
