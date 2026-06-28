@@ -1239,6 +1239,23 @@ The Mouser search result (`public/mouser-search.html` → local backend `/mouser
 | 23.3 | Inspect the `/mouser/pricing` JSON response (DevTools Network, or curl). | Response includes an `image_url` field — a `mouser.com` image URL for parts with a photo, `null` otherwise. |
 | 23.4 | Stop the backend and search. | Unchanged: the "backend unreachable" error message shows (the image feature doesn't affect the offline path). |
 
+## 24. Treemap tile hints on touch devices (issue #166)
+
+On `/ghstars` the treemap is canvas-rendered and only surfaced hints via mouse hover, so iPad/iOS (no pointer) never showed them usably. Pointer-event handlers in `components/treemap/Treemap.tsx` drive touch: the first tap on a repo tile reveals its hint — both the bottom detail bar (§ 21) and an **interactive floating hint** near the tap (label "Tap to open · drag to move") — and highlights the tile. Opening the repo on GitHub happens via **either** a second tap on the same tile **or** a tap on the floating hint. The floating hint can be **dragged** to uncover the tiles it covers. Header/group/"more" cells navigate on a single tap; a tap on empty space dismisses. The synthesized mouse events iOS fires on tap are ignored (gated on `pointerType`), so desktop mouse behaviour is unchanged. Best tested on a real iPad/iPhone, or Chrome DevTools device-toolbar touch emulation (Appendix § G).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 24.1 | On an iPad/iPhone (or DevTools touch emulation), load `/ghstars` and tap a repo tile once. | The bottom detail bar fills in with that repo's name/owner/language/stars/etc. (as § 21 hover does), the tile is highlighted, and a floating hint (name + description + "Tap to open · drag to move") appears near the tap. The browser does **not** navigate to GitHub. |
+| 24.2 | Tap the **same** tile a second time. | GitHub opens in a new tab for that repo. |
+| 24.3 | Tap the **floating hint** itself (a tap, not a drag). | GitHub opens in a new tab for the revealed repo. |
+| 24.4 | Press and **drag** the floating hint, then lift. | The hint follows the finger and stays where released; it does **not** open GitHub (a drag is not a tap). Tiles previously under it are now visible. |
+| 24.5 | Tap one tile, then tap a **different** tile. | The detail bar + highlight + floating hint move to the second tile; GitHub does **not** open (the second tile was a first tap, not a re-tap of the first). |
+| 24.6 | Tap a tile to reveal it, then tap empty space (a gap/margin with no cell). | The selection clears — highlight removed, detail bar resets, floating hint hidden; nothing opens. |
+| 24.7 | Tap a group header (overview) or the "+N more" cell. | Single tap drills in (open language / tier), same as a desktop click — no two-stage needed for navigation cells. |
+| 24.8 | Swipe/drag across the **canvas** (start on a tile, lift elsewhere). | Treated as a drag, not a tap — no reveal and no navigation. |
+| 24.9 | On a **desktop browser with a mouse**, hover and click repo tiles as before. | Unchanged: hover shows the click-through floating tooltip + detail bar; a single click opens GitHub immediately (no reveal-first behavior, no double-open). The hover tooltip shows no "Tap to open" line and cannot be dragged. |
+| 24.10 | On a touchscreen laptop, use the trackpad to click a tile, then separately tap the same tile via touch. | Trackpad click opens immediately (mouse path); touch tap reveals first with the interactive hint (touch path) — each input type behaves per its kind. |
+
 ## Exit criteria
 
 A change ships when:
