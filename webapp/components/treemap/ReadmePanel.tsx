@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSlug from "rehype-slug";
 
 interface ReadmePanelProps {
   fullName: string;
@@ -64,9 +65,29 @@ const sanitizeSchema = {
 };
 
 const mdComponents = {
-  a: (props: React.ComponentProps<"a">) => (
-    <a {...props} target="_blank" rel="noreferrer" className="text-cyan-400 underline underline-offset-2 hover:text-cyan-300" />
-  ),
+  a: (props: React.ComponentProps<"a">) => {
+    const href = props.href ?? "";
+    const linkClass = "text-cyan-400 underline underline-offset-2 hover:text-cyan-300";
+    // In-page anchors (a README's table-of-contents links) scroll to the
+    // matching heading *within the panel* — not a new tab or a page-URL change.
+    // rehype-slug gives headings GitHub-style ids that these "#…" hrefs target.
+    if (href.startsWith("#")) {
+      return (
+        <a
+          {...props}
+          className={linkClass}
+          onClick={(e) => {
+            e.preventDefault();
+            const id = decodeURIComponent(href.slice(1));
+            if (!id) return;
+            const container = e.currentTarget.closest("[data-readme-scroll]");
+            container?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+      );
+    }
+    return <a {...props} target="_blank" rel="noreferrer" className={linkClass} />;
+  },
   img: (props: React.ComponentProps<"img">) => (
     // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
     <img {...props} className="inline-block max-w-full rounded" loading="lazy" />
@@ -181,14 +202,16 @@ export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-5 py-4" data-readme-scroll>
         {state.status === "loading" && <div className="text-sm text-neutral-400">Loading README…</div>}
         {state.status === "error" && <div className="text-sm text-neutral-400">{state.message}</div>}
         {state.status === "ok" && (
           <div className="text-sm break-words">
             <Markdown
               remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+              // rehypeSlug runs after sanitize so heading ids stay clean (no
+              // sanitize "user-content-" clobber prefix), matching the "#…" hrefs.
+              rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeSlug]}
               urlTransform={makeUrlTransform(fullName)}
               components={{ ...mdComponents, source: makeSourceComponent(fullName) }}
             >
