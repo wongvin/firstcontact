@@ -2,6 +2,12 @@
 
 ## 2026-06-28
 
+### fix: README panel in-page anchor links now scroll (issue #172)
+
+- `webapp/components/treemap/ReadmePanel.tsx`: a README's table-of-contents links (`#books` etc.) opened a new browser tab at the app URL with the hash appended (e.g. `/ghstars#books`) instead of scrolling to the heading — the `a` component applied `target="_blank"` to **every** link, and `react-markdown` didn't slug headings so there was no target anyway. Added `rehype-slug` (after `rehype-sanitize`, so heading ids stay clean and un-prefixed) to give headings GitHub-style ids, and special-cased `href="#…"` links in the `a` component to `preventDefault` and `scrollIntoView` the matching heading within the panel (scoped via a `data-readme-scroll` marker on the scroll container). External/relative links are unchanged (still open in a new tab).
+- `webapp/package.json`: added `rehype-slug`.
+- `webapp/TEST-PLAN.md`: added § 27.
+
 ### feat: render raw-HTML images in the treemap README panel (issue #170)
 
 - `webapp/components/treemap/ReadmePanel.tsx`: README markdown is rendered by `react-markdown`, which silently drops all raw HTML — so images that READMEs embed as raw HTML (centred logos via `<p align="center"><img>`, `<picture>` blocks, badge rows) never appeared. Added `rehype-raw` (parses the raw HTML into nodes the `img` styling + `urlTransform` apply to) followed by `rehype-sanitize` with a schema that additionally allows `<picture>`/`<source>` and the `align` attribute on `img`/`p`/`div` (READMEs are untrusted, so raw HTML must be sanitised). Added a `<source>` component override that rewrites relative `srcSet` candidates to `raw.githubusercontent.com` (react-markdown's `urlTransform` only runs on `src`/`href`). Markdown-syntax images and the existing relative-URL rewriting are unchanged.

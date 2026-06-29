@@ -1292,6 +1292,18 @@ Good repos to exercise this: any with a prominent header logo embedded via `<p a
 | 26.5 | Regression: re-run § 25 (markdown rendering, relative markdown images/links, no-README, scrolling). | All § 25 cases still pass — adding the rehype plugins didn't regress markdown rendering. |
 | 26.6 | Security: open a README and confirm no script/iframe/event-handler HTML executes (sanitisation). Inspect a README known to contain HTML comments or unusual tags. | No `<script>`/`<iframe>` runs; no console errors from injected HTML — `rehype-sanitize` strips disallowed tags/attributes. |
 
+## 27. README panel in-page anchor scrolling (issue #172)
+
+`ReadmePanel.tsx` runs `rehype-slug` (after `rehype-sanitize`) so README headings get GitHub-style `id`s, and the `a` component special-cases `href="#…"` links: clicking one `preventDefault`s and `scrollIntoView`s the matching heading within the panel's scroll container (`data-readme-scroll`) instead of opening a new tab / changing the page URL. External and relative links are unchanged (open in a new tab). Good repo to exercise this: `public-apis/public-apis` (big table-of-contents of `#section` links).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 27.1 | Open the README for `public-apis/public-apis`, then click a table-of-contents link (e.g. **Books**). | The panel scrolls smoothly to that heading. **No** new browser tab opens; the page URL does **not** change to `…/ghstars#books`. |
+| 27.2 | Inspect a rendered heading in DevTools. | It has a clean `id` (e.g. `id="books"`) — no `user-content-` prefix. |
+| 27.3 | Click an **external** link in a README (e.g. a project homepage). | Opens in a new tab (`target="_blank"`), as before. |
+| 27.4 | Click a **relative** repo link (e.g. `CONTRIBUTING.md`). | Opens `github.com/<repo>/blob/HEAD/CONTRIBUTING.md` in a new tab — unchanged from § 25.8. |
+| 27.5 | Regression: re-run § 25 + § 26. | All still pass — adding `rehype-slug` + the anchor handler didn't regress markdown/image rendering. |
+
 ## Exit criteria
 
 A change ships when:
