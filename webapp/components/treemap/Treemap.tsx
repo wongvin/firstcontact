@@ -191,7 +191,7 @@ export function Treemap({
 
   // README side panel: which repo it shows + which half it occupies. Opening it
   // replaces the old "open on GitHub" action for both mouse and touch.
-  const [readme, setReadme] = useState<{ fullName: string; side: "left" | "right" } | null>(null);
+  const [readme, setReadme] = useState<{ fullName: string; metricLabel: string; side: "left" | "right" } | null>(null);
   const panelSideRef = useRef<"left" | "right" | null>(null);
   // While the panel is open the selection is locked onto this tile: hover/leave
   // don't move the highlight or hint until the panel closes.
@@ -274,7 +274,11 @@ export function Treemap({
       // On touch the floating hint is interactive (tap to open, drag to move it
       // off the tiles it covers); on hover it's a plain click-through tooltip.
       // When the README panel is open, keep the hint out of the panel's half.
-      if (floating) tooltipRef.current?.show(x, y, tooltipRepo, interactive, panelSideRef.current);
+      if (floating) {
+        const activeMetric = activeMetricRef.current;
+        const metricLabel = formatMetricValue(activeMetric, getMetricValue(tooltipRepo, activeMetric));
+        tooltipRef.current?.show(x, y, tooltipRepo, metricLabel, interactive, panelSideRef.current);
+      }
 
       if (cachedMeta) {
         return;
@@ -292,7 +296,7 @@ export function Treemap({
         }
       });
     },
-    [ensureTooltipMetaIndex]
+    [ensureTooltipMetaIndex, formatMetricValue, getMetricValue]
   );
 
   useEffect(() => {
@@ -865,10 +869,12 @@ export function Treemap({
       // While a panel is open the hint is interactive (draggable) on both mouse
       // and touch, so it can be moved off the tiles it covers.
       showRepoTooltip(x, y, repo, gi.lang, gi.color, true, true);
-      setReadme({ fullName: repo.fullName, side });
+      const activeMetric = activeMetricRef.current;
+      const metricLabel = formatMetricValue(activeMetric, getMetricValue(repo, activeMetric));
+      setReadme({ fullName: repo.fullName, metricLabel, side });
       render();
     },
-    [render, showRepoTooltip]
+    [render, showRepoTooltip, formatMetricValue, getMetricValue]
   );
 
   const closeReadme = useCallback(() => {
@@ -1370,7 +1376,7 @@ export function Treemap({
         ref={tooltipRef}
         onActivate={() => activateRepo(hoveredIdxRef.current, hoveredGroupRef.current)}
       />
-      {readme && <ReadmePanel key={readme.fullName} fullName={readme.fullName} side={readme.side} onClose={closeReadme} />}
+      {readme && <ReadmePanel key={readme.fullName} fullName={readme.fullName} metricLabel={readme.metricLabel} side={readme.side} onClose={closeReadme} />}
     </>
   );
 }
