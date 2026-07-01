@@ -148,22 +148,47 @@ export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
     // The parent remounts this panel per repo (key={fullName}), so initial
     // state is already "loading" — the effect just runs the fetch.
     const controller = new AbortController();
+    const { signal } = controller;
 
-    fetch(`https://api.github.com/repos/${fullName}/readme`, {
-      headers: { Accept: "application/vnd.github.raw" },
-      signal: controller.signal,
-    })
-      .then(async (res) => {
+    // Fetch order (issue #174): the two most common README filenames — README.md
+    // and plain README (no extension) — are pulled straight from the raw CDN,
+    // which is NOT subject to api.github.com's 60/hr-per-IP limit. Only when both
+    // raw tries miss do we spend an API request on `/readme`, which resolves the
+    // long-tail filenames/casing/branches raw can't guess (README.rst, README.txt,
+    // lowercase readme.md, .github/README.md, …). raw serves CORS `*`, so
+    // browser fetch works. Relative image/link rewriting (below) is keyed on
+    // fullName, so it's identical regardless of which source served the body.
+    async function load() {
+      for (const path of ["README.md", "README"]) {
+        try {
+          const res = await fetch(`https://raw.githubusercontent.com/${fullName}/HEAD/${path}`, { signal });
+          if (res.ok) {
+            setState({ status: "ok", text: await res.text(), message: "" });
+            return;
+          }
+          // Non-ok (typically 404 for a missing filename) → try the next source.
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          // Network error on the CDN → fall through to the API.
+        }
+      }
+
+      try {
+        const res = await fetch(`https://api.github.com/repos/${fullName}/readme`, {
+          headers: { Accept: "application/vnd.github.raw" },
+          signal,
+        });
         if (res.status === 404) throw new Error("This repository has no README.");
         if (res.status === 403) throw new Error("GitHub rate limit reached — try again in a little while.");
         if (!res.ok) throw new Error(`Couldn't load the README (HTTP ${res.status}).`);
-        const text = await res.text();
-        setState({ status: "ok", text, message: "" });
-      })
-      .catch((err: unknown) => {
+        setState({ status: "ok", text: await res.text(), message: "" });
+      } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setState({ status: "error", text: "", message: err instanceof Error ? err.message : "Couldn't load the README." });
-      });
+      }
+    }
+
+    load();
 
     return () => controller.abort();
   }, [fullName]);

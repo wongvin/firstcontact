@@ -1321,6 +1321,20 @@ In the **Forks view** (the **Forks** metric is selected from the metric switcher
 | 28.9 | Drill a repo whose forks all have 0 stars (under Stars). | The empty-state message shows; switching to Repo size surfaces forks by size. |
 | 28.10 | Drill repeatedly to exhaust the API quota (or block the request in DevTools → 403). | The fork-stars view shows a graceful "rate limit reached" / "couldn't load forks" message with a working back chevron — no crash. |
 
+## 29. README panel fetches from the raw CDN first (issue #174)
+
+`ReadmePanel.tsx` fetches the README body in order: raw `raw.githubusercontent.com/{repo}/HEAD/README.md`, then raw `…/HEAD/README` (no extension), then the API `api.github.com/repos/{repo}/readme`. The first two are served by the Fastly CDN and do **not** count against api.github.com's 60-req/hr-per-IP limit; the API is only hit for the long-tail filenames the raw guesses miss. Rendering/sanitization/relative-URL rewriting and the 403/404/error UX are unchanged from § 25–27. Use the DevTools Network panel to observe which host serves each README.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 29.1 | Open the README for a repo with a root `README.md` (e.g. `facebook/react`). With Network open, watch the requests. | README renders as before. The body is fetched from `raw.githubusercontent.com/.../README.md` (200); **no** `api.github.com/.../readme` request is made. |
+| 29.2 | Open the README for a repo whose README is plain `README` (e.g. `torvalds/linux`, `gcc-mirror/gcc`). | `…/README.md` on raw 404s, then `…/README` on raw 200s and renders (plain text, unstyled). Still **no** api.github.com request. |
+| 29.3 | Open the README for a repo whose README is `README.rst` (e.g. `django/django`). | Both raw tries 404, then the API `/readme` request resolves it (200) and it renders. |
+| 29.4 | Open the README for a repo with no README at all (e.g. `openbsd/src`). | Both raw tries 404, the API returns 404, and the panel shows "This repository has no README." |
+| 29.5 | Simulate rate limiting: in DevTools, override the api.github.com `/readme` response to 403 (or exhaust the quota), then open a repo whose README is only resolvable via the API (e.g. `django/django`). | The panel shows "GitHub rate limit reached — try again in a little while." Repos served by raw (§ 29.1/29.2) are unaffected by the 403. |
+| 29.6 | Open a README with relative images/links (regression — e.g. a repo with a centred logo and a TOC). | Images load from `raw.githubusercontent.com` and in-page anchors scroll within the panel — unchanged from § 25–27 (rewriting is keyed on the repo, not the fetch source). |
+| 29.7 | Rapidly open several repos in a row, then open a repo served only via the API. | The API isn't rate-limited nearly as fast as before, because raw-served READMEs no longer consume the 60/hr budget. |
+
 ## Exit criteria
 
 A change ships when:
