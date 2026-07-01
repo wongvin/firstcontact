@@ -1335,6 +1335,19 @@ In the **Forks view** (the **Forks** metric is selected from the metric switcher
 | 29.6 | Open a README with relative images/links (regression — e.g. a repo with a centred logo and a TOC). | Images load from `raw.githubusercontent.com` and in-page anchors scroll within the panel — unchanged from § 25–27 (rewriting is keyed on the repo, not the fetch source). |
 | 29.7 | Rapidly open several repos in a row, then open a repo served only via the API. | The API isn't rate-limited nearly as fast as before, because raw-served READMEs no longer consume the 60/hr budget. |
 
+## 30. Metric value in the treemap hint and README panel top bar (issue #179)
+
+The floating hover/touch hint (`components/treemap/Tooltip.tsx`) and the README panel's top bar (`components/treemap/ReadmePanel.tsx`) now show the currently-selected metric's formatted value next to the repo name. The value uses the same `formatMetricValue` formatting as the on-cell/legend labels (e.g. `★ 1.2k`, `⑂ 340`, `+50`, `900 KB`) and reflects the **active** metric (honoring metric fallback), so it changes when you switch metrics. Run with `npm run dev` and `public/treemap-data/repos.json` present.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 30.1 | On `/ghstars` with **Stars** active, hover a repo tile (desktop). | The floating hint's title line shows the repo name followed by a dimmer `★ <count>` matching the value drawn on the tile / bottom bar. |
+| 30.2 | Switch the metric to **30d Growth**, then **Forks**, hovering the same tile after each switch. | The hint's value updates to `+<n>` (growth) and `⑂ <n>` (forks) respectively — same formatting as the on-cell labels. |
+| 30.3 | Click a tile to open its README panel. | The panel's top bar shows the repo `owner/name` link followed by the active metric value (e.g. `★ 1.2k`); the value sits between the name and the × close button and doesn't push the close button off-screen (name truncates first). |
+| 30.4 | With the panel open under **Forks**, open a different repo's README. | The new top bar shows that repo's fork count. Values match what the tile shows. |
+| 30.5 | Touch (iPhone / responsive): tap a tile to reveal the interactive hint. | The hint's title line shows the metric value alongside the name (plus the "Drag to move" line), and dragging/tapping still works as in § 24. |
+| 30.6 | Drill into the fork-stars view (§ 28), hover/open a fork under **Repo size**. | The hint and panel top bar show `<n> KB` for that fork — the active metric of the drilled view is respected. |
+
 ## Exit criteria
 
 A change ships when:

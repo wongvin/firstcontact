@@ -9,6 +9,9 @@ import rehypeSlug from "rehype-slug";
 
 interface ReadmePanelProps {
   fullName: string;
+  // Formatted active-metric value for this repo (e.g. "★ 1.2k"), shown in the
+  // top bar next to the repo name.
+  metricLabel: string;
   // Which half of the screen the panel occupies.
   side: "left" | "right";
   onClose: () => void;
@@ -137,7 +140,7 @@ function makeSourceComponent(fullName: string) {
   return SourceComponent;
 }
 
-export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
+export function ReadmePanel({ fullName, metricLabel, side, onClose }: ReadmePanelProps) {
   const [state, setState] = useState<{ status: "loading" | "ok" | "error"; text: string; message: string }>({
     status: "loading",
     text: "",
@@ -208,15 +211,18 @@ export function ReadmePanel({ fullName, side, onClose }: ReadmePanelProps) {
       }`}
     >
       <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-        <a
-          href={`https://github.com/${fullName}`}
-          target="_blank"
-          rel="noreferrer"
-          className="min-w-0 flex-1 truncate text-sm font-semibold text-white hover:text-cyan-300"
-          title={fullName}
-        >
-          {fullName}
-        </a>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <a
+            href={`https://github.com/${fullName}`}
+            target="_blank"
+            rel="noreferrer"
+            className="min-w-0 truncate text-sm font-semibold text-white hover:text-cyan-300"
+            title={fullName}
+          >
+            {fullName}
+          </a>
+          {metricLabel && <span className="shrink-0 text-sm font-medium text-neutral-400">{metricLabel}</span>}
+        </div>
         <button
           type="button"
           onClick={onClose}

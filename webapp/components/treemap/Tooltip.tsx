@@ -8,7 +8,7 @@ import type { Repo } from "@/lib/treemap/types";
 type AvoidSide = "left" | "right" | null;
 
 export interface TooltipHandle {
-  show: (x: number, y: number, repo: Repo, interactive?: boolean, avoid?: AvoidSide) => void;
+  show: (x: number, y: number, repo: Repo, metricLabel: string, interactive?: boolean, avoid?: AvoidSide) => void;
   hide: () => void;
   // Slide the currently-shown hint horizontally out of `avoid`'s half.
   nudgeIntoHalf: (avoid: AvoidSide) => void;
@@ -46,16 +46,17 @@ export const Tooltip = forwardRef<TooltipHandle, TooltipProps>(function Tooltip(
   const dragRef = useRef<{ offX: number; offY: number; startX: number; startY: number; moved: boolean; id: number } | null>(null);
 
   useImperativeHandle(ref, () => ({
-    show(x, y, repo, interactive = false, avoid = null) {
+    show(x, y, repo, metricLabel, interactive = false, avoid = null) {
       const el = elRef.current;
       if (!el) return;
       repoRef.current = repo;
       const name = repo.fullName.split("/")[1] || repo.fullName;
       const safeName = escapeHtml(name);
+      const safeMetric = metricLabel ? escapeHtml(metricLabel) : "";
       const safeDescription = repo.description ? escapeHtml(repo.description) : "";
 
       el.innerHTML = `
-        <div class="font-bold text-[15px]">${safeName}</div>
+        <div class="font-bold text-[15px]">${safeName}${safeMetric ? ` <span class="font-normal text-neutral-400">${safeMetric}</span>` : ""}</div>
         ${safeDescription ? `<div class="mt-0.5 text-xs text-neutral-400 leading-relaxed">${safeDescription}</div>` : ""}
         ${interactive ? `<div class="mt-1.5 text-[11px] text-neutral-500">Drag to move</div>` : ""}`;
 
