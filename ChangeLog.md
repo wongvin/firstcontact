@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-06-30
+
+### fix: fetch treemap READMEs from raw CDN before the API (issue #174)
+
+- `webapp/components/treemap/ReadmePanel.tsx`: the README body was fetched from `api.github.com/repos/{repo}/readme`, which counts against GitHub's unauthenticated 60-req/hr-per-IP limit shared across all of `/ghstars`' calls. Reordered the fetch to try the rate-limit-free `raw.githubusercontent.com` CDN first — `README.md`, then plain `README` (no extension) — covering the two most common filenames (~16.4M of ~16.9M READMEs) at zero API cost, and only falling back to the API `/readme` endpoint (which auto-resolves the long-tail `.rst`/`.txt`/`.markdown`/lowercase/`.github/` variants) when both raw tries 404. Content is byte-identical for `README.md` repos; markdown rendering, sanitization, relative-URL rewriting, and the 403/404/error UX are all unchanged. Prerequisite for the fork-stars README-content search (#175).
+- `webapp/TEST-PLAN.md`: added § 29.
+
 ## 2026-06-29
 
 ### feat: fork-stars drill-down treemap (issue #176)
