@@ -7,6 +7,10 @@ export interface Repo {
   growth: number;
   createdAt?: string;
   updatedAt?: string;
+  // Repository size in KB. Only present for forks fetched live from the GitHub
+  // API (the "Repo size" metric in the fork-stars treemap); absent for the
+  // main dataset's repos.
+  size?: number;
 }
 
 export interface RepoData {
@@ -48,4 +52,4 @@ export interface GroupRect extends Rect {
   allRepos: Repo[];
 }
 
-export type Metric = "stars" | "forks" | "growth";
+export type Metric = "stars" | "forks" | "growth" | "size";
