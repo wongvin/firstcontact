@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-29
+
+### feat: fork-stars drill-down treemap (issue #176)
+
+- `/ghstars` Forks view: while the **Forks** metric is active, re-activating a repo whose README panel is already open now closes the panel and drills into a **fork-stars treemap** — that repo's actual forks, fetched live from `GET /repos/{owner}/{repo}/forks?sort=stargazers&per_page=100` (top 100), sized/ordered by *their* stars. The fork-stars treemap reuses the existing canvas/interaction engine (hover, tap-to-README, tooltip, detail bar), so it behaves like the main and zoom-in views.
+- `webapp/app/ghstars/ForksTreemap.tsx`: new client component — fetches the forks (mirroring `ReadmePanel.tsx`'s 403/404/error + loading handling), maps each to a `Repo`, builds one `GroupData`, and renders a `mode="detail"` `Treemap` with a back-chevron header (back + metric switcher + presentational search) replacing the standard tabs/breadcrumb header.
+- `webapp/components/treemap/Treemap.tsx`: added `onDrillForks`/`onBack`/`backTitle` props; a new `activateRepo` helper routes a repo activation to the forks drill (when re-activating the locked tile under the Forks metric) or to `openReadme` otherwise, wired into desktop click, touch tap, and the hint's `onActivate`. Added the back-chevron header variant and the `"size"` ("Repo size") metric to `METRIC_OPTIONS`/`formatMetricValue`.
+- `webapp/lib/treemap/types.ts` + `metrics.ts`: new `size` metric (`Repo.size`, KB) — present only on live-fetched forks, so it stays out of the main treemap's metrics; offered alongside Stars in the fork-stars switcher (default Stars).
+- `webapp/app/ghstars/page.tsx`: `forksTarget` client state + `onDrillForks` wiring + a render branch for the fork-stars view.
+- Search box in the fork-stars header ships controlled-but-inert (logic deferred to #175). Follow-ups filed: #174 (raw-CDN README fetch), #175 (fork-stars README-content search, depends on #174).
+- `webapp/TEST-PLAN.md`: added § 28.
+
 ## 2026-06-28
 
 ### fix: README panel in-page anchor links now scroll (issue #172)

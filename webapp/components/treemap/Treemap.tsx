@@ -110,6 +110,7 @@ const METRIC_OPTIONS: Record<Metric, { key: Metric; label: string }> = {
   stars: { key: "stars", label: "Stars" },
   growth: { key: "growth", label: "30d Growth" },
   forks: { key: "forks", label: "Forks" },
+  size: { key: "size", label: "Repo size" },
 };
 
 interface TreemapProps {
@@ -135,6 +136,14 @@ interface TreemapProps {
   onOpenTier?: (tierSlug: string) => void;
   onBackToOverview?: () => void;
   onBackToLang?: () => void;
+  // Forks view: re-activating a repo whose README is already open drills into
+  // its forks (only fires while the Forks metric is active — see activateRepo).
+  onDrillForks?: (fullName: string) => void;
+  // Fork-stars treemap chrome: when set, the standard Header is replaced by a
+  // back chevron (→ onBack) + metric switcher + an inert search box. backTitle
+  // labels the bar (the parent repo's full name).
+  onBack?: () => void;
+  backTitle?: string;
 }
 
 export function Treemap({
@@ -155,6 +164,9 @@ export function Treemap({
   onOpenTier,
   onBackToOverview,
   onBackToLang,
+  onDrillForks,
+  onBack,
+  backTitle,
 }: TreemapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -163,6 +175,10 @@ export function Treemap({
 
   const [metric, setMetric] = useState<Metric>(initialMetric);
   const [search, setSearch] = useState("");
+  // Fork-stars view only: the back-chevron header's search box is presentational
+  // for now (logic deferred to issue #175 — README-content search), so it has
+  // its own state and does NOT drive layout filtering.
+  const [forkSearch, setForkSearch] = useState("");
   const [hasVisibleData, setHasVisibleData] = useState(true);
   const [fallbackActive, setFallbackActive] = useState(false);
   // Most-recently-hovered repo (+ its language label/color), surfaced in the
@@ -204,6 +220,7 @@ export function Treemap({
   const formatMetricValue = useCallback((metricKey: Metric, value: number) => {
     if (metricKey === "growth") return `+${fmtK(value)}`;
     if (metricKey === "forks") return `⑂ ${fmtK(value)}`;
+    if (metricKey === "size") return `${fmtK(value)} KB`;
     return `★ ${fmtK(value)}`;
   }, []);
   const hideTooltip = useCallback(() => {
@@ -865,6 +882,27 @@ export function Treemap({
     render();
   }, [hideTooltip, render]);
 
+  // Activate a repo tile (desktop click, touch tap, or hint tap). Normally this
+  // opens the README panel. But in the Forks view (metric === "forks"),
+  // re-activating the tile whose README is already open closes the panel and
+  // drills into that repo's forks — this runs before openReadme's own
+  // "re-selecting the locked tile is a no-op" early-return.
+  const activateRepo = useCallback(
+    (idx: number, groupIdx: number) => {
+      const locked = lockedRef.current;
+      if (metric === "forks" && locked && locked.idx === idx && locked.group === groupIdx) {
+        const repo = groupRectsRef.current[groupIdx]?.allRepos[idx];
+        if (repo) {
+          closeReadme();
+          onDrillForks?.(repo.fullName);
+          return;
+        }
+      }
+      openReadme(idx, groupIdx);
+    },
+    [metric, closeReadme, onDrillForks, openReadme]
+  );
+
   // ── Resize ──
   const resize = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1075,7 +1113,7 @@ export function Treemap({
         const hit = hitRepo(mx, my);
         if (hit >= 0) {
           const r = rectsRef.current[hit];
-          openReadme(r.idx, r.groupIdx!);
+          activateRepo(r.idx, r.groupIdx!);
           return;
         }
         // "More" click → navigate to sub-tier
@@ -1100,7 +1138,7 @@ export function Treemap({
         const repoHit = hitRepo(mx, my);
         if (repoHit >= 0) {
           const r = rectsRef.current[repoHit];
-          openReadme(r.idx, r.groupIdx!);
+          activateRepo(r.idx, r.groupIdx!);
           return;
         }
         const gh = hitGroup(mx, my);
@@ -1110,7 +1148,7 @@ export function Treemap({
         }
       }
     },
-    [mode, onOpenLang, onOpenTier, openReadme]
+    [mode, onOpenLang, onOpenTier, activateRepo]
   );
 
   const onClick = useCallback(
@@ -1171,12 +1209,12 @@ export function Treemap({
         // When a panel is open, a tap on any tile replaces it with that tile's
         // README — single tap, matching the desktop click behaviour.
         if (lockedRef.current) {
-          openReadme(r.idx, r.groupIdx!);
+          activateRepo(r.idx, r.groupIdx!);
           return;
         }
         if (detailRepoNameRef.current === repo.fullName) {
           // Second tap on the already-revealed tile → open its README.
-          openReadme(r.idx, r.groupIdx!);
+          activateRepo(r.idx, r.groupIdx!);
           return;
         }
         // First tap → reveal hint (interactive floating hint + detail bar) and
@@ -1206,7 +1244,7 @@ export function Treemap({
         render();
       }
     },
-    [hideTooltip, openOrNavigate, openReadme, render, showRepoTooltip]
+    [hideTooltip, openOrNavigate, activateRepo, render, showRepoTooltip]
   );
 
   const breadcrumb: HeaderBreadcrumbItem[] =
@@ -1238,17 +1276,63 @@ export function Treemap({
 
   return (
     <>
-      <Header
-        breadcrumb={breadcrumb}
-        metric={metric}
-        onMetricChange={setMetric}
-        search={search}
-        onSearchChange={setSearch}
-        info={info}
-        metrics={metricOptions}
-        activeView={activeView}
-        onViewChange={onViewChange}
-      />
+      {onBack ? (
+        // Fork-stars treemap: the standard Header is replaced by a back chevron,
+        // the metric switcher (Stars / Repo size), and a presentational search
+        // box (no filtering wired yet — see issue #175).
+        <header className="flex items-center gap-3 px-5 py-2.5 bg-[#151515] border-b border-[#252525] shrink-0 z-10">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back to forks view"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[#252525] text-neutral-300 hover:border-neutral-600 hover:text-white transition-all cursor-pointer"
+          >
+            <span className="text-lg leading-none">‹</span>
+          </button>
+          {backTitle && (
+            <span className="text-[15px] font-bold whitespace-nowrap truncate" title={backTitle}>
+              {backTitle} <span className="text-[#61dafb]">forks</span>
+            </span>
+          )}
+          {metricOptions.length > 0 && (
+            <div className="flex gap-1 ml-3">
+              {metricOptions.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => setMetric(m.key)}
+                  className={`px-3 py-1 rounded text-xs border transition-all cursor-pointer ${
+                    metric === m.key
+                      ? "bg-white text-black border-white"
+                      : "border-[#252525] text-neutral-500 hover:border-neutral-600 hover:text-neutral-300"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <input
+            type="text"
+            value={forkSearch}
+            onChange={(e) => setForkSearch(e.target.value)}
+            placeholder="Search..."
+            className="ml-auto px-2.5 py-1 rounded text-xs border border-[#252525] bg-[#0c0c0c] text-neutral-200 outline-none w-44 focus:border-neutral-600"
+          />
+          <span className="text-xs text-neutral-500 whitespace-nowrap">{info}</span>
+        </header>
+      ) : (
+        <Header
+          breadcrumb={breadcrumb}
+          metric={metric}
+          onMetricChange={setMetric}
+          search={search}
+          onSearchChange={setSearch}
+          info={info}
+          metrics={metricOptions}
+          activeView={activeView}
+          onViewChange={onViewChange}
+        />
+      )}
       <div ref={wrapRef} className="flex-1 relative overflow-hidden">
         <canvas
           ref={canvasRef}
@@ -1284,7 +1368,7 @@ export function Treemap({
       <Panel ref={panelRef} />
       <Tooltip
         ref={tooltipRef}
-        onActivate={() => openReadme(hoveredIdxRef.current, hoveredGroupRef.current)}
+        onActivate={() => activateRepo(hoveredIdxRef.current, hoveredGroupRef.current)}
       />
       {readme && <ReadmePanel key={readme.fullName} fullName={readme.fullName} side={readme.side} onClose={closeReadme} />}
     </>

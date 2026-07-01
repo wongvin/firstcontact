@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Treemap } from "@/components/treemap/Treemap";
+import { ForksTreemap } from "./ForksTreemap";
 import type { TreemapView } from "@/components/treemap/Header";
 import {
   DAILY_TRENDING_MIN_BASELINE_STARS,
@@ -57,6 +58,10 @@ export default function GhStarsPage() {
   const [view, setView] = useState<TreemapView>("projects");
   const [langName, setLangName] = useState<string | null>(null);
   const [tierSlug, setTierSlug] = useState<string | null>(null);
+  // Forks view drill: the parent repo whose forks fill the fork-stars treemap.
+  // Set by re-activating a README-open tile while the Forks metric is active;
+  // cleared by the back chevron.
+  const [forksTarget, setForksTarget] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +111,7 @@ export default function GhStarsPage() {
       setView(v);
       setLangName(null);
       setTierSlug(null);
+      setForksTarget(null);
     },
     onOpenLang: (name: string) => {
       setLangName(name);
@@ -117,6 +123,7 @@ export default function GhStarsPage() {
       setTierSlug(null);
     },
     onBackToLang: () => setTierSlug(null),
+    onDrillForks: (fullName: string) => setForksTarget(fullName),
   };
 
   let body: React.ReactNode;
@@ -128,6 +135,19 @@ export default function GhStarsPage() {
       <StatusScreen
         title="Treemap dataset unavailable"
         detail="The repo dataset isn't bundled in this deployment. Run the app locally (npm run dev) with public/treemap-data/repos.json present to explore the treemap."
+      />
+    );
+  } else if (forksTarget) {
+    // Fork-stars drill: live-fetch the parent repo's forks and render them as a
+    // detail treemap with the back-chevron header. Sits above the normal
+    // view/drill branches; the back chevron clears forksTarget to return.
+    body = (
+      <ForksTreemap
+        key={forksTarget}
+        fullName={forksTarget}
+        langs={load.data.langs}
+        colors={load.data.colors}
+        onBack={() => setForksTarget(null)}
       />
     );
   } else {

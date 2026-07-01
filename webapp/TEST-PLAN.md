@@ -1304,6 +1304,23 @@ Good repos to exercise this: any with a prominent header logo embedded via `<p a
 | 27.4 | Click a **relative** repo link (e.g. `CONTRIBUTING.md`). | Opens `github.com/<repo>/blob/HEAD/CONTRIBUTING.md` in a new tab — unchanged from § 25.8. |
 | 27.5 | Regression: re-run § 25 + § 26. | All still pass — adding `rehype-slug` + the anchor handler didn't regress markdown/image rendering. |
 
+## 28. Fork-stars drill-down treemap (issue #176)
+
+In the **Forks view** (the **Forks** metric is selected from the metric switcher), re-activating a repo whose README panel is already open closes the panel and drills into a **fork-stars treemap**: that repo's actual forks, fetched live from `GET /repos/{owner}/{repo}/forks?sort=stargazers&per_page=100`, sized/ordered by *their* stars. The fork-stars treemap replaces the top bar with a back chevron + a Stars/Repo-size metric switcher + a (currently inert) search box, and reuses the standard hover/tap/README behaviors. Run with `npm run dev` and `public/treemap-data/repos.json` present. Good parent repo: `facebook/react` (many starred forks). The drill makes a live GitHub API call, which shares the unauthenticated 60-req/hr/IP limit with README fetches.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 28.1 | On the Projects overview, click the **Forks** metric. Click a popular repo to open its README, then click the **same** tile again. | README panel closes; the treemap is replaced by the fork-stars treemap (back chevron + Stars/Repo size switcher + search box). Tiles are that repo's forks sized by their stars. |
+| 28.2 | With Stars active, eyeball a few tiles. | Larger tiles = forks with more stars; the most-starred forks dominate. Forks with 0 stars are not shown (filtered). |
+| 28.3 | Click **Repo size**. | Tiles re-size by repository size (KB); forks that were hidden at 0 stars can now appear. Click **Stars** to switch back. |
+| 28.4 | Hover a fork tile (desktop). | Tooltip + bottom detail bar show that fork's name/description/stats, exactly like the main view. |
+| 28.5 | Click a fork tile. | Its README opens in the side panel (the fork is itself a GitHub repo). Clicking it again does **not** drill further (metric is Stars/Repo size, not Forks). |
+| 28.6 | Click the back chevron (‹). | Returns to the Forks view you came from, with the Forks metric (and any prior view/language/tier) intact. |
+| 28.7 | Type in the fork-stars search box. | The box accepts text but does **not** filter tiles yet (logic deferred to #175). |
+| 28.8 | Touch (iPhone / responsive): tap a tile (reveals hint), tap it again (opens README), tap the README-open tile a third time. | First tap reveals the hint, second opens the README, third (re-tap of the README-open tile) drills into its forks. Tapping a fork opens its README. |
+| 28.9 | Drill a repo whose forks all have 0 stars (under Stars). | The empty-state message shows; switching to Repo size surfaces forks by size. |
+| 28.10 | Drill repeatedly to exhaust the API quota (or block the request in DevTools → 403). | The fork-stars view shows a graceful "rate limit reached" / "couldn't load forks" message with a working back chevron — no crash. |
+
 ## Exit criteria
 
 A change ships when:
