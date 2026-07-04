@@ -346,6 +346,11 @@ struct ContentView: View {
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
     @State private var textSelectionActive = false   // true while the body's selection handles are in use
+    // Reading zoom for the full-text body: 1.0…2.0 in 0.2 steps, driven by a two-finger pinch
+    // on the article detail screen. `committedFontScale` holds the value between gestures;
+    // `articleFontScale` is the live value applied to the body font.
+    @State private var articleFontScale: CGFloat = 1.0
+    @State private var committedFontScale: CGFloat = 1.0
     // Article URLs whose full-text fetch failed (only reachable via "Open in Safari"). Session
     // memory so reopening one skips the costly WKWebView retry that can't beat its bot wall.
     @State private var safariOnlyArticleURLs: Set<String> = []
@@ -374,6 +379,16 @@ struct ContentView: View {
     private static let issueFetchLimit = 50
     private static let wordLimit = 50
     private static let viewCount = 3
+    // Full-text body pinch-zoom: base point size, allowed scale range, and the discrete step.
+    private static let articleBaseFontSize: CGFloat = 16
+    private static let articleZoomRange: ClosedRange<CGFloat> = 1.0...2.0
+    private static let articleZoomStep: CGFloat = 0.2
+
+    // Clamp a raw pinch scale to 1.0…2.0 and round to the nearest 0.2 step.
+    private static func snapZoom(_ raw: CGFloat) -> CGFloat {
+        let clamped = min(articleZoomRange.upperBound, max(articleZoomRange.lowerBound, raw))
+        return (clamped / articleZoomStep).rounded() * articleZoomStep
+    }
     private static let newsCategories = ["general", "technology", "science"]
     // Cream / dark reading theme for the news views (article cards, detail, related feed,
     // news status). The home screen keeps the indigo/purple gradient.
@@ -836,6 +851,16 @@ struct ContentView: View {
                 },
             including: textSelectionActive ? .subviews : .all
         )
+        // Two-finger pinch scales the body font between 1× and 2× in 0.2 steps. Two-finger so
+        // it doesn't conflict with the single-finger scroll or the dismiss swipe above. Snaps
+        // live to the nearest step; the settled value carries over between pinches.
+        .simultaneousGesture(
+            MagnifyGesture()
+                .onChanged { value in
+                    articleFontScale = Self.snapZoom(committedFontScale * value.magnification)
+                }
+                .onEnded { _ in committedFontScale = articleFontScale }
+        )
         .task(id: article.url) { await loadFullText(article) }
     }
 
@@ -1147,7 +1172,9 @@ struct ContentView: View {
         switch articleTextState {
         case .loaded(let text):
             // UITextView-backed so the body supports native cursor-based selection.
-            SelectableText(text: text, color: Self.newsTextUIColor, tint: Self.newsSelectionTint) { active in
+            SelectableText(text: text,
+                           font: .systemFont(ofSize: Self.articleBaseFontSize * articleFontScale),
+                           color: Self.newsTextUIColor, tint: Self.newsSelectionTint) { active in
                 textSelectionActive = active
             }
             .frame(maxWidth: .infinity, alignment: .leading)
