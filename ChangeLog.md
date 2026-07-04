@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-04
+
+### feat: sync keyword filters across devices over Multipeer Connectivity (issue #183)
+
+- `ios/FirstContact/FirstContact/Sync/`: new `SyncStore` (owns the keyword list, its UserDefaults persistence, and a CRDT-lite LWW-Element-Set merge), `SyncManager` (Multipeer Connectivity in a symmetric advertise+browse role with a deterministic invite tiebreak; auto-connects to the user's own nearby devices and exchanges the full keyword set on connect/change), and `SyncPayload` (Codable envelope).
+- Allowlist gate: peers must present a shared pairing secret (advertised as a SHA-256 hash in the Bonjour discoveryInfo for pre-filtering, verified in full via the invitation context) so the app won't sync with a stranger's device on a shared network. Secret sourced from `Secrets.xcconfig` (`SYNC_SECRET`) via `GeneratedSecrets`, with a built-in default when unset; `generate-secrets.sh` + `Secrets.example.xcconfig` extended.
+- `ios/FirstContact/FirstContact/ContentView.swift`: `Keyword` gains `updatedAt` + soft-delete `deleted` (backward-compatible decoding); the keyword list moves from `@State` to an injected `SyncStore`/`SyncManager` (`@EnvironmentObject`); mutation sites, `sortedKeywords`, and `keywordQuery()` route through the store (tombstones hidden); a compact sync-status row + on/off toggle added to the keyword panel, showing connected peers by name.
+- `ios/FirstContact/FirstContact/FirstContactApp.swift`: owns the shared stores and drives `SyncManager` start/stop from `scenePhase`.
+- `ios/FirstContact/FirstContact/Info.plist` (new) + `project.pbxproj`: switched off `GENERATE_INFOPLIST_FILE` for a hand-authored plist (needed for the `NSBonjourServices` array); added local-network/Bluetooth usage strings + `_fc-sync` Bonjour services; migrated the former `INFOPLIST_KEY_*` + `CFBundle*` keys; excluded `Info.plist` from the synchronized group's resource copy.
+
 ## 2026-07-03
 
 ### feat: pinch-to-zoom font size in full-text article (issue #181)

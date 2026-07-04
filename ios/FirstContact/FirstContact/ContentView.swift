@@ -56,21 +56,32 @@ struct Keyword: Codable, Identifiable {
     let id: UUID
     let text: String
     var excluded: Bool = false
+    // Sync metadata (device-to-device keyword sync): time of the last local mutation, used for
+    // last-writer-wins merging, plus a soft-delete tombstone so deletes propagate across devices
+    // instead of resurrecting. See SyncStore.merge.
+    var updatedAt: Date = Date(timeIntervalSince1970: 0)
+    var deleted: Bool = false
 
-    enum CodingKeys: String, CodingKey { case id, text, excluded }
+    enum CodingKeys: String, CodingKey { case id, text, excluded, updatedAt, deleted }
 
-    init(id: UUID, text: String, excluded: Bool = false) {
+    init(id: UUID, text: String, excluded: Bool = false,
+         updatedAt: Date = Date(timeIntervalSince1970: 0), deleted: Bool = false) {
         self.id = id
         self.text = text
         self.excluded = excluded
+        self.updatedAt = updatedAt
+        self.deleted = deleted
     }
 
-    // Decode `excluded` defensively so keywords saved before the field existed still load.
+    // Decode `excluded` and the sync fields defensively so keywords saved before those fields
+    // existed still load (a missing `updatedAt` sorts oldest, so any real edit wins on first sync).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         text = try c.decode(String.self, forKey: .text)
         excluded = try c.decodeIfPresent(Bool.self, forKey: .excluded) ?? false
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(timeIntervalSince1970: 0)
+        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
     }
 }
 
@@ -358,7 +369,9 @@ struct ContentView: View {
     @State private var showKeywordPanel = false      // drives panel presentation (article optional)
     @State private var keywordState: KeywordState = .loading
     @State private var keywordDragOffset: CGFloat = 0
-    @State private var keywords: [Keyword] = []
+    // Keyword list + its device-to-device sync live in shared stores injected by the App.
+    @EnvironmentObject private var store: SyncStore
+    @EnvironmentObject private var sync: SyncManager
     @State private var keywordDraft = ""
     @State private var showKeywordTooLong = false
     @FocusState private var keywordFieldFocused: Bool
@@ -372,7 +385,6 @@ struct ContentView: View {
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
     private static let composeCacheKey = "firstcontact.compose.v1"
-    private static let keywordCacheKey = "firstcontact.keywords.v1"
     private static let summaryTTLHours = 24
     private static let geminiModel = "gemini-2.5-flash-lite"
     private static let issueWindowDays = 30
@@ -457,7 +469,6 @@ struct ContentView: View {
         .task { await loadSummary() }
         .task { await loadNews() }
         .task { messages = loadComposeMessages() }
-        .task { keywords = loadKeywords() }
         .alert("Search filter too long", isPresented: $showKeywordTooLong) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -913,6 +924,8 @@ struct ContentView: View {
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
+            syncStatusRow
+
             keywordContent
 
             HStack(spacing: 8) {
@@ -973,6 +986,33 @@ struct ContentView: View {
                 if t > 120 { withAnimation { showKeywordPanel = false } }
                 withAnimation { keywordDragOffset = 0 }
             }
+    }
+
+    // Nearby-device keyword sync status + kill switch, shown above the input. Keywords sync
+    // automatically over Multipeer Connectivity between the user's own devices; this row just
+    // reports connection state and lets the user turn it off.
+    private var syncStatusRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: (sync.enabled && !sync.connectedPeers.isEmpty)
+                  ? "antenna.radiowaves.left.and.right"
+                  : "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 13))
+            Text(syncStatusText)
+                .font(.system(size: 12))
+            Spacer()
+            Toggle("", isOn: $sync.enabled)
+                .labelsHidden()
+                .scaleEffect(0.8)
+        }
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.horizontal)
+    }
+
+    private var syncStatusText: String {
+        guard sync.enabled else { return "Sync off" }
+        let names = sync.connectedPeers.map(\.displayName)
+        guard !names.isEmpty else { return "Looking for your devices…" }
+        return "Synced with " + names.joined(separator: ", ")
     }
 
     // Compact status shown just above the keyword input: a spinner while the Gemini term
@@ -1110,38 +1150,34 @@ struct ContentView: View {
     private func sendKeyword() {
         let text = keywordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        keywords.append(Keyword(id: UUID(), text: text))
+        store.addKeyword(text)
         keywordDraft = ""
-        saveKeywords()
         warnIfQueryTooLong()
     }
 
     private func deleteKeyword(_ keyword: Keyword) {
-        keywords.removeAll { $0.id == keyword.id }
-        saveKeywords()
+        store.deleteKeyword(keyword)   // soft-delete (tombstone) so the delete syncs across devices
     }
 
     private func toggleExcluded(_ keyword: Keyword) {
-        guard let i = keywords.firstIndex(where: { $0.id == keyword.id }) else { return }
-        keywords[i].excluded.toggle()
-        saveKeywords()
         // Excluding adds a `NOT ` prefix, lengthening the expression; warn only then.
-        if keywords[i].excluded { warnIfQueryTooLong() }
+        if store.toggleExcluded(keyword) { warnIfQueryTooLong() }
     }
 
     // Display order: non-excluded (blue) bubbles first, excluded (red) last. Stable within
-    // each group (insertion order preserved). Storage order is unchanged — this is display-only.
+    // each group (insertion order preserved). Tombstoned keywords are hidden. Display-only.
     private var sortedKeywords: [Keyword] {
-        keywords.filter { !$0.excluded } + keywords.filter { $0.excluded }
+        let live = store.keywords.filter { !$0.deleted }
+        return live.filter { !$0.excluded } + live.filter { $0.excluded }
     }
 
     // Boolean GNews `q` from saved keywords: the blue (included) terms are OR-ed inside one
     // parenthesized group, then AND-ed with each NOT-prefixed red (excluded) term —
     //   ("blue1" OR "blue2") AND NOT "red1" AND NOT "red2"
-    // Empty string when there are no keywords. Reads the persisted list directly (not @State
-    // `keywords`) so it's correct at launch, where loadNews() races the keyword-load `.task`.
+    // Empty string when there are no keywords. Reads `store.keywords` (loaded synchronously in
+    // SyncStore.init, so it's populated before launch fetches run) and skips tombstoned rows.
     private func keywordQuery() -> String {
-        let saved = loadKeywords()
+        let saved = store.keywords.filter { !$0.deleted }
         let blue = saved.filter { !$0.excluded }.map { "\"\($0.text)\"" }
         let red  = saved.filter {  $0.excluded }.map { "NOT \"\($0.text)\"" }
         var parts: [String] = []
@@ -1153,16 +1189,6 @@ struct ContentView: View {
     // GNews caps `q` at 200 characters; warn (informational) if the expression exceeds it.
     private func warnIfQueryTooLong() {
         if keywordQuery().count > 200 { showKeywordTooLong = true }
-    }
-
-    private func loadKeywords() -> [Keyword] {
-        guard let data = UserDefaults.standard.data(forKey: Self.keywordCacheKey) else { return [] }
-        return (try? JSONDecoder().decode([Keyword].self, from: data)) ?? []
-    }
-
-    private func saveKeywords() {
-        guard let data = try? JSONEncoder().encode(keywords) else { return }
-        UserDefaults.standard.set(data, forKey: Self.keywordCacheKey)
     }
 
     // The article body: the full text scraped from article.url once it loads, with the
@@ -1852,5 +1878,8 @@ struct ContentView: View {
 }
 
 #Preview {
+    let store = SyncStore()
     ContentView()
+        .environmentObject(store)
+        .environmentObject(SyncManager(store: store))
 }
