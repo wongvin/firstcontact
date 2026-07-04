@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-03
+
+### feat: pinch-to-zoom font size in full-text article (issue #181)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: a two-finger pinch on the article detail screen scales the full-text body font between 1× and 2× in discrete 0.2 steps (1.0…2.0). New `articleFontScale`/`committedFontScale` state + a `MagnifyGesture` `.simultaneousGesture` (two-finger, so single-finger scroll and swipe-to-dismiss are unaffected); a `snapZoom` helper clamps and rounds to the nearest step. The `.loaded` body's `SelectableText` now gets `.systemFont(ofSize: 16 * articleFontScale)`.
+
 ## 2026-06-30
 
 ### feat: show metric value in treemap hint and README panel (issue #179)
