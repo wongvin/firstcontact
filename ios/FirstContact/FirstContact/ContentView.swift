@@ -43,11 +43,35 @@ enum SummaryState {
     case failedNoCache
 }
 
-// A single message typed in the long-press compose screen. Persisted to UserDefaults
-// so the thread survives app relaunches (same approach as CachedSummary).
+// A single message typed in the long-press compose screen. Owned by SyncStore and persisted to
+// UserDefaults so the thread survives app relaunches; synced device-to-device over Multipeer the
+// same way keywords are. Like `Keyword`, it carries `updatedAt` (last-writer-wins) and a
+// soft-delete `deleted` tombstone so both edits and deletes converge across devices.
 struct ComposeMessage: Codable, Identifiable {
     let id: UUID
     let text: String
+    var updatedAt: Date = Date(timeIntervalSince1970: 0)
+    var deleted: Bool = false
+
+    enum CodingKeys: String, CodingKey { case id, text, updatedAt, deleted }
+
+    init(id: UUID, text: String,
+         updatedAt: Date = Date(timeIntervalSince1970: 0), deleted: Bool = false) {
+        self.id = id
+        self.text = text
+        self.updatedAt = updatedAt
+        self.deleted = deleted
+    }
+
+    // Decode the sync fields defensively so messages saved before those fields existed still load
+    // (a missing `updatedAt` sorts oldest, so any real edit wins on first sync).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(timeIntervalSince1970: 0)
+        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+    }
 }
 
 // A saved keyword from the key-term panel — its own persisted list, separate from the
@@ -376,7 +400,6 @@ struct ContentView: View {
     @State private var showKeywordTooLong = false
     @FocusState private var keywordFieldFocused: Bool
     @State private var showCompose = false
-    @State private var messages: [ComposeMessage] = []
     @State private var draft = ""
     @FocusState private var composeFieldFocused: Bool
     // On iPhone a compact vertical size class means landscape orientation.
@@ -384,7 +407,6 @@ struct ContentView: View {
     private var isLandscape: Bool { verticalSizeClass == .compact }
 
     private static let summaryCacheKey = "firstcontact.summary30d.v1"
-    private static let composeCacheKey = "firstcontact.compose.v1"
     private static let summaryTTLHours = 24
     private static let geminiModel = "gemini-2.5-flash-lite"
     private static let issueWindowDays = 30
@@ -468,7 +490,6 @@ struct ContentView: View {
         .task { await loadIssues() }
         .task { await loadSummary() }
         .task { await loadNews() }
-        .task { messages = loadComposeMessages() }
         .alert("Search filter too long", isPresented: $showKeywordTooLong) {
             Button("OK", role: .cancel) { }
         } message: {
@@ -1068,7 +1089,7 @@ struct ContentView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 8) {
-                        ForEach(messages) { message in
+                        ForEach(liveMessages) { message in
                             HStack {
                                 Spacer(minLength: 40)
                                 Text(message.text)
@@ -1090,8 +1111,8 @@ struct ContentView: View {
                     }
                     .padding()
                 }
-                .onChange(of: messages.count) {
-                    guard let last = messages.last else { return }
+                .onChange(of: liveMessages.count) {
+                    guard let last = liveMessages.last else { return }
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -1122,27 +1143,21 @@ struct ContentView: View {
         .foregroundStyle(.white)
     }
 
+    // The thread as shown: non-tombstoned, ordered by creation time so messages typed on either
+    // device interleave chronologically after a sync. The store keeps the full list + tombstones.
+    private var liveMessages: [ComposeMessage] {
+        store.messages.filter { !$0.deleted }.sorted { $0.updatedAt < $1.updatedAt }
+    }
+
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        messages.append(ComposeMessage(id: UUID(), text: text))
+        store.addMessage(text)   // stamps updatedAt, persists, and broadcasts to synced devices
         draft = ""
-        saveComposeMessages()
     }
 
     private func delete(_ message: ComposeMessage) {
-        messages.removeAll { $0.id == message.id }
-        saveComposeMessages()
-    }
-
-    private func loadComposeMessages() -> [ComposeMessage] {
-        guard let data = UserDefaults.standard.data(forKey: Self.composeCacheKey) else { return [] }
-        return (try? JSONDecoder().decode([ComposeMessage].self, from: data)) ?? []
-    }
-
-    private func saveComposeMessages() {
-        guard let data = try? JSONEncoder().encode(messages) else { return }
-        UserDefaults.standard.set(data, forKey: Self.composeCacheKey)
+        store.deleteMessage(message)   // soft-delete (tombstone) so the delete syncs across devices
     }
 
     // MARK: - Keyword thread (key-term panel; own store, separate from compose messages)
