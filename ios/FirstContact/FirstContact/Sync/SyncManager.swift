@@ -2,10 +2,11 @@
 //  SyncManager.swift
 //  FirstContact
 //
-//  Local device-to-device keyword sync over Apple's Multipeer Connectivity. Each device plays a
-//  symmetric role — it both advertises and browses — and auto-connects to the user's other
-//  devices with no UI. On connect, and on every local change, it sends the full keyword set;
-//  incoming sets are merged by the SyncStore (LWW by updatedAt, tombstones included).
+//  Local device-to-device sync over Apple's Multipeer Connectivity — the keyword filter list and
+//  the compose-message thread. Each device plays a symmetric role — it both advertises and
+//  browses — and auto-connects to the user's other devices with no UI. On connect, and on every
+//  local change, it sends the full state (keywords + messages); incoming sets are merged by the
+//  SyncStore (LWW by updatedAt, tombstones included).
 //
 //  MPC is a delegate-based Objective-C framework bridged to Swift: no async/await, and every
 //  delegate callback arrives on MPC's own background queue. This class is @MainActor, so each
@@ -92,7 +93,7 @@ final class SyncManager: NSObject, ObservableObject {
 
     private func send(to peers: [MCPeerID]) {
         guard !peers.isEmpty else { return }
-        let payload = SyncPayload(keywords: store.snapshot())
+        let payload = SyncPayload(keywords: store.snapshot(), messages: store.snapshotMessages())
         guard let data = try? JSONEncoder().encode(payload) else { return }
         // A peer may drop mid-send; ignore the throw — the next connect resyncs the full set.
         try? session.send(data, toPeers: peers, with: .reliable)
@@ -122,7 +123,10 @@ extension SyncManager: MCSessionDelegate {
     nonisolated func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         Task { @MainActor in
             guard let payload = try? JSONDecoder().decode(SyncPayload.self, from: data) else { return }
-            let changed = self.store.merge(payload.keywords)
+            // Merge both sets into separate locals first so neither call is short-circuited away.
+            let keywordsChanged = self.store.merge(payload.keywords)
+            let messagesChanged = self.store.mergeMessages(payload.messages)
+            let changed = keywordsChanged || messagesChanged
             self.lastSyncedAt = Date()
             // Echo back only if the merge actually changed us — bounds the exchange, no loops.
             if changed { self.send(to: self.session.connectedPeers) }

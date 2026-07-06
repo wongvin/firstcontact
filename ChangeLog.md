@@ -2,6 +2,13 @@
 
 ## 2026-07-04
 
+### feat: sync stored compose messages across devices over Multipeer Connectivity (issue #185)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: `ComposeMessage` gains `updatedAt` + soft-delete `deleted` (backward-compatible decoding); the long-press compose thread moves from `@State` to the injected `SyncStore`. `send()`/`delete(_:)` route through `store.addMessage`/`store.deleteMessage`; the thread renders from a new `liveMessages` computed prop (non-tombstoned, sorted by `updatedAt` so both devices' messages interleave chronologically).
+- `ios/FirstContact/FirstContact/Sync/SyncStore.swift`: now owns the compose messages alongside keywords — loads them from the same `firstcontact.compose.v1` key (existing messages migrate in place), with `addMessage`/`deleteMessage` mutations and a `mergeMessages` LWW-Element-Set merge parallel to the keyword one. Persistence split into `persistKeywords`/`persistMessages`.
+- `ios/FirstContact/FirstContact/Sync/SyncPayload.swift`: carries `messages`; `schemaVersion` bumped to 2 with a tolerant decoder (`decodeIfPresent`) so a peer still on the v1 build sends a payload the new build decodes without breaking keyword sync.
+- `ios/FirstContact/FirstContact/Sync/SyncManager.swift`: sends both keyword and message snapshots per payload, and merges both on receive (each into its own local so neither merge is short-circuited).
+
 ### feat: sync keyword filters across devices over Multipeer Connectivity (issue #183)
 
 - `ios/FirstContact/FirstContact/Sync/`: new `SyncStore` (owns the keyword list, its UserDefaults persistence, and a CRDT-lite LWW-Element-Set merge), `SyncManager` (Multipeer Connectivity in a symmetric advertise+browse role with a deterministic invite tiebreak; auto-connects to the user's own nearby devices and exchanges the full keyword set on connect/change), and `SyncPayload` (Codable envelope).
