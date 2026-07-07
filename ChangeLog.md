@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-06
+
+### feat: render a compose message as a tappable link when it is a URL (issue #187)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: in the long-press compose thread, a message whose entire trimmed text is a single URL now renders as a tappable `Link` (underlined, same blue bubble / white text, whole bubble tappable) that opens in the browser; everything else stays plain `Text`. New `messageURL(_:)` helper uses `NSDataDetector` and requires the link to span the full message (bare hosts like `example.com` are accepted and get an `http` scheme; a URL embedded among other text, or multiple URLs, stay plain). Bubble styling extracted into a `messageBubble(_:underline:)` view builder shared by both branches; context-menu delete still works on link bubbles.
+
 ## 2026-07-04
 
 ### feat: sync stored compose messages across devices over Multipeer Connectivity (issue #185)

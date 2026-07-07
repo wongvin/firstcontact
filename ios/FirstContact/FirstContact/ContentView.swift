@@ -1092,19 +1092,25 @@ struct ContentView: View {
                         ForEach(liveMessages) { message in
                             HStack {
                                 Spacer(minLength: 40)
-                                Text(message.text)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            withAnimation { delete(message) }
-                                        } label: {
-                                            Label("Delete", systemImage: "trash")
+                                Group {
+                                    // A message that is itself a URL becomes a tappable link
+                                    // (underlined bubble); anything else stays plain text.
+                                    if let url = messageURL(message.text) {
+                                        Link(destination: url) {
+                                            messageBubble(message.text, underline: true)
                                         }
+                                        .tint(.white)
+                                    } else {
+                                        messageBubble(message.text, underline: false)
                                     }
+                                }
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        withAnimation { delete(message) }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
                             }
                             .id(message.id)
                         }
@@ -1147,6 +1153,31 @@ struct ContentView: View {
     // device interleave chronologically after a sync. The store keeps the full list + tombstones.
     private var liveMessages: [ComposeMessage] {
         store.messages.filter { !$0.deleted }.sorted { $0.updatedAt < $1.updatedAt }
+    }
+
+    // A message bubble: blue rounded rect, white text, underlined when it's a tappable link.
+    private func messageBubble(_ text: String, underline: Bool) -> some View {
+        Text(text)
+            .underline(underline)
+            .font(.system(size: 16))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.blue, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    // Returns a URL only when the *entire* trimmed message is a single link (a bare host like
+    // `example.com` is accepted and gets an http scheme). A message that merely contains a URL
+    // among other text stays plain, so only genuinely link-only messages become tappable.
+    private func messageURL(_ text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return nil }
+        let full = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+        let matches = detector.matches(in: trimmed, options: [], range: full)
+        guard matches.count == 1, let match = matches.first, match.range == full else { return nil }
+        return match.url
     }
 
     private func send() {
