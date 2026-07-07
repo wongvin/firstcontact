@@ -49,16 +49,20 @@ enum SummaryState {
 // soft-delete `deleted` tombstone so both edits and deletes converge across devices.
 struct ComposeMessage: Codable, Identifiable {
     let id: UUID
-    let text: String
+    var text: String
+    // Custom label shown in place of `text`. For a URL message it lets the user rename the link
+    // without touching the underlying URL (`text` stays the link target). nil = show `text` as-is.
+    var displayText: String?
     var updatedAt: Date = Date(timeIntervalSince1970: 0)
     var deleted: Bool = false
 
-    enum CodingKeys: String, CodingKey { case id, text, updatedAt, deleted }
+    enum CodingKeys: String, CodingKey { case id, text, displayText, updatedAt, deleted }
 
-    init(id: UUID, text: String,
+    init(id: UUID, text: String, displayText: String? = nil,
          updatedAt: Date = Date(timeIntervalSince1970: 0), deleted: Bool = false) {
         self.id = id
         self.text = text
+        self.displayText = displayText
         self.updatedAt = updatedAt
         self.deleted = deleted
     }
@@ -69,6 +73,7 @@ struct ComposeMessage: Codable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
         text = try c.decode(String.self, forKey: .text)
+        displayText = try c.decodeIfPresent(String.self, forKey: .displayText)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date(timeIntervalSince1970: 0)
         deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
     }
@@ -402,6 +407,10 @@ struct ContentView: View {
     @State private var showCompose = false
     @State private var draft = ""
     @FocusState private var composeFieldFocused: Bool
+    // Message editing (long-press → Edit): the message being edited and the alert's text field.
+    @State private var editTarget: ComposeMessage?
+    @State private var editDraft = ""
+    @State private var showEditAlert = false
     // On iPhone a compact vertical size class means landscape orientation.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     private var isLandscape: Bool { verticalSizeClass == .compact }
@@ -1094,10 +1103,11 @@ struct ContentView: View {
                                 Spacer(minLength: 40)
                                 Group {
                                     // A message that is itself a URL becomes a tappable link
-                                    // (underlined bubble); anything else stays plain text.
+                                    // (underlined bubble, showing its custom label if set);
+                                    // anything else stays plain text.
                                     if let url = messageURL(message.text) {
                                         Link(destination: url) {
-                                            messageBubble(message.text, underline: true)
+                                            messageBubble(message.displayText ?? message.text, underline: true)
                                         }
                                         .tint(.white)
                                     } else {
@@ -1105,6 +1115,11 @@ struct ContentView: View {
                                     }
                                 }
                                 .contextMenu {
+                                    Button {
+                                        beginEdit(message)
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
                                     Button(role: .destructive) {
                                         withAnimation { delete(message) }
                                     } label: {
@@ -1147,6 +1162,43 @@ struct ContentView: View {
             .padding()
         }
         .foregroundStyle(.white)
+        .alert(isEditingURL ? "Edit link text" : "Edit message", isPresented: $showEditAlert) {
+            TextField(isEditingURL ? "Link text" : "Message", text: $editDraft)
+            Button("Save") { saveEdit() }
+            Button("Cancel", role: .cancel) { editTarget = nil }
+        } message: {
+            if isEditingURL {
+                Text("Changes the text shown for the link. The link still opens the same URL.")
+            }
+        }
+    }
+
+    // True while the message being edited is a URL — the alert then edits the link's label.
+    private var isEditingURL: Bool {
+        guard let t = editTarget else { return false }
+        return messageURL(t.text) != nil
+    }
+
+    private func beginEdit(_ message: ComposeMessage) {
+        editTarget = message
+        // For a URL, prefill with the current label (or the URL itself); otherwise the text.
+        editDraft = messageURL(message.text) != nil ? (message.displayText ?? message.text) : message.text
+        showEditAlert = true
+    }
+
+    private func saveEdit() {
+        guard let target = editTarget else { return }
+        let trimmed = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if messageURL(target.text) != nil {
+            // URL message: change only the shown label, keep the underlying URL. A blank label, or
+            // one equal to the URL, clears it so the raw URL is shown again.
+            let label = (trimmed.isEmpty || trimmed == target.text) ? nil : trimmed
+            store.updateMessage(id: target.id, text: target.text, displayText: label)
+        } else if !trimmed.isEmpty {
+            // Plain message: edit its text (ignore an empty result — nothing to show).
+            store.updateMessage(id: target.id, text: trimmed, displayText: nil)
+        }
+        editTarget = nil
     }
 
     // The thread as shown: non-tombstoned, ordered by creation time so messages typed on either

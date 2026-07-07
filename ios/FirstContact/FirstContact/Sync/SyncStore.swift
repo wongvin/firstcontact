@@ -74,6 +74,16 @@ final class SyncStore: ObservableObject {
         persistMessages(broadcast: true)
     }
 
+    /// Edit a message: replace its text and/or custom display label. Callers preserve `text`
+    /// (the URL) when editing only a link's label. Stamps `updatedAt` so the edit wins on merge.
+    func updateMessage(id: UUID, text: String, displayText: String?) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[i].text = text
+        messages[i].displayText = displayText
+        messages[i].updatedAt = Date()
+        persistMessages(broadcast: true)
+    }
+
     // MARK: - Sync
 
     /// The outgoing snapshots for a payload — include tombstones (peers need them to converge).
