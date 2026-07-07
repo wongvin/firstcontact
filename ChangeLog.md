@@ -2,6 +2,11 @@
 
 ## 2026-07-06
 
+### feat: edit a compose message; relabel a link without changing its URL (issue #189)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the compose-thread long-press menu gains an **Edit** action above Delete. Editing a plain message changes its text; editing a URL message changes only the displayed link label (via a new `ComposeMessage.displayText`) while the underlying URL — the link target — is unchanged. Edit happens in an alert with a text field (title/placeholder/hint adapt for URL vs plain); a blank label, or one equal to the URL, clears back to showing the raw URL. `ComposeMessage.text` became `var` and `displayText` decodes defensively for backward compatibility; the URL branch now renders `displayText ?? text` as the link label.
+- `ios/FirstContact/FirstContact/Sync/SyncStore.swift`: new `updateMessage(id:text:displayText:)` mutation — stamps `updatedAt`, persists, and broadcasts, so edits converge across devices on the existing LWW path.
+
 ### feat: render a compose message as a tappable link when it is a URL (issue #187)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: in the long-press compose thread, a message whose entire trimmed text is a single URL now renders as a tappable `Link` (underlined, same blue bubble / white text, whole bubble tappable) that opens in the browser; everything else stays plain `Text`. New `messageURL(_:)` helper uses `NSDataDetector` and requires the link to span the full message (bare hosts like `example.com` are accepted and get an `http` scheme; a URL embedded among other text, or multiple URLs, stay plain). Bubble styling extracted into a `messageBubble(_:underline:)` view builder shared by both branches; context-menu delete still works on link bubbles.
