@@ -1129,6 +1129,19 @@ struct ContentView: View {
                                     } label: {
                                         Label("Edit", systemImage: "pencil")
                                     }
+                                    // Forward via the native share sheet (AirDrop, Messages, Mail,
+                                    // WhatsApp, and any other installed sharing apps). Link-only
+                                    // messages share the URL so recipients get a tappable link;
+                                    // everything else shares its text.
+                                    if let url = messageURL(message.text) {
+                                        ShareLink(item: url) {
+                                            Label("Forward", systemImage: "arrowshape.turn.up.right")
+                                        }
+                                    } else {
+                                        ShareLink(item: message.text) {
+                                            Label("Forward", systemImage: "arrowshape.turn.up.right")
+                                        }
+                                    }
                                     Button(role: .destructive) {
                                         withAnimation { delete(message) }
                                     } label: {

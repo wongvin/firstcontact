@@ -2,6 +2,10 @@
 
 ## 2026-07-07
 
+### feat: forward a compose message via the native share sheet (issue #193)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the compose-thread long-press menu gains a **Forward** action between Edit and Delete. It uses SwiftUI's `ShareLink`, which presents the standard iOS share sheet — surfacing AirDrop, Messages, Mail, WhatsApp, and any other installed sharing apps. Link-only messages share the underlying `URL` (recipients get a tappable link); every other message shares its text.
+
 ### feat: auto-summarize a URL message's link label via Gemini (issue #191)
 
 - `ios/FirstContact/FirstContact/ContentView.swift`: when a sent compose message is a URL, a background task fetches the page and asks Gemini (`gemini-2.5-flash-lite`) for a ≤5-word summary that becomes the link's displayed label (`displayText`). The summary source prefers the page's own metadata — Open Graph `og:title`/`og:description`, then `<title>` / meta `description` / twitter tags — because a page's first body words are usually navigation chrome, not the article; it falls back to the first 100 body words only when a page exposes no metadata (crude HTML→text: drops script/style/head/noscript, strips tags, decodes entities via the shared decoder, collapses whitespace). Any failure (no API key, non-HTML/binary content, fetch/parse/Gemini error) is swallowed so the message keeps showing its raw URL. New `summarizeLink`/`fetchSummarySource`/`metaContent`/`titleTag`/`generateLinkSummary` helpers, a `plainText(fromHTML:)` static, a `linkSummarySystemPrompt`, and word-limit constants.
