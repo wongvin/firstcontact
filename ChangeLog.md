@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-07
+
+### feat: auto-summarize a URL message's link label via Gemini (issue #191)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: when a sent compose message is a URL, a background task fetches the page and asks Gemini (`gemini-2.5-flash-lite`) for a ≤5-word summary that becomes the link's displayed label (`displayText`). The summary source prefers the page's own metadata — Open Graph `og:title`/`og:description`, then `<title>` / meta `description` / twitter tags — because a page's first body words are usually navigation chrome, not the article; it falls back to the first 100 body words only when a page exposes no metadata (crude HTML→text: drops script/style/head/noscript, strips tags, decodes entities via the shared decoder, collapses whitespace). Any failure (no API key, non-HTML/binary content, fetch/parse/Gemini error) is swallowed so the message keeps showing its raw URL. New `summarizeLink`/`fetchSummarySource`/`metaContent`/`titleTag`/`generateLinkSummary` helpers, a `plainText(fromHTML:)` static, a `linkSummarySystemPrompt`, and word-limit constants.
+- `ios/FirstContact/FirstContact/Sync/SyncStore.swift`: `addMessage` now returns the new message's id (so the async summary can target it); new `setDisplayText(id:_:)` sets only the label (stamps `updatedAt`, so the generated label syncs across devices).
+
 ## 2026-07-06
 
 ### feat: edit a compose message; relabel a link without changing its URL (issue #189)
