@@ -62,8 +62,22 @@ final class SyncStore: ObservableObject {
         return keywords[i].excluded
     }
 
-    func addMessage(_ text: String) {
-        messages.append(ComposeMessage(id: UUID(), text: text, updatedAt: Date(), deleted: false))
+    /// Appends a message and returns its id so the caller can update it later (e.g. to attach an
+    /// async-generated link summary).
+    @discardableResult
+    func addMessage(_ text: String) -> UUID {
+        let message = ComposeMessage(id: UUID(), text: text, updatedAt: Date(), deleted: false)
+        messages.append(message)
+        persistMessages(broadcast: true)
+        return message.id
+    }
+
+    /// Sets only a message's display label, leaving its text/URL intact. Used by the automatic
+    /// link summary. Stamps `updatedAt` so the label syncs.
+    func setDisplayText(id: UUID, _ displayText: String?) {
+        guard let i = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[i].displayText = displayText
+        messages[i].updatedAt = Date()
         persistMessages(broadcast: true)
     }
 

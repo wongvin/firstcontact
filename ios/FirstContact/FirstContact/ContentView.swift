@@ -453,6 +453,15 @@ struct ContentView: View {
         news headline, description, and content. Respond with ONLY that word or term — no punctuation \
         wrapping, no quotes, no explanation, no preamble. Use only the provided headline, description, and content.
         """
+    private static let linkSummarySystemPrompt = """
+        You label a web page in NO MORE THAN 5 WORDS, using only the page title and description \
+        (or text excerpt) provided. Capture the page's specific topic, not the site it is on. \
+        Respond with ONLY the label — five words maximum, no punctuation wrapping, no quotes, \
+        no trailing period, no preamble, no explanation.
+        """
+    // Auto-summary of a link message: how much of the page body to feed Gemini, and the word cap.
+    private static let linkBodyWordLimit = 100
+    private static let linkSummaryWordLimit = 5
 
     var body: some View {
         ZStack {
@@ -1235,8 +1244,12 @@ struct ContentView: View {
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        store.addMessage(text)   // stamps updatedAt, persists, and broadcasts to synced devices
+        let id = store.addMessage(text)   // stamps updatedAt, persists, broadcasts to synced devices
         draft = ""
+        // If it's a URL, summarize the page into a short link label in the background.
+        if let url = messageURL(text) {
+            Task { await summarizeLink(id: id, url: url) }
+        }
     }
 
     private func delete(_ message: ComposeMessage) {
@@ -1957,6 +1970,114 @@ struct ContentView: View {
         )
         let response = try await model.generateContent(input)
         return (response.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Link summary (Gemini, from the page's first 100 words)
+
+    // Fetch the URL, derive the best summary source (the page's own title + description, or a body
+    // excerpt as a fallback), ask Gemini for a <=5-word label, and set that as the message's
+    // displayed link text. Any failure is swallowed — the raw URL stays as the label.
+    private func summarizeLink(id: UUID, url: URL) async {
+        guard let apiKey = geminiAPIKey() else { return }
+        do {
+            let source = try await fetchSummarySource(from: url)
+            guard !source.isEmpty else { return }
+            let summary = try await generateLinkSummary(apiKey: apiKey, source: source)
+            guard !summary.isEmpty else { return }
+            await MainActor.run { store.setDisplayText(id: id, summary) }
+        } catch {
+            // Network / parse / Gemini failure: leave the message showing its raw URL.
+        }
+    }
+
+    // Downloads the page and returns the text to summarize. Prefers the page's own metadata — the
+    // Open Graph / <title> / description tags publishers author to describe it — because the raw
+    // body's first words are usually navigation chrome, not the article. Falls back to the first
+    // `linkBodyWordLimit` body words only when a page exposes no useful metadata.
+    private func fetchSummarySource(from url: URL) async throws -> String {
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        // Only makes sense for HTML/text; skip binary payloads (PDFs, images, …).
+        if let mime = http.mimeType, !mime.contains("html"), !mime.hasPrefix("text/") { return "" }
+        let html = String(decoding: data, as: UTF8.self)
+
+        let title = Self.metaContent(html, attr: "property", value: "og:title")
+            ?? Self.metaContent(html, attr: "name", value: "twitter:title")
+            ?? Self.titleTag(html)
+        let desc = Self.metaContent(html, attr: "property", value: "og:description")
+            ?? Self.metaContent(html, attr: "name", value: "description")
+            ?? Self.metaContent(html, attr: "name", value: "twitter:description")
+        var parts: [String] = []
+        if let title { parts.append("Title: \(title)") }
+        if let desc { parts.append("Description: \(desc)") }
+        if !parts.isEmpty { return parts.joined(separator: "\n") }
+
+        // Fallback: the first N words of the visible body text.
+        let words = Self.plainText(fromHTML: html).split(whereSeparator: { $0.isWhitespace })
+        return words.prefix(Self.linkBodyWordLimit).joined(separator: " ")
+    }
+
+    // The content of a <meta {attr}="{value}" content="…"> tag (matching either attribute order),
+    // entities decoded. `value` is a fixed OG/twitter/name key, so no regex-escaping is needed.
+    private static func metaContent(_ html: String, attr: String, value: String) -> String? {
+        let patterns = [
+            "<meta[^>]+\(attr)=[\"']\(value)[\"'][^>]*content=[\"']([^\"']*)[\"']",
+            "<meta[^>]+content=[\"']([^\"']*)[\"'][^>]*\(attr)=[\"']\(value)[\"']"
+        ]
+        for p in patterns {
+            guard let re = try? NSRegularExpression(
+                pattern: p, options: [.caseInsensitive, .dotMatchesLineSeparators]) else { continue }
+            let r = NSRange(html.startIndex..., in: html)
+            if let m = re.firstMatch(in: html, range: r), let g = Range(m.range(at: 1), in: html) {
+                let s = decodeEntities(String(html[g])).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty { return s }
+            }
+        }
+        return nil
+    }
+
+    // The <title> element's text, entities decoded.
+    private static func titleTag(_ html: String) -> String? {
+        guard let re = try? NSRegularExpression(
+            pattern: "<title[^>]*>([\\s\\S]*?)</title>", options: [.caseInsensitive]) else { return nil }
+        let r = NSRange(html.startIndex..., in: html)
+        guard let m = re.firstMatch(in: html, range: r), let g = Range(m.range(at: 1), in: html) else { return nil }
+        let s = decodeEntities(String(html[g])).trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? nil : s
+    }
+
+    // Crude HTML→text: drop script/style/head/noscript, strip tags, decode entities, collapse space.
+    private static func plainText(fromHTML html: String) -> String {
+        var s = html
+        for tag in ["script", "style", "head", "noscript"] {
+            s = s.replacingOccurrences(of: "<\(tag)[^>]*>[\\s\\S]*?</\(tag)>",
+                                       with: " ", options: [.regularExpression, .caseInsensitive])
+        }
+        s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        s = decodeEntities(s)   // reuses the shared named + numeric (decimal & hex) entity decoder
+        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func generateLinkSummary(apiKey: String, source: String) async throws -> String {
+        let config = GenerationConfig(temperature: 0.2)
+        let model = GenerativeModel(
+            name: Self.geminiModel,
+            apiKey: apiKey,
+            generationConfig: config,
+            systemInstruction: ModelContent(parts: [.text(Self.linkSummarySystemPrompt)])
+        )
+        let response = try await model.generateContent(source)
+        let text = (response.text ?? "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \n\t\"'.").union(.whitespacesAndNewlines))
+        // Enforce the word cap even if the model overshoots.
+        return text.split(whereSeparator: { $0.isWhitespace })
+            .prefix(Self.linkSummaryWordLimit).joined(separator: " ")
     }
 
     private func wordCount(_ text: String) -> Int {
