@@ -306,6 +306,7 @@ export default function HomePage() {
         <Link className={styles.toolLink} href="/ghstars">GitHub Treemap →</Link>
         <a className={styles.toolLink} href="/digikey-search.html">DigiKey search →</a>
         <a className={styles.toolLink} href="/mouser-search.html">Mouser search →</a>
+        <a className={styles.toolLink} href="/octopart-search.html">Octopart search →</a>
         <a className={styles.toolLink} href="/transcripts-viewer.html">Transcripts viewer →</a>
       </nav>
     </div>

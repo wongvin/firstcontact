@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-10
+
+### feat: Octopart search page — median (~1K-qty) volume price (issue #195)
+
+- `api/server/octopart_client.py`: new client that scrapes `octopart.com/search` for a part's median unit price. Octopart sits behind Cloudflare, so a plain fetch 403s; `curl_cffi` with a Chrome TLS-fingerprint impersonation (version-less `chrome` alias → newest bundled profile) clears the passive challenge. Reads two stable `data-testid` elements — `serp-result-count` and `serp-part-header-median-price` — and **gates on the result count**: 0 → "no results", >1 → "ambiguous, refine MPN", exactly 1 → returns the price. The sync fetch runs in a worker thread (`asyncio.to_thread`) to keep the endpoint non-blocking.
+- `api/server/main.py`: new `/octopart/pricing` route mirroring the DigiKey/Mouser routers (`OctopartError` → HTTP 502).
+- `api/server/requirements.txt`: add `curl_cffi>=0.7`.
+- `webapp/public/octopart-search.html`: new static tool page (cloned from the Mouser page) showing `Qty 1,000 → $<price> USD / unit`, the MPN, and a "View on Octopart →" link.
+- `webapp/app/page.tsx`: "Octopart search →" button added to the homepage tool nav.
+
 ## 2026-07-07
 
 ### feat: forward a compose message via the native share sheet (issue #193)
