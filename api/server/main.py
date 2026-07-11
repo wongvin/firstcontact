@@ -5,6 +5,7 @@ One process, one port, one .env (DigiKey + Mouser + Gemini credentials), one COR
 Frontends (served by the Vercel-hosted Next.js app under webapp/):
 - webapp/public/digikey-search.html      → GET /digikey/pricing
 - webapp/public/mouser-search.html       → GET /mouser/pricing
+- webapp/public/octopart-search.html     → GET /octopart/pricing
 - webapp/public/transcripts-viewer.html  → GET /claudecode/timeline
 - webapp/app/page.tsx (homepage)         → GET /summary/30days
 """
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from claudecode_client import build_timeline
 from digikey_client import DigiKeyError, get_pricing as get_digikey_pricing
 from mouser_client import MouserError, get_pricing as get_mouser_pricing
+from octopart_client import OctopartError, get_pricing as get_octopart_pricing
 from summary_client import SummaryError, get_30day_summary
 
 
@@ -43,6 +45,7 @@ app.add_middleware(
 
 digikey_router = APIRouter(prefix="/digikey", tags=["digikey"])
 mouser_router = APIRouter(prefix="/mouser", tags=["mouser"])
+octopart_router = APIRouter(prefix="/octopart", tags=["octopart"])
 claudecode_router = APIRouter(prefix="/claudecode", tags=["claudecode"])
 summary_router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -67,6 +70,16 @@ async def mouser_pricing(
         raise HTTPException(status_code=502, detail=str(err))
 
 
+@octopart_router.get("/pricing")
+async def octopart_pricing(
+    manufacturer_part_number: str = Query(..., min_length=1, description="Manufacturer part number, e.g. ME910C1WW05T100100"),
+):
+    try:
+        return await get_octopart_pricing(manufacturer_part_number)
+    except OctopartError as err:
+        raise HTTPException(status_code=502, detail=str(err))
+
+
 @claudecode_router.get("/timeline")
 async def claudecode_timeline():
     """Flat globally-sorted timeline of (user_prompt, assistant_response) pairs across all sessions."""
@@ -84,6 +97,7 @@ async def summary_30days():
 
 app.include_router(digikey_router)
 app.include_router(mouser_router)
+app.include_router(octopart_router)
 app.include_router(claudecode_router)
 app.include_router(summary_router)
 

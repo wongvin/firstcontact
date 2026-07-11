@@ -1348,6 +1348,21 @@ The floating hover/touch hint (`components/treemap/Tooltip.tsx`) and the README 
 | 30.5 | Touch (iPhone / responsive): tap a tile to reveal the interactive hint. | The hint's title line shows the metric value alongside the name (plus the "Drag to move" line), and dragging/tapping still works as in § 24. |
 | 30.6 | Drill into the fork-stars view (§ 28), hover/open a fork under **Repo size**. | The hint and panel top bar show `<n> KB` for that fork — the active metric of the drilled view is respected. |
 
+## 31. Octopart search page (issue #195)
+
+A new tool page (`public/octopart-search.html` → local backend `/octopart/pricing`) looks up a part's **median (~1K-qty) volume unit price** from Octopart, reachable via the "Octopart search →" button in the homepage tool nav (`app/page.tsx`). Octopart is behind Cloudflare, so the backend (`api/server/octopart_client.py`) scrapes the rendered search page with `curl_cffi` (Chrome TLS-fingerprint impersonation) and reads two stable `data-testid` elements: `serp-result-count` and `serp-part-header-median-price`. It **gates on the result count** — only an exact single match (`Results: 1`) returns a price; 0 or >1 results return a 502 with a clear message the page surfaces. The result shows `Qty 1,000 → $<price> USD / unit`, the MPN, and a "View on Octopart →" link. Requires the local backend running (`localhost:8001`).
+
+| ID | Steps | Expected |
+|---|---|---|
+| 31.1 | With the backend running, open `/octopart-search.html` and search `ME910C1WW05T100100`. | Result shows `Qty 1,000 → $37.744 USD / unit` (trailing zeros trimmed), the MPN on its own line, and a "View on Octopart →" link. |
+| 31.2 | Search another fully-specific orderable MPN, e.g. `TPS62840DLCR`. | A single price renders (≈`$1.15 USD / unit`); no error. (Generic MPNs like `NE555P` or `STM32F407VGT6` resolve to many Octopart parts and are expected to hit the ambiguity guard in 31.4 instead.) |
+| 31.3 | Click the "View on Octopart →" link. | Opens `octopart.com/search?...&q=ME910C1WW05T100100&s=1` in a new tab (`target="_blank"`, `rel="noreferrer"`). |
+| 31.4 | Search a generic/partial MPN with many hits, e.g. `NE555P` (33 results) or `resistor`. | An error message shows: "Ambiguous part number … Octopart results. Enter a more specific MPN." (backend 502, surfaced via `body.detail`). No price is shown. |
+| 31.5 | Search a nonsense string, e.g. `zzzznotarealpartxyz123`. | An error message shows: "No Octopart results for …". No price is shown. |
+| 31.6 | Inspect the `/octopart/pricing` JSON response (DevTools Network, or curl). | Response has `manufacturer_part_number`, `currency: "USD"`, `unit_price` (number), `tier_quantity: 1000`, and `octopart_url`. |
+| 31.7 | Stop the backend and search. | The "backend unreachable at http://localhost:8001 …" error message shows (same graceful path as the DigiKey/Mouser pages). |
+| 31.8 | On the homepage, locate the tool nav (bottom-right). | An "Octopart search →" button appears between "Mouser search →" and "Transcripts viewer →" and navigates to `/octopart-search.html`. |
+
 ## Exit criteria
 
 A change ships when:
