@@ -475,11 +475,15 @@ struct ContentView: View {
             )
             .ignoresSafeArea()
 
-            if showCompose {
-                composeScreen
-                    .transition(.move(edge: .trailing))
-            } else if let article = detailArticle {
+            if let article = detailArticle {
+                // Checked before composeScreen so a link tapped inside the thread
+                // layers the reader over it; dismissing (detailArticle = nil) reveals
+                // the still-open compose thread underneath. News opens this with
+                // showCompose == false, so ordering doesn't change its behavior.
                 articleDetailScreen(article)
+                    .transition(.move(edge: .trailing))
+            } else if showCompose {
+                composeScreen
                     .transition(.move(edge: .trailing))
             } else {
                 ZStack(alignment: isLandscape ? .trailing : .bottom) {
@@ -870,13 +874,17 @@ struct ContentView: View {
                         // Color.clear anchors the layout to exactly the column width; the
                         // scaledToFill image rides in a clipped overlay so it can't overflow
                         // the right margin the way `.frame(maxWidth: .infinity)` applied
-                        // directly to the overflowing image did.
-                        Color.clear
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 200)
-                            .overlay { articleImage(article) }
-                            .clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        // directly to the overflowing image did. Skipped when there's no image
+                        // (e.g. a saved URL message opened as a link) so we don't show an empty
+                        // newspaper placeholder.
+                        if article.image != nil {
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 200)
+                                .overlay { articleImage(article) }
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
 
                         articleBody(article)
                     }
@@ -1115,10 +1123,21 @@ struct ContentView: View {
                                     // (underlined bubble, showing its custom label if set);
                                     // anything else stays plain text.
                                     if let url = messageURL(message.text) {
-                                        Link(destination: url) {
+                                        // Tapping opens the page in the in-app article reader
+                                        // (same scrape + Safari-fallback path as news articles),
+                                        // rather than leaving for the external browser. Wrap the
+                                        // link into an Article so it reuses articleDetailScreen /
+                                        // loadFullText verbatim; the label (or host) is the title.
+                                        Button {
+                                            withAnimation {
+                                                detailArticle = Article(
+                                                    title: message.displayText ?? url.host ?? message.text,
+                                                    description: nil, content: nil,
+                                                    url: message.text, image: nil)
+                                            }
+                                        } label: {
                                             messageBubble(message.displayText ?? message.text, underline: true)
                                         }
-                                        .tint(.white)
                                     } else {
                                         messageBubble(message.text, underline: false)
                                     }
