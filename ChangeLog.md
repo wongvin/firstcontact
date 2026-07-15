@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-14
+
+### feat: open a saved URL message in the in-app reader, not Safari (issue #197)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: tapping a URL message in the compose thread now opens the page in the in-app article reader instead of leaving for the external browser. The link's tap wraps its URL (with its label — or host — as the title) into an `Article` and sets `detailArticle`, reusing the article path verbatim: `articleDetailScreen` → `loadFullText` (URLSession → hidden-`WKWebView` `WebPageFetcher` → readable-text extraction) → `SelectableText`, with the existing "Open in Safari" link as the fallback when the page can't be scraped. The `body` branch order now checks `detailArticle` before `showCompose`, so the reader layers over the thread and dismissing (back chevron / horizontal swipe) returns to it. The detail screen's hero image block is skipped when an article has no image, so a link doesn't show an empty newspaper placeholder.
+
 ## 2026-07-10
 
 ### feat: Octopart search page — median (~1K-qty) volume price (issue #195)
