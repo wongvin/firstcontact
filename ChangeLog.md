@@ -1,6 +1,10 @@
 # Changelog
 
-## 2026-07-26
+## 2026-08-01
+
+### feat: TTL + manual retry for the give-up cache (issue #201)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the `safariOnlyArticleURLs` give-up cache (which skips the ~25s WKWebView retry for articles that already failed) is no longer permanent for the session. It changed from a `Set<String>` to `[String: GiveUpEntry]` recording *when* and *why* (the `FetchWall`) each article failed, and a new `isGivenUp(_:)` treats an entry as expired past a reason-specific TTL (`giveUpTTL`): paywall/transient misses retry after 2 min, persistent bot walls after 10 min. Also adds a **"Try again"** button in the `.failed` state (next to "Open in Safari") that clears the URL's cache entry and re-runs `loadFullText` for an immediate retry — the provenance caption (#200) then reflects the new outcome. Surfaced by a Flipboard→WSJ link that "cleared once then failed forever" (#200).
 
 ### feat: show fetch provenance below the article title (issue #200)
 

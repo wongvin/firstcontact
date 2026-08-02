@@ -384,6 +384,14 @@ struct DirectFetch {
     let wall: FetchWall
 }
 
+// A given-up article in the fetch cache: when the full-text fetch failed and why,
+// so the entry can expire after a reason-specific TTL (see ContentView.giveUpTTL)
+// rather than fast-failing the article for the whole session.
+struct GiveUpEntry {
+    let at: Date
+    let wall: FetchWall
+}
+
 // Gemini-extracted key word/term for an article (from headline + description only).
 enum KeywordState {
     case loading
@@ -415,9 +423,11 @@ struct ContentView: View {
     // `articleFontScale` is the live value applied to the body font.
     @State private var articleFontScale: CGFloat = 1.0
     @State private var committedFontScale: CGFloat = 1.0
-    // Article URLs whose full-text fetch failed (only reachable via "Open in Safari"). Session
-    // memory so reopening one skips the costly WKWebView retry that can't beat its bot wall.
-    @State private var safariOnlyArticleURLs: Set<String> = []
+    // Articles whose full-text fetch failed (only reachable via "Open in Safari"), keyed by URL
+    // with when/why they failed. Session memory so reopening one skips the costly WKWebView
+    // retry that can't beat its bot wall — but only until the reason's TTL expires (giveUpTTL),
+    // so a transient block (metered-paywall reset, network blip) is retried on a later reopen.
+    @State private var safariOnlyArticleURLs: [String: GiveUpEntry] = [:]
     @State private var keywordArticle: Article?      // article whose term to suggest; nil when opened without an article
     @State private var showKeywordPanel = false      // drives panel presentation (article optional)
     @State private var keywordState: KeywordState = .loading
@@ -1425,8 +1435,31 @@ struct ContentView: View {
             .padding(.top, 4)
         case .failed:
             truncatedContent(article)
+            retryButton(article)
             openInSafariLink(article)
         }
+    }
+
+    // "Try again" in the failed state: an explicit retry without waiting for the give-up
+    // TTL. Clears this URL's cache entry so the WKWebView tier runs again, then reloads;
+    // the provenance caption then reflects the new outcome.
+    @ViewBuilder
+    private func retryButton(_ article: Article) -> some View {
+        Button {
+            if let urlString = article.url { safariOnlyArticleURLs[urlString] = nil }
+            Task { await loadFullText(article) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                Text("Try again")
+            }
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(Self.newsText)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .background(Self.newsText.opacity(0.1), in: Capsule())
+        }
+        .padding(.top, 4)
     }
 
     // Shown when the full body can't be scraped (e.g. a publisher behind a Cloudflare /
@@ -1691,6 +1724,25 @@ struct ContentView: View {
 
     // MARK: - Full article text (client-side scrape of article.url)
 
+    // How long a give-up entry stays sticky before the article is retried, by reason.
+    // Bot walls are persistent, so avoid re-paying the ~25s WKWebView attempt on rapid
+    // back-and-forth; paywall/transient misses may clear soon, so retry them sooner.
+    private static func giveUpTTL(_ wall: FetchWall) -> TimeInterval {
+        switch wall {
+        case .paywall, .none: return 2 * 60     // metered / transient — retry soon
+        default:              return 10 * 60    // persistent bot wall
+        }
+    }
+
+    // Whether to skip the WKWebView tier for this URL: true only for a non-expired give-up.
+    // Prunes the entry once its TTL has lapsed so the next open retries the full cascade.
+    private func isGivenUp(_ urlString: String) -> Bool {
+        guard let entry = safariOnlyArticleURLs[urlString] else { return false }
+        if Date().timeIntervalSince(entry.at) < Self.giveUpTTL(entry.wall) { return true }
+        safariOnlyArticleURLs[urlString] = nil
+        return false
+    }
+
     private func loadFullText(_ article: Article) async {
         textSelectionActive = false   // reset per article so a stale selection can't block dismiss
         fetchOutcome = nil            // clear the prior article's provenance caption
@@ -1716,21 +1768,23 @@ struct ContentView: View {
         // presents a genuine Safari fingerprint and runs any JS challenge, then extract
         // from the rendered DOM.
         //
-        // Skip this for an article we've already seen fail: once it fell back to "Open in
+        // Skip this for an article we've recently given up on: once it fell back to "Open in
         // Safari", we know its full text requires Safari, and the WKWebView retry can't beat
         // the bot wall a second time (it never clears Cloudflare's interactive challenge) —
-        // so re-running its ~9s attempt on reopen is pure waste. Go straight to .failed.
-        if !safariOnlyArticleURLs.contains(urlString),
+        // so re-running its ~9s attempt on reopen is pure waste. The give-up is only sticky
+        // until its reason's TTL expires (isGivenUp), so a transient block is retried later.
+        if !isGivenUp(urlString),
            let html = await WebPageFetcher.html(from: url),
            case let text = Self.extractReadableText(from: html), !text.isEmpty {
             articleTextState = .loaded(text)
             // The WebView rescued it — carry the direct tier's blocking code/reason.
             fetchOutcome = FetchOutcome(tier: .webView, status: direct.status, wall: direct.wall)
+            safariOnlyArticleURLs[urlString] = nil   // recovered — clear any stale give-up
             return
         }
-        // Full text unavailable — remember it so the next open of this article skips the
-        // WKWebView attempt above and lands straight on the Safari link.
-        safariOnlyArticleURLs.insert(urlString)
+        // Full text unavailable — remember it (with the reason) so the next open skips the
+        // WKWebView attempt above and lands straight on the Safari link, until the TTL lapses.
+        safariOnlyArticleURLs[urlString] = GiveUpEntry(at: Date(), wall: direct.wall)
         articleTextState = .failed
         fetchOutcome = FetchOutcome(tier: .failed, status: direct.status, wall: direct.wall)
     }
