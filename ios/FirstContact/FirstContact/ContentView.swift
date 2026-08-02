@@ -361,6 +361,29 @@ enum ArticleTextState {
     case failed
 }
 
+// How the article body was fetched — surfaced as a caption under the title in the
+// format `HTTP code · blocker · mitigation`.
+// Why the direct fetch was blocked. `.other` is a bot wall whose vendor we couldn't
+// identify; the named vendors are bot-management services (not CDNs) detected from
+// their signature headers/cookies.
+enum FetchWall { case none, paywall, cloudflare, datadome, perimeterx, akamai, imperva, other }
+enum FetchTier { case direct, webView, failed }        // which tier produced the result (later: + impersonate)
+
+struct FetchOutcome {
+    let tier: FetchTier
+    let status: Int?      // HTTP status of the decisive/blocking attempt (nil if the direct fetch threw)
+    let wall: FetchWall
+}
+
+// Result of the direct URLSession GET: the HTML on a 200, plus the status and a
+// bot-wall classification derived from the response headers (kept even on non-200,
+// unlike a bare String? which discards why the fetch was blocked).
+struct DirectFetch {
+    let html: String?
+    let status: Int?
+    let wall: FetchWall
+}
+
 // Gemini-extracted key word/term for an article (from headline + description only).
 enum KeywordState {
     case loading
@@ -385,6 +408,7 @@ struct ContentView: View {
     @State private var keywordTermCache: [String: String] = [:] // key-term panel's Gemini term by article.url (session memory)
     @State private var detailArticle: Article?
     @State private var articleTextState: ArticleTextState = .loading
+    @State private var fetchOutcome: FetchOutcome?   // how the body was fetched; nil while loading
     @State private var textSelectionActive = false   // true while the body's selection handles are in use
     // Reading zoom for the full-text body: 1.0…2.0 in 0.2 steps, driven by a two-finger pinch
     // on the article detail screen. `committedFontScale` holds the value between gestures;
@@ -871,6 +895,8 @@ struct ContentView: View {
                             .font(.system(size: 26, weight: .bold))
                             .fixedSize(horizontal: false, vertical: true)
 
+                        fetchProvenanceCaption()
+
                         // Color.clear anchors the layout to exactly the column width; the
                         // scaledToFill image rides in a clipped overlay so it can't overflow
                         // the right margin the way `.frame(maxWidth: .infinity)` applied
@@ -1334,6 +1360,47 @@ struct ContentView: View {
         if keywordQuery().count > 200 { showKeywordTooLong = true }
     }
 
+    // A slim caption under the title showing how the body was fetched, in the fixed
+    // format `HTTP code · blocker · mitigation` (natural case, not a pill). Hidden
+    // while loading; the code field is dropped when the direct fetch threw (no status).
+    // A future impersonate tier adds a `200 · <blocker> · impersonation` (green) case.
+    @ViewBuilder
+    private func fetchProvenanceCaption() -> some View {
+        if let outcome = fetchOutcome {
+            let blocker: String = {
+                switch outcome.wall {
+                case .cloudflare: return "Cloudflare"
+                case .datadome:   return "DataDome"
+                case .perimeterx: return "PerimeterX"
+                case .akamai:     return "Akamai"
+                case .imperva:    return "Imperva"
+                case .paywall:    return "paywall"
+                case .other:      return "bot wall"
+                case .none:       return "none"
+                }
+            }()
+            let mitigation: String = {
+                switch outcome.tier {
+                case .direct:  return "direct"
+                case .webView: return "in-app browser"
+                case .failed:  return "failed"
+                }
+            }()
+            let color: Color = {
+                switch outcome.tier {
+                case .direct:  return Self.newsText.opacity(0.55)
+                case .webView: return Color(red: 0.72, green: 0.47, blue: 0.10)   // muted amber
+                case .failed:  return Color(red: 0.66, green: 0.24, blue: 0.20)   // muted red
+                }
+            }()
+            let fields = [outcome.status.map(String.init), blocker, mitigation].compactMap { $0 }
+            Text(fields.joined(separator: " · "))
+                .font(.system(size: 12))
+                .foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // The article body: the full text scraped from article.url once it loads, with the
     // truncated GNews `content` shown immediately as a placeholder and on failure.
     @ViewBuilder
@@ -1626,16 +1693,20 @@ struct ContentView: View {
 
     private func loadFullText(_ article: Article) async {
         textSelectionActive = false   // reset per article so a stale selection can't block dismiss
+        fetchOutcome = nil            // clear the prior article's provenance caption
         guard let urlString = article.url, let url = URL(string: urlString) else {
             articleTextState = .failed
+            fetchOutcome = FetchOutcome(tier: .failed, status: nil, wall: .none)
             return
         }
         articleTextState = .loading
         // Fast path: a plain URLSession GET. Works for most publishers.
-        if let html = await fetchHTMLDirect(url) {
+        let direct = await fetchHTMLDirect(url)
+        if let html = direct.html {
             let text = Self.extractReadableText(from: html)
             if !text.isEmpty {
                 articleTextState = .loaded(text)
+                fetchOutcome = FetchOutcome(tier: .direct, status: direct.status, wall: .none)
                 return
             }
         }
@@ -1653,27 +1724,70 @@ struct ContentView: View {
            let html = await WebPageFetcher.html(from: url),
            case let text = Self.extractReadableText(from: html), !text.isEmpty {
             articleTextState = .loaded(text)
+            // The WebView rescued it — carry the direct tier's blocking code/reason.
+            fetchOutcome = FetchOutcome(tier: .webView, status: direct.status, wall: direct.wall)
             return
         }
         // Full text unavailable — remember it so the next open of this article skips the
         // WKWebView attempt above and lands straight on the Safari link.
         safariOnlyArticleURLs.insert(urlString)
         articleTextState = .failed
+        fetchOutcome = FetchOutcome(tier: .failed, status: direct.status, wall: direct.wall)
     }
 
-    // Direct URLSession fetch. Returns the page HTML on a 200, nil on any failure/non-200
-    // (the caller then tries the WebKit fallback).
-    private func fetchHTMLDirect(_ url: URL) async -> String? {
+    // Direct URLSession fetch. Returns the page HTML on a 200; on a non-200 returns
+    // nil HTML but keeps the status code and a bot-wall classification (so the caller
+    // can surface *why* it fell back to the WebKit tier). On a thrown/non-HTTP failure
+    // everything is nil/.none.
+    private func fetchHTMLDirect(_ url: URL) async -> DirectFetch {
         var request = URLRequest(url: url, timeoutInterval: 15)
         // Some sites serve a stripped page (or block) the default URLSession UA.
         request.setValue(
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
             forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            return nil
+              let http = response as? HTTPURLResponse else {
+            return DirectFetch(html: nil, status: nil, wall: .none)
         }
-        return String(decoding: data, as: UTF8.self)
+        if http.statusCode == 200 {
+            return DirectFetch(html: String(decoding: data, as: UTF8.self), status: 200, wall: .none)
+        }
+        // Non-200 → classify the block. 401/402 are auth/payment codes → a paywall
+        // (takes precedence — a metered site can still 401 behind a bot manager).
+        // Otherwise sniff the bot-management vendor from its signature headers/cookies.
+        let wall: FetchWall = (http.statusCode == 401 || http.statusCode == 402)
+            ? .paywall
+            : Self.botWallVendor(http)
+        return DirectFetch(html: nil, status: http.statusCode, wall: wall)
+    }
+
+    // Identify the bot-management vendor behind a blocked response from its signature
+    // headers/cookies. These are the services that *decide to block* — not the CDN
+    // (Fastly/Akamai-CDN) or origin proxy (Envoy) in the path. `.other` when unknown.
+    // NB: read from the *blocking* response — a 200 carries a site's normal cookies.
+    private static func botWallVendor(_ http: HTTPURLResponse) -> FetchWall {
+        func has(_ name: String) -> Bool { http.value(forHTTPHeaderField: name) != nil }
+        let server  = http.value(forHTTPHeaderField: "Server")?.lowercased() ?? ""
+        // HTTPURLResponse joins multiple Set-Cookie headers into one comma-separated
+        // string; a substring match on the cookie name is enough to fingerprint.
+        let cookies = http.value(forHTTPHeaderField: "Set-Cookie")?.lowercased() ?? ""
+
+        if has("cf-ray") || has("cf-mitigated") || server.contains("cloudflare") {
+            return .cloudflare
+        }
+        if has("x-datadome") || has("x-dd-b") || cookies.contains("datadome=") {
+            return .datadome
+        }
+        if has("x-px") || cookies.contains("_px") {
+            return .perimeterx
+        }
+        if server.contains("akamaighost") || cookies.contains("ak_bmsc") {
+            return .akamai
+        }
+        if has("x-iinfo") || cookies.contains("visid_incap") || cookies.contains("incap_ses") {
+            return .imperva
+        }
+        return .other
     }
 
     // Heuristic readability extraction: strip non-content blocks, then collect block-level text
