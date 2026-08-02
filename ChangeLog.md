@@ -1,6 +1,10 @@
 # Changelog
 
-## 2026-07-14
+## 2026-07-26
+
+### feat: show fetch provenance below the article title (issue #200)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: the article detail screen now shows a slim caption under the title in the format `HTTP code · blocker · mitigation` — e.g. `200 · none · direct`, `403 · Cloudflare · in-app browser`, `403 · bot wall · in-app browser`, `401 · paywall · in-app browser`, or `403 · Cloudflare · failed`. `fetchHTMLDirect` now returns a `DirectFetch` (html + status + `FetchWall` classification) instead of discarding the status: 401/402 → `paywall` (takes precedence), else a bot-management vendor sniffed from the blocking response's signature headers/cookies — `Cloudflare` (`cf-ray`/`cf-mitigated`/`Server`), `DataDome` (`x-datadome`/`datadome` cookie), `PerimeterX` (`x-px`/`_px`), `Akamai` (`AkamaiGHost`/`ak_bmsc`), `Imperva` (`x-iinfo`/`visid_incap`) — falling back to a generic `bot wall`. Named vendors are the services that *decide to block*, not the CDN (Fastly) or origin proxy (Envoy) in the path. `loadFullText` records a `FetchOutcome` (which tier won + the blocking code/reason) that a new `fetchProvenanceCaption()` renders (natural case, per-state tint: direct muted, WebView amber, failed red). First step of the Route B integration (#199); the impersonate tier is designed-for but not built here.
 
 ### feat: open a saved URL message in the in-app reader, not Safari (issue #197)
 
