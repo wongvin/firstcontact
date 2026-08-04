@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-03
+
+### feat: log fetch-tier outcomes to harvest passive-wall URLs (issue #204)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: instrument `loadFullText`'s three tier-resolution points with an `os.Logger` (`subsystem: com.vwong.FirstContact`, `category: fetch-tier`) so the URLs that hit each fetch tier can be harvested for the Route B survey (#199). Each line is bucketed — `no-wall` (`.direct`), `passive-rescue` (`.webView` rescue = Route B candidate), `blocked` (`.failed`) — and carries `tier`, tier-1 `status`, `FetchWall` vendor, `host`, and `url`, all marked `%{public}` so our own logs aren't redacted. `FetchTier`/`FetchWall` gained `String` raw values for stable tokens. The per-fetch logging is `#if DEBUG`-only (release builds compile it away). Collect with `xcrun simctl spawn booted log stream --predicate 'subsystem == "com.vwong.FirstContact" && category == "fetch-tier"'` (or Console.app on device).
+
 ## 2026-08-01
 
 ### feat: TTL + manual retry for the give-up cache (issue #201)
