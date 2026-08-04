@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 import WebKit
 import GoogleGenerativeAI
+import os
 
 struct Quote: Codable {
     let id: Int
@@ -366,8 +367,17 @@ enum ArticleTextState {
 // Why the direct fetch was blocked. `.other` is a bot wall whose vendor we couldn't
 // identify; the named vendors are bot-management services (not CDNs) detected from
 // their signature headers/cookies.
-enum FetchWall { case none, paywall, cloudflare, datadome, perimeterx, akamai, imperva, other }
-enum FetchTier { case direct, webView, failed }        // which tier produced the result (later: + impersonate)
+enum FetchWall: String { case none, paywall, cloudflare, datadome, perimeterx, akamai, imperva, other }
+enum FetchTier: String { case direct, webView, failed }  // which tier produced the result (later: + impersonate)
+
+#if DEBUG
+// Per-fetch tier logging (#204) to harvest passive-wall URLs for the Route B survey (#199).
+// DEBUG only — release builds compile the log calls away. Collect with:
+//   xcrun simctl spawn booted log stream --predicate \
+//     'subsystem == "com.vwong.FirstContact" && category == "fetch-tier"'
+// On device: Console.app → filter subsystem com.vwong.FirstContact, category fetch-tier.
+private let fetchTierLog = Logger(subsystem: "com.vwong.FirstContact", category: "fetch-tier")
+#endif
 
 struct FetchOutcome {
     let tier: FetchTier
@@ -1743,6 +1753,23 @@ struct ContentView: View {
         return false
     }
 
+    // Log each fetch's tier resolution (#204) so passive-wall URLs (`.webView` rescues —
+    // the Route B candidates) can be harvested from real usage. Bucketed: `no-wall`
+    // (`.direct`), `passive-rescue` (`.webView` + non-200/vendor), `blocked` (`.failed`).
+    // DEBUG-only; release builds compile the body away. Fields are `.public` so our own
+    // logs aren't redacted by os_log's default dynamic-string privacy.
+    private func logFetchTier(_ outcome: FetchOutcome, url: URL) {
+        #if DEBUG
+        let bucket: String
+        switch outcome.tier {
+        case .direct:  bucket = "no-wall"
+        case .webView: bucket = "passive-rescue"   // Route B candidate
+        case .failed:  bucket = "blocked"
+        }
+        fetchTierLog.notice("fetch-tier bucket=\(bucket, privacy: .public) tier=\(outcome.tier.rawValue, privacy: .public) status=\(outcome.status.map(String.init) ?? "-", privacy: .public) wall=\(outcome.wall.rawValue, privacy: .public) host=\(url.host ?? "-", privacy: .public) url=\(url.absoluteString, privacy: .public)")
+        #endif
+    }
+
     private func loadFullText(_ article: Article) async {
         textSelectionActive = false   // reset per article so a stale selection can't block dismiss
         fetchOutcome = nil            // clear the prior article's provenance caption
@@ -1758,7 +1785,9 @@ struct ContentView: View {
             let text = Self.extractReadableText(from: html)
             if !text.isEmpty {
                 articleTextState = .loaded(text)
-                fetchOutcome = FetchOutcome(tier: .direct, status: direct.status, wall: .none)
+                let outcome = FetchOutcome(tier: .direct, status: direct.status, wall: .none)
+                fetchOutcome = outcome
+                logFetchTier(outcome, url: url)
                 return
             }
         }
@@ -1778,7 +1807,9 @@ struct ContentView: View {
            case let text = Self.extractReadableText(from: html), !text.isEmpty {
             articleTextState = .loaded(text)
             // The WebView rescued it — carry the direct tier's blocking code/reason.
-            fetchOutcome = FetchOutcome(tier: .webView, status: direct.status, wall: direct.wall)
+            let outcome = FetchOutcome(tier: .webView, status: direct.status, wall: direct.wall)
+            fetchOutcome = outcome
+            logFetchTier(outcome, url: url)
             safariOnlyArticleURLs[urlString] = nil   // recovered — clear any stale give-up
             return
         }
@@ -1786,7 +1817,9 @@ struct ContentView: View {
         // WKWebView attempt above and lands straight on the Safari link, until the TTL lapses.
         safariOnlyArticleURLs[urlString] = GiveUpEntry(at: Date(), wall: direct.wall)
         articleTextState = .failed
-        fetchOutcome = FetchOutcome(tier: .failed, status: direct.status, wall: direct.wall)
+        let outcome = FetchOutcome(tier: .failed, status: direct.status, wall: direct.wall)
+        fetchOutcome = outcome
+        logFetchTier(outcome, url: url)
     }
 
     // Direct URLSession fetch. Returns the page HTML on a 200; on a non-200 returns
