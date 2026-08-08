@@ -1,6 +1,10 @@
 # Changelog
 
-## 2026-08-03
+## 2026-08-07
+
+### feat: in-app fetch-tier log view (swipe right from home) (issue #205)
+
+- `ios/FirstContact/FirstContact/ContentView.swift`: swipe **left** on the home screen to slide in a scrollable, monospaced view of the #204 `fetch-tier` log; swipe **right** to return home. The view is backed by a new **persisted, capped file buffer** (`FetchTierLogStore` — a ≤500-line file in Caches, serialized off the main thread) that `logFetchTier` appends to alongside the os_log, so the log **survives across app sessions** — OSLogStore can only read the current process on iOS, so it couldn't show earlier sessions. Refresh + clear buttons. The open gesture is wired into the pager's cross-axis branch, portrait-only (horizontal is unused on home there; landscape horizontal stays navigation) to avoid conflict; the base pager's `ZStack` was extracted to a `pagerContainer` for the new branch. Entire feature is `#if DEBUG`-only (matches #204). Diagnostics surface for harvesting Route B passive-wall URLs (#199).
 
 ### feat: log fetch-tier outcomes to harvest passive-wall URLs (issue #204)
 

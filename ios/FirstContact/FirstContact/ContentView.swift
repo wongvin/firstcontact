@@ -377,6 +377,39 @@ enum FetchTier: String { case direct, webView, failed }  // which tier produced 
 //     'subsystem == "com.vwong.FirstContact" && category == "fetch-tier"'
 // On device: Console.app → filter subsystem com.vwong.FirstContact, category fetch-tier.
 private let fetchTierLog = Logger(subsystem: "com.vwong.FirstContact", category: "fetch-tier")
+
+// Persisted, capped buffer behind the in-app log view (#205). OSLogStore can only read the
+// *current process* on iOS, so it can't show entries from earlier app sessions — this file
+// (appended alongside the os_log above) does, surviving relaunches. Backed by a capped file
+// in Caches (expendable diagnostic data). Writes are serialized off the main thread.
+enum FetchTierLogStore {
+    private static let maxLines = 500
+    private static let queue = DispatchQueue(label: "com.vwong.FirstContact.fetch-tier-log")
+    private static let fileURL = FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("fetch-tier.log")
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MM-dd HH:mm:ss"; return f
+    }()
+
+    static func append(_ message: String) {
+        let line = "\(stamp.string(from: Date()))  \(message)"
+        queue.async {
+            var lines = readLines()
+            lines.append(line)
+            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+            try? lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    static func load() -> [String] { queue.sync { readLines() } }
+    static func clear() { queue.async { try? FileManager.default.removeItem(at: fileURL) } }
+
+    private static func readLines() -> [String] {
+        guard let s = try? String(contentsOf: fileURL, encoding: .utf8), !s.isEmpty else { return [] }
+        return s.split(separator: "\n").map(String.init)
+    }
+}
 #endif
 
 struct FetchOutcome {
@@ -448,6 +481,12 @@ struct ContentView: View {
     @State private var keywordDraft = ""
     @State private var showKeywordTooLong = false
     @FocusState private var keywordFieldFocused: Bool
+    #if DEBUG
+    // In-app fetch-tier log view (#205): swipe left on home to open; backed by the persisted
+    // FetchTierLogStore so it survives across app sessions.
+    @State private var showFetchLog = false
+    @State private var fetchLogEntries: [String] = []
+    #endif
     @State private var showCompose = false
     @State private var draft = ""
     @FocusState private var composeFieldFocused: Bool
@@ -530,26 +569,16 @@ struct ContentView: View {
                 composeScreen
                     .transition(.move(edge: .trailing))
             } else {
-                ZStack(alignment: isLandscape ? .trailing : .bottom) {
-                    Group {
-                        if let feed = spawnedFeed {
-                            spawnedFeedPager(feed)
-                                .transition(.move(edge: .trailing))
-                        } else {
-                            pager
-                        }
-                    }
-                    .allowsHitTesting(!showKeywordPanel)
-                    if showKeywordPanel {
-                        // Dim the screen behind; tapping it dismisses the sheet.
-                        Color.black.opacity(0.35)
-                            .ignoresSafeArea()
-                            .transition(.opacity)
-                            .onTapGesture { withAnimation { showKeywordPanel = false } }
-                        keywordPanel()
-                            .transition(.move(edge: isLandscape ? .trailing : .bottom))
-                    }
+                #if DEBUG
+                if showFetchLog {
+                    fetchLogScreen
+                        .transition(.move(edge: .trailing))
+                } else {
+                    pagerContainer
                 }
+                #else
+                pagerContainer
+                #endif
             }
         }
         .task { await loadQuote() }
@@ -560,6 +589,30 @@ struct ContentView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("The keyword search expression is over GNews's 200-character limit, so some keywords may not be applied to the news filter.")
+        }
+    }
+
+    // The base pager (or a spawned related-news feed) plus the keyword panel overlay.
+    private var pagerContainer: some View {
+        ZStack(alignment: isLandscape ? .trailing : .bottom) {
+            Group {
+                if let feed = spawnedFeed {
+                    spawnedFeedPager(feed)
+                        .transition(.move(edge: .trailing))
+                } else {
+                    pager
+                }
+            }
+            .allowsHitTesting(!showKeywordPanel)
+            if showKeywordPanel {
+                // Dim the screen behind; tapping it dismisses the sheet.
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture { withAnimation { showKeywordPanel = false } }
+                keywordPanel()
+                    .transition(.move(edge: isLandscape ? .trailing : .bottom))
+            }
         }
     }
 
@@ -638,6 +691,16 @@ struct ContentView: View {
                 let dx = value.translation.width
                 let dy = value.translation.height
                 let horizontal = abs(dx) > abs(dy)
+                #if DEBUG
+                // Swipe left on the home screen opens the in-app fetch-tier log (#205).
+                // Portrait only: there horizontal is the free cross-axis on home (the pager
+                // navigates vertically, and cross-swipes only act on article screens); in
+                // landscape horizontal is the nav axis, so we leave it alone.
+                if screenIndex == 0, !isLandscape, horizontal, dx < -50 {
+                    withAnimation { showFetchLog = true }
+                    return
+                }
+                #endif
                 // Navigation runs on the horizontal axis in landscape, vertical in portrait.
                 if horizontal == isLandscape {
                     let primary = isLandscape ? dx : dy
@@ -658,6 +721,76 @@ struct ContentView: View {
                 }
             }
     }
+
+    #if DEBUG
+    // In-app fetch-tier log (#205): a scrollable view of the persisted FetchTierLogStore
+    // (survives across sessions). Reached by swiping left on home; swipe right to return.
+    private var fetchLogScreen: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { withAnimation { showFetchLog = false } } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Back")
+                Spacer()
+                Text("fetch-tier log").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button { loadFetchLog() } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 17, weight: .semibold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Refresh")
+                Button { FetchTierLogStore.clear(); loadFetchLog() } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 17, weight: .semibold))
+                        .padding(8)
+                }
+                .accessibilityLabel("Clear")
+            }
+            .padding(.horizontal, 12)
+
+            ScrollView {
+                if fetchLogEntries.isEmpty {
+                    Text("No fetch-tier entries.\nOpen some articles, then tap refresh.")
+                        .font(.system(size: 14))
+                        .multilineTextAlignment(.center)
+                        .opacity(0.8)
+                        .padding(.top, 48)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(fetchLogEntries.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 12, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding()
+                }
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        // Swipe right to return home (mirrors the article detail's swipe-to-dismiss).
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20).onEnded { value in
+                if value.translation.width > 50,
+                   abs(value.translation.width) > abs(value.translation.height) {
+                    withAnimation { showFetchLog = false }
+                }
+            }
+        )
+        .task { loadFetchLog() }
+    }
+
+    // Load the persisted fetch-tier lines (survives across app sessions, unlike an
+    // OSLogStore current-process query). The file is capped, so a synchronous read is cheap.
+    private func loadFetchLog() { fetchLogEntries = FetchTierLogStore.load() }
+    #endif
 
     @ViewBuilder
     private var quoteSection: some View {
@@ -1766,7 +1899,9 @@ struct ContentView: View {
         case .webView: bucket = "passive-rescue"   // Route B candidate
         case .failed:  bucket = "blocked"
         }
-        fetchTierLog.notice("fetch-tier bucket=\(bucket, privacy: .public) tier=\(outcome.tier.rawValue, privacy: .public) status=\(outcome.status.map(String.init) ?? "-", privacy: .public) wall=\(outcome.wall.rawValue, privacy: .public) host=\(url.host ?? "-", privacy: .public) url=\(url.absoluteString, privacy: .public)")
+        let message = "bucket=\(bucket) tier=\(outcome.tier.rawValue) status=\(outcome.status.map(String.init) ?? "-") wall=\(outcome.wall.rawValue) host=\(url.host ?? "-") url=\(url.absoluteString)"
+        fetchTierLog.notice("fetch-tier \(message, privacy: .public)")   // os_log: off-device / Console
+        FetchTierLogStore.append(message)                                // persisted: in-app view (#205)
         #endif
     }
 
