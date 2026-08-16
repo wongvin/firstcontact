@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-16
+
+### feat: Sophon app icon (issue #216)
+
+- The app shipped with an empty `AppIcon.appiconset` (a placeholder from #208 that only silenced the asset warning), so it showed the blank default on the home screen. It now has an icon: an **infinity symbol** — two entangled protons — with a glowing proton at the heart of each loop and a binary string running between them.
+- **Generated, not drawn.** `ios/Sophon/icon/sophon-icon.py` emits one SVG per appearance and `render.sh` rasterises them into the catalog, so the icon is reproducible and tunable rather than an opaque binary. The curve is a **lemniscate of Bernoulli** sampled from its parametric equation at 64 points and joined via Catmull-Rom→Bézier, giving C1 continuity — smooth by construction.
+- Protons sit at each loop's **widest point** (`0.612a`), not the curve's true foci (`0.707a`); the real foci sit visibly outboard and read as sliding toward the tips. Their gradient uses an exponential falloff (`t⁴`) so the core stays white and heat appears only at the circumference — `t⁶` looks better at 1024px but loses the warm rim below ~100px.
+- The binary string is drawn twice — white, then black clipped to the protons — which is what keeps it legible where it crosses the bright cores.
+- **Three genuinely distinct appearance variants** (light / dark / tinted), verified to differ by checksum. `ios/FirstContact` ships its light and dark icons byte-identical; that shortcut is deliberately not repeated here.
+
 ## 2026-08-10
 
 ### feat: Sophon project skeleton — Zephyr BLE peripheral + iOS central (issue #208)
