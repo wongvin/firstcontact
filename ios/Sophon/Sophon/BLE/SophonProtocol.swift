@@ -15,6 +15,56 @@ nonisolated enum SophonProtocol {
 
     /// Notify-only, 18-byte value.
     static let motionCharacteristicUUID = CBUUID(string: "C6560002-84D5-4DC2-8C1E-4B4EB2337CE4")
+
+    /// Read-only, 16-byte value: the peripheral's own transmit counters.
+    ///
+    /// Read rather than notify — these move slowly and are diagnostics, and a
+    /// notification would spend connection-event budget, which is the resource
+    /// #211 is trying to measure.
+    static let statsCharacteristicUUID = CBUUID(string: "C6560003-84D5-4DC2-8C1E-4B4EB2337CE4")
+}
+
+/// The peripheral's transmit outcome counters, cumulative since its boot.
+///
+/// These are the other half of the attribution story. `seqGaps` says an interval
+/// has no data; only `noBuffer` can say whether those frames were lost on the air
+/// or never left the board at all.
+nonisolated struct TxStats: Equatable, Sendable {
+    static let wireSize = 16
+
+    /// Notifications the stack accepted.
+    let sent: UInt32
+    /// Rejected because nobody was subscribed. Expected, not a fault.
+    let noConn: UInt32
+    /// Rejected because the TX buffers were full — the interesting one.
+    let noBuffer: UInt32
+    /// Anything else the stack returned.
+    let other: UInt32
+
+    init?(_ data: Data) {
+        guard data.count == Self.wireSize else { return nil }
+
+        var bytes = [UInt8](repeating: 0, count: Self.wireSize)
+        data.copyBytes(to: &bytes, count: Self.wireSize)
+
+        func u32(_ offset: Int) -> UInt32 {
+            UInt32(bytes[offset])
+                | (UInt32(bytes[offset + 1]) << 8)
+                | (UInt32(bytes[offset + 2]) << 16)
+                | (UInt32(bytes[offset + 3]) << 24)
+        }
+
+        sent = u32(0)
+        noConn = u32(4)
+        noBuffer = u32(8)
+        other = u32(12)
+    }
+}
+
+nonisolated extension TxStats {
+    /// True when the board reported a transmit failure worth explaining.
+    /// `noConn` is excluded: it only means nobody was subscribed.
+    var hasFailures: Bool { noBuffer > 0 || other > 0 }
 }
 
 /// One IMU sample. 18 bytes on the wire, little-endian.

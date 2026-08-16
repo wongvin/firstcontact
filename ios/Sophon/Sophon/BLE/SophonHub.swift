@@ -26,6 +26,8 @@ final class SophonHub: NSObject {
 
     private var central: CBCentralManager!
     private var byID: [UUID: SophonDevice] = [:]
+    /// Held per device so stats can be re-read on demand without rediscovering.
+    private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
     private let log = Logger(subsystem: "com.vwong.Sophon", category: "ble")
 
     override init() {
@@ -45,6 +47,13 @@ final class SophonHub: NSObject {
 
     func disconnect(_ device: SophonDevice) {
         central.cancelPeripheralConnection(device.peripheral)
+    }
+
+    /// Re-read the board's transmit counters. Cheap and on demand — deliberately
+    /// not a subscription, so it costs no connection-event budget.
+    func refreshStats(_ device: SophonDevice) {
+        guard let characteristic = statsCharacteristics[device.id] else { return }
+        device.peripheral.readValue(for: characteristic)
     }
 
     private func startScan() {
@@ -153,6 +162,7 @@ extension SophonHub: CBCentralManagerDelegate {
             guard let device = self.byID[peripheral.identifier] else { return }
             device.state = .disconnected(reason: reason)
             self.log.info("disconnected \(device.displayName, privacy: .public)")
+            self.statsCharacteristics[peripheral.identifier] = nil
 
             // Re-arm. The scan is still running, so walking back into range
             // rediscovers and reconnects without a relaunch.
@@ -165,7 +175,10 @@ extension SophonHub: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil, let services = peripheral.services else { return }
         for service in services where service.uuid == SophonProtocol.serviceUUID {
-            peripheral.discoverCharacteristics([SophonProtocol.motionCharacteristicUUID], for: service)
+            peripheral.discoverCharacteristics(
+                [SophonProtocol.motionCharacteristicUUID,
+                 SophonProtocol.statsCharacteristicUUID],
+                for: service)
         }
     }
 
@@ -175,9 +188,20 @@ extension SophonHub: CBPeripheralDelegate {
         error: Error?
     ) {
         guard error == nil, let characteristics = service.characteristics else { return }
-        for characteristic in characteristics
-        where characteristic.uuid == SophonProtocol.motionCharacteristicUUID {
-            peripheral.setNotifyValue(true, for: characteristic)
+        for characteristic in characteristics {
+            switch characteristic.uuid {
+            case SophonProtocol.motionCharacteristicUUID:
+                peripheral.setNotifyValue(true, for: characteristic)
+            case SophonProtocol.statsCharacteristicUUID:
+                // Read once on connect to establish the session baseline; after
+                // that it is refreshed on demand from the detail view.
+                peripheral.readValue(for: characteristic)
+                Task { @MainActor in
+                    self.statsCharacteristics[peripheral.identifier] = characteristic
+                }
+            default:
+                break
+            }
         }
     }
 
@@ -186,10 +210,23 @@ extension SophonHub: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard error == nil,
-              characteristic.uuid == SophonProtocol.motionCharacteristicUUID,
-              let data = characteristic.value
-        else { return }
+        guard error == nil, let data = characteristic.value else { return }
+
+        if characteristic.uuid == SophonProtocol.statsCharacteristicUUID {
+            let byteCount = data.count
+            guard let stats = TxStats(data) else {
+                Task { @MainActor in
+                    self.log.error("bad stats: \(byteCount) bytes, expected \(TxStats.wireSize)")
+                }
+                return
+            }
+            Task { @MainActor in
+                self.byID[peripheral.identifier]?.ingest(stats)
+            }
+            return
+        }
+
+        guard characteristic.uuid == SophonProtocol.motionCharacteristicUUID else { return }
 
         let byteCount = data.count
         guard let frame = MotionFrame(data) else {

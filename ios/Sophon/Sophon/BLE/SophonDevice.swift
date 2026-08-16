@@ -42,6 +42,18 @@ final class SophonDevice: Identifiable {
     /// Negotiated on connect. Expect 23 — logged rather than assumed, on both sides.
     var attMTU: Int?
 
+    /// The board's own transmit counters, read over the stats characteristic.
+    /// Cumulative since the *board's* boot, so they do not reset when this
+    /// connection does — which is why `txStatsAtConnect` is kept alongside.
+    var txStats: TxStats?
+    /// Snapshot taken on connect, so the UI can show movement during this
+    /// session rather than a total that is mostly historical.
+    var txStatsAtConnect: TxStats?
+    var txStatsAt: Date?
+    /// framesReceived at the instant the stats baseline was taken, so both
+    /// sides of the comparison start from the same moment.
+    private var framesAtStatsBaseline: Int = 0
+
     private var previousFrame: MotionFrame?
 
     init(peripheral: CBPeripheral, advertisedName: String?) {
@@ -70,5 +82,56 @@ final class SophonDevice: Identifiable {
         lastFrame = nil
         lastFrameAt = nil
         attMTU = nil
+        txStats = nil
+        txStatsAtConnect = nil
+        txStatsAt = nil
+        framesAtStatsBaseline = 0
+    }
+
+    func ingest(_ stats: TxStats) {
+        // The first read of a connection becomes the baseline, so the UI can
+        // report what happened during this session. The board's totals survive
+        // reconnects; this app's counters do not, and comparing the two without
+        // a baseline would be misleading.
+        //
+        // framesReceived is snapshotted at the same instant. That read lands a
+        // second or two after connect — after service and characteristic
+        // discovery — and any frames arriving in that window are already inside
+        // the board's baseline while still counted by this app. Without pinning
+        // both to the same moment, `lostInFlight` under-reports by exactly the
+        // number of frames that slipped through the gap.
+        if txStatsAtConnect == nil {
+            txStatsAtConnect = stats
+            framesAtStatsBaseline = framesReceived
+        }
+        txStats = stats
+        txStatsAt = Date()
+    }
+
+    /// Board-side counters scoped to **this connection**, which is the only form
+    /// comparable with `framesReceived` and `seqGaps`.
+    ///
+    /// The board's own totals are cumulative since it booted and survive a
+    /// reconnect; this app's counters reset on every connect. Showing the two
+    /// side by side without rebasing invites a false reading — `sent` would
+    /// simply be larger than `received` by however long the board had been
+    /// running beforehand.
+    var txThisSession: (sent: UInt32, noBuffer: UInt32, other: UInt32)? {
+        guard let now = txStats, let base = txStatsAtConnect else { return nil }
+        return (now.sent &- base.sent,
+                now.noBuffer &- base.noBuffer,
+                now.other &- base.other)
+    }
+
+    /// Frames the board handed to the stack that never reached this app.
+    ///
+    /// This is the one number neither side can produce alone: the board knows
+    /// what it sent, the app knows what it decoded, and the difference is what
+    /// died in between — on the air, or while the app was not listening.
+    /// `nil` until a stats read has established a baseline.
+    var lostInFlight: Int? {
+        guard let s = txThisSession else { return nil }
+        let receivedSinceBaseline = framesReceived - framesAtStatsBaseline
+        return max(0, Int(s.sent) - receivedSinceBaseline)
     }
 }

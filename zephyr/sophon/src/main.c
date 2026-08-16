@@ -28,6 +28,17 @@ LOG_MODULE_REGISTER(sophon, LOG_LEVEL_INF);
 /* Blink cadence while advertising. Independent of the notify period. */
 #define LED_TICK_MS 250
 
+/*
+ * How often the transmit counters are summarised to the console.
+ *
+ * Deliberately a periodic summary rather than a line per failure: the failure
+ * worth reporting is TX-buffer exhaustion, and at #209's 50 Hz a log line per
+ * occurrence would flood the console during exactly the congestion it is trying
+ * to describe -- and the logging would compete for the resources already under
+ * pressure.
+ */
+#define STATS_PERIOD_MS 30000
+
 /* Green led1 on the XIAO. Active-low, but the gpio_dt_spec flags handle that. */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 
@@ -52,8 +63,6 @@ static int led_init(void)
 
 static void notify_work_handler(struct k_work *work)
 {
-	int err;
-
 	ARG_UNUSED(work);
 
 	if (!sophon_ble_subscribed()) {
@@ -69,10 +78,14 @@ static void notify_work_handler(struct k_work *work)
 	frame.t_ms = k_uptime_get_32();
 	/* axes stay zero until #209 */
 
-	err = sophon_ble_notify(&frame);
-	if (err && err != -ENOTCONN) {
-		LOG_WRN("notify failed (%d)", err);
-	}
+	/*
+	 * The outcome is counted in ble.c and summarised by stats_work_handler.
+	 * Deliberately NOT logged per failure: measured on hardware, a flooding
+	 * link produced 22781 per-failure lines against 11 summaries in 90 s --
+	 * two megabytes of console describing a congestion problem, while the
+	 * logging competed for the very resources under pressure.
+	 */
+	(void)sophon_ble_notify(&frame);
 }
 
 static K_WORK_DEFINE(notify_work, notify_work_handler);
@@ -104,6 +117,43 @@ static void notify_timer_expiry(struct k_timer *timer)
 static K_TIMER_DEFINE(notify_timer, notify_timer_expiry, NULL);
 static K_TIMER_DEFINE(led_timer, NULL, NULL);
 
+static void stats_work_handler(struct k_work *work)
+{
+	static struct sophon_tx_stats last;
+	struct sophon_tx_stats now;
+
+	ARG_UNUSED(work);
+
+	sophon_ble_tx_stats(&now);
+
+	/*
+	 * Silent while healthy. -ENOTCONN is excluded from the test on purpose:
+	 * it just means nobody is subscribed, which is the normal state of an
+	 * advertising board and not something to report every 30 seconds.
+	 */
+	if (now.no_mem == last.no_mem && now.other == last.other) {
+		last = now;
+		return;
+	}
+
+	LOG_WRN("tx failures: no-buffer %u (+%u), other %u (+%u); sent %u",
+		now.no_mem, now.no_mem - last.no_mem,
+		now.other, now.other - last.other,
+		now.sent);
+
+	last = now;
+}
+
+static K_WORK_DEFINE(stats_work, stats_work_handler);
+
+static void stats_timer_expiry(struct k_timer *timer)
+{
+	ARG_UNUSED(timer);
+	k_work_submit(&stats_work);
+}
+
+static K_TIMER_DEFINE(stats_timer, stats_timer_expiry, NULL);
+
 int main(void)
 {
 	uint32_t tick = 0;
@@ -128,6 +178,7 @@ int main(void)
 
 	k_timer_start(&notify_timer, K_MSEC(NOTIFY_PERIOD_MS), K_MSEC(NOTIFY_PERIOD_MS));
 	k_timer_start(&led_timer, K_MSEC(LED_TICK_MS), K_MSEC(LED_TICK_MS));
+	k_timer_start(&stats_timer, K_MSEC(STATS_PERIOD_MS), K_MSEC(STATS_PERIOD_MS));
 
 	/*
 	 * The main thread now only drives the LED: solid while connected, blinking
