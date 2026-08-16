@@ -35,7 +35,21 @@ final class SophonDevice: Identifiable {
     // are what turn "does it still work with 4 boards?" into an observation
     // instead of a guess (#211).
     var framesReceived: Int = 0
+    /// Frames the board sent, on a live stream, that never arrived. Excludes
+    /// anything missed while this app was not listening — see `interruptions`.
     var seqGaps: Int = 0
+    /// Times the stream resumed after a hole too large to be loss. Surfaced
+    /// separately rather than silently discarded: "gaps 0, interruptions 3"
+    /// says more than either number alone, and hiding the interruption would
+    /// make a suspended app look like a flawless link.
+    var interruptions: Int = 0
+    /// Frames unaccounted for across those interruptions. Not losses, but not
+    /// nothing either — this is the data the app did not see.
+    var framesDuringInterruptions: Int = 0
+    /// Times the board restarted mid-connection. Detected exactly rather than
+    /// guessed: the frame's `t_ms` is board uptime, so a value lower than the
+    /// previous one can only mean it rebooted.
+    var boardRestarts: Int = 0
     var lastFrame: MotionFrame?
     var lastFrameAt: Date?
 
@@ -53,8 +67,15 @@ final class SophonDevice: Identifiable {
     /// framesReceived at the instant the stats baseline was taken, so both
     /// sides of the comparison start from the same moment.
     private var framesAtStatsBaseline: Int = 0
+    /// Same idea for interruption frames, so a hole that predates the
+    /// baseline is not subtracted from a window it never belonged to.
+    private var interruptedFramesAtStatsBaseline: Int = 0
 
     private var previousFrame: MotionFrame?
+    /// Set when iOS reports the app left the foreground, cleared by the next
+    /// frame that arrives. Any gap spanning it is an interruption regardless of
+    /// how brief it was -- which is what elapsed time alone cannot tell you.
+    private var wasSuspended = false
 
     init(peripheral: CBPeripheral, advertisedName: String?) {
         self.id = peripheral.identifier
@@ -62,14 +83,76 @@ final class SophonDevice: Identifiable {
         self.displayName = advertisedName ?? peripheral.name ?? "Sophon (unnamed)"
     }
 
+    /// Inter-arrival time beyond which a sequence jump is read as the stream
+    /// having been *interrupted* rather than frames having been *lost*.
+    ///
+    /// This is a threshold because nothing better exists. From the frame data
+    /// alone the two cases are identical: whether three frames were lost on a
+    /// live link or the app was suspended for an hour, the board carried on and
+    /// `t_ms` advanced in proportion to wall time either way. No ratio separates
+    /// them — only the size of the hole.
+    ///
+    /// 5 s is chosen against the rate that matters. At #209's 50 Hz it is 250
+    /// frames, which is unambiguously an interruption rather than the
+    /// scheduling jitter #211 exists to measure. At the skeleton's 1 Hz it is
+    /// only 5 frames, so a genuine five-second dropout on a live link is
+    /// misclassified as an interruption. That error is deliberate and one-sided:
+    /// it under-counts loss slightly, where the previous behaviour over-counted
+    /// it by thousands.
+    private static let interruptionThreshold: TimeInterval = 5
+
     func ingest(_ frame: MotionFrame) {
-        if let previous = previousFrame {
-            seqGaps += max(0, frame.gap(since: previous))
+        let now = Date()
+
+        if let previous = previousFrame, frame.tMillis < previous.tMillis {
+            // Board uptime went backwards, so the board rebooted. Its seq and
+            // its transmit counters both restart from zero, which makes every
+            // comparison against the old session meaningless -- the sequence
+            // jump is not loss, and `sent` would appear to run backwards.
+            //
+            // A quick power cycle can stay inside the supervision timeout, so
+            // iOS never reports a disconnect and nothing else resets. This is
+            // the only reliable signal that it happened.
+            boardRestarts += 1
+
+            // Discarding the stats baseline is the whole job: the next read
+            // re-establishes it, and `lostOnAir` reports nil until then
+            // rather than a figure spanning two different boots. No sequence
+            // gap is counted for this frame, and the assignment at the end of
+            // this method makes it the start of the new comparison.
+            txStatsAtConnect = nil
+        } else if let previous = previousFrame {
+            let missing = max(0, frame.gap(since: previous))
+            if missing > 0 {
+                let elapsed = lastFrameAt.map { now.timeIntervalSince($0) } ?? 0
+                // Two independent signals, because each covers the other's
+                // blind spot. The lifecycle flag is exact but only fires when
+                // iOS actually backgrounds the app; the elapsed-time threshold
+                // catches long holes that arrive some other way -- delivery
+                // throttling, a stall -- where no notification was posted.
+                if wasSuspended || elapsed > Self.interruptionThreshold {
+                    // Not loss. The frames were sent; this app was not there to
+                    // receive them — a locked phone suspends the app while the
+                    // BLE link itself stays up, so no disconnect resets anything.
+                    interruptions += 1
+                    framesDuringInterruptions += missing
+                } else {
+                    seqGaps += missing
+                }
+            }
         }
+
         previousFrame = frame
         lastFrame = frame
-        lastFrameAt = Date()
+        lastFrameAt = now
         framesReceived += 1
+        wasSuspended = false
+    }
+
+    /// Called when iOS backgrounds the app. The next frame to arrive will treat
+    /// its gap as an interruption rather than loss, however short it was.
+    func noteSuspended() {
+        wasSuspended = true
     }
 
     /// Counters describe one connection, so they reset when a new one starts —
@@ -78,6 +161,9 @@ final class SophonDevice: Identifiable {
     func resetLinkStats() {
         framesReceived = 0
         seqGaps = 0
+        interruptions = 0
+        framesDuringInterruptions = 0
+        boardRestarts = 0
         previousFrame = nil
         lastFrame = nil
         lastFrameAt = nil
@@ -86,6 +172,7 @@ final class SophonDevice: Identifiable {
         txStatsAtConnect = nil
         txStatsAt = nil
         framesAtStatsBaseline = 0
+        interruptedFramesAtStatsBaseline = 0
     }
 
     func ingest(_ stats: TxStats) {
@@ -98,11 +185,12 @@ final class SophonDevice: Identifiable {
         // second or two after connect — after service and characteristic
         // discovery — and any frames arriving in that window are already inside
         // the board's baseline while still counted by this app. Without pinning
-        // both to the same moment, `lostInFlight` under-reports by exactly the
-        // number of frames that slipped through the gap.
+        // both to the same moment, the session figures drift apart by exactly
+        // the number of frames that slipped through the gap.
         if txStatsAtConnect == nil {
             txStatsAtConnect = stats
             framesAtStatsBaseline = framesReceived
+            interruptedFramesAtStatsBaseline = framesDuringInterruptions
         }
         txStats = stats
         txStatsAt = Date()
@@ -123,15 +211,22 @@ final class SophonDevice: Identifiable {
                 now.other &- base.other)
     }
 
-    /// Frames the board handed to the stack that never reached this app.
+    /// Frames that were produced and never arrived, excluding the ones the
+    /// board dropped before they reached the air.
     ///
-    /// This is the one number neither side can produce alone: the board knows
-    /// what it sent, the app knows what it decoded, and the difference is what
-    /// died in between — on the air, or while the app was not listening.
-    /// `nil` until a stats read has established a baseline.
-    var lostInFlight: Int? {
-        guard let s = txThisSession else { return nil }
-        let receivedSinceBaseline = framesReceived - framesAtStatsBaseline
-        return max(0, Int(s.sent) - receivedSinceBaseline)
+    /// Derived from two **event counts over the same window**, not from two
+    /// snapshots taken at different instants. `seqGaps` counts holes in the
+    /// sequence; `noBuffer` counts sends the board itself refused. Subtracting
+    /// leaves what was handed to the radio and lost.
+    ///
+    /// The earlier version computed `sent - received`, which cannot work:
+    /// those two are sampled on different clocks, so at read time the board has
+    /// usually just sent a frame the app has not decoded yet. Reading them a
+    /// poll apart only traded the resulting flicker for a permanent zero.
+    /// Counting events sidesteps the question entirely -- neither term is an
+    /// instantaneous reading.
+    var lostOnAir: Int? {
+        guard let tx = txThisSession else { return nil }
+        return max(0, seqGaps - Int(tx.noBuffer))
     }
 }

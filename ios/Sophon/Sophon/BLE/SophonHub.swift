@@ -1,5 +1,6 @@
 import CoreBluetooth
 import Foundation
+import UIKit
 import os
 
 /// Owns the app's single `CBCentralManager` and the set of known Sophons.
@@ -33,6 +34,28 @@ final class SophonHub: NSObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+
+        // Frames missed while the app is not running are not link loss. iOS
+        // says exactly when that starts, which beats inferring it from how long
+        // a gap lasted -- a two-second screen lock and a two-second dropout are
+        // identical by duration, and only this tells them apart.
+        //
+        // BOTH notifications are observed, not just the background one. A quick
+        // screen toggle can resign active without ever fully backgrounding, and
+        // the app stops being scheduled from the earlier of the two -- so
+        // watching only didEnterBackground leaves exactly the short suspensions
+        // that happen most often still counted as loss.
+        for name in [UIApplication.willResignActiveNotification,
+                     UIApplication.didEnterBackgroundNotification] {
+            NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.devices.forEach { $0.noteSuspended() }
+                }
+            }
+        }
     }
 
     func device(for peripheral: CBPeripheral) -> SophonDevice? {
