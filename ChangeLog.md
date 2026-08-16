@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-08-10
+
+### feat: Sophon project skeleton — Zephyr BLE peripheral + iOS central (issue #208)
+
+- **New `zephyr/` top-level target.** First embedded firmware in the repo: `zephyr/sophon/` is a **freestanding** Zephyr app for the Seeed XIAO nRF52840 Sense Plus (`xiao_ble/nrf52840/sense`), built against the shared `~/zephyrproject` workspace. `scripts/build.sh` exports `ZEPHYR_BASE` because `west` cannot resolve a workspace from inside this repo; `scripts/flash.sh` does `west flash -r uf2` with a manual-copy fallback for the board-id mismatch. `CMakeLists.txt` guards Zephyr >= 4.4 at configure time (using `ZEPHYR_VERSION_CODE` — `CONFIG_ZEPHYR_VERSION_CODE` does not exist and guarding on it is silently dead).
+- **18-byte wire frame** (`seq` u16, `t_ms` u32, six i16 axes), documented in `zephyr/sophon/PROTOCOL.md` with frozen service/characteristic UUIDs. Sized to fit the default 23-byte ATT MTU so one sample is exactly one radio packet — no fragmentation, no reassembly. MTU left at default deliberately; no pairing.
+- **Per-chip identity** from the nRF52840 FICR via `hwinfo_get_device_id()` → advertised name `Sophon-XXXX`, so one image suits every board. Name rides in the **scan response**; flags + the 128-bit service UUID already fill 21 of the advertisement's 31 bytes.
+- Firmware notifies a zero-filled frame at 1 Hz once subscribed (`seq`/`t_ms` live), so the subscribe path is verifiable before the IMU exists (#209). Green LED blinks while advertising, solid while connected. Negotiated ATT MTU is logged, not assumed.
+- **New `ios/Sophon/` Xcode project**, sibling to `FirstContact/`, bundle `com.vwong.Sophon`, with a **committed shared scheme** so it builds from a fresh clone. Split into `SophonHub` (owns the single `CBCentralManager`, scans filtered by service UUID, keys `[UUID: SophonDevice]`) and `SophonDevice` (name, state, RSSI, `framesReceived`, `seqGaps`) — multi-device-shaped before any view binds to it.
+- `ios/Sophon/UPDATED-PLAN.md` carries the design reasoning for both halves: the ATT MTU budget, the connection-event supply/demand analysis behind the 50 Hz target, the batching-vs-DLE arithmetic, and why the app is freestanding. `ORIGINAL-PLAN.md` beside it freezes the same document as approved before implementation — kept as the record of what was intended, since a plan that rewrites itself to match the code stops being evidence of anything. The updated one corrects API-level detail only (the USB stack Kconfig, the advertising-restart macro, the CMake version variable, and Swift actor isolation); no analysis moved.
+- Docs: new `zephyr/CLAUDE.md` + `zephyr/README.md`, `zephyr/sophon/README.md`, `ios/Sophon/README.md`. Root `CLAUDE.md` gains the `zephyr/` target and the `sophon:` issue prefix; `.gitignore` gains an explicit `zephyr/*/build/`.
+- **Verified on hardware.** Flashed a real XIAO nRF52840 Sense Plus; console shows `advertising as Sophon-4D88` (FICR-derived name working), and an iPhone connects with `ATT MTU 23` — exactly the value the frame size was budgeted against — then subscribes to the motion characteristic, which is only possible if both hardcoded UUID copies agree. Repeated `disconnected (0x08)` → `connected` cycles confirm the advertising restart works.
+- Two bugs only reachable with a board attached: **`flash.sh` aborted on a successful flash** (the bootloader reboots the instant it has a complete image, so the volume unmounts mid-copy and `cp` fails setting extended attributes — now `cp -X`, and the unmount is treated as the success signal); and **the documented console device was wrong** — `/dev/tty.usbmodem*` blocks on carrier detect and fails with `Device not configured`, so all three docs now say `/dev/cu.usbmodem*`.
+- Real board-id recorded: `nRF52840-SeeedXiaoSense-v1`, which the uf2 runner's expected `Seeed_XIAO_nRF52840_Sense` does **not** match — the copy fallback is the working path, as the plan anticipated.
+- Follow-ups filed: #209 (real IMU at 50 Hz), #210 (3D orientation view + charts), #211 (multi-device batching + DLE, cross-device time sync).
+
 ## 2026-08-07
 
 ### feat: in-app fetch-tier log view (swipe right from home) (issue #205)

@@ -1,9 +1,12 @@
 # First Contact — repo conventions
 
-This repo contains two top-level targets:
+This repo contains three top-level targets:
 
 - [`webapp/`](webapp/) — the primary web app: a Next.js 16 site (homepage, daily news reader, and the DigiKey/Mouser/Transcripts tool pages) deployed to Vercel. Target conventions in [webapp/CLAUDE.md](webapp/CLAUDE.md).
-- [`ios/`](ios/) — native iOS app (early development, free Apple ID signing for personal use). Target conventions will live in `ios/CLAUDE.md` once they emerge.
+- [`ios/`](ios/) — native iOS apps (free Apple ID signing for personal use): `FirstContact/` and `Sophon/`. Target conventions in [ios/CLAUDE.md](ios/CLAUDE.md).
+- [`zephyr/`](zephyr/) — embedded firmware built with Zephyr RTOS against the shared toolchain at `~/zephyrproject`. Target conventions in [zephyr/CLAUDE.md](zephyr/CLAUDE.md).
+
+**Sophon** spans two of those: `zephyr/sophon/` (a BLE motion peripheral on a Seeed XIAO nRF52840 Sense Plus) and `ios/Sophon/` (the iPhone app that visualizes it). One logical project, one issue prefix, one branch per change.
 
 The `webapp/` target is deployed by Vercel (Root Directory `webapp`, `GNEWS_API_KEY` env var). It supersedes the former static `web/` + GitHub Pages target, retired in issue #88. A local FastAPI backend ([`api/server/`](api/server/), `localhost:8001`) enriches the homepage's 30-day summary and the tool pages; it stays a local-only service.
 
@@ -33,8 +36,13 @@ Does not require an issue:
 - Reformatting / wording-only doc edits
 
 Prefix every new issue title with the sub-project it concerns, followed by a
-colon: `webapp:` for the webapp target, `iOS:` for the ios target (e.g.
-`webapp: Add dark-mode toggle`, `iOS: Pull-to-refresh on news list`).
+colon: `webapp:` for the webapp target, `iOS:` for the ios target, `sophon:` for
+the Sophon firmware+app pair (e.g. `webapp: Add dark-mode toggle`,
+`iOS: Pull-to-refresh on news list`, `sophon: Stream raw 6-axis IMU`).
+
+`sophon:` covers both `zephyr/sophon/` and `ios/Sophon/` — it is one logical
+project spanning two folders, so a change touching both is one issue on one
+branch, not two.
 
 Format issue bodies with a short rationale and a `### Requirements` checklist —
 match the style of issues #1–#5.
