@@ -2,6 +2,14 @@
 
 ## 2026-08-16
 
+### fix: pace Sophon's notify cadence with periodic timers (issue #213)
+
+- `zephyr/sophon/src/main.c` paced everything with `k_msleep(250)` at the bottom of a `while (1)` loop. `k_msleep` sleeps for **at least** its argument, so each iteration cost 250 ms *plus* however long the loop body took, and that overhead was never given back — measured on hardware as `t_ms` deltas of ~1001 ms rather than 1000, i.e. ~3.6 s/hour.
+- Replaced with **two independent periodic `k_timer`s**. A periodic timer re-arms from its own start time, so expiries stay on an absolute grid and per-iteration work never accumulates. The notify timer defers through a `k_work` because timer callbacks run in ISR context and the Bluetooth API must not be called from there; the main thread now only drives the LED, blocking on `k_timer_status_sync()`.
+- **Decoupling the two cadences is what unblocks #209.** They previously shared a loop via `tick % (NOTIFY_PERIOD_MS / 250)`, which worked only because 250 divides evenly into 1000 — an undocumented constraint that #209's 20 ms period would have silently broken. They are now independent and the constraint is gone.
+- A missed notify slot is **dropped rather than queued**: `k_work_submit()` on already-pending work is a no-op, so `seq` does not advance for a frame that was never built, which keeps the receiver's gap count honest (#215).
+- Measured on the board over 3.5 minutes: **212 consecutive intervals, every one exactly 1000.000 ms** — zero spread, zero drift, zero cumulative error. The old loop would have accumulated ~212 ms across the same span. (Measured via temporary instrumentation, removed before commit; the log clock and the timer share the kernel tick, so this demonstrates scheduling drift is gone, not oscillator accuracy.)
+
 ### feat: Sophon app icon (issue #216)
 
 - The app shipped with an empty `AppIcon.appiconset` (a placeholder from #208 that only silenced the asset warning), so it showed the blank default on the home screen. It now has an icon: an **infinity symbol** — two entangled protons — with a glowing proton at the heart of each loop and a binary string running between them.
