@@ -16,6 +16,16 @@
 		7700A0B0C0D0E0F001000005 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.example.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		7700A0B0C0D0E0F001000010 /* Exceptions for "FirstContact" folder in "FirstContact" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 09FCF1D82F9E91A600A5E20E /* FirstContact */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		09FCF1DB2F9E91A600A5E20E /* FirstContact */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -26,16 +36,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		7700A0B0C0D0E0F001000010 /* Exceptions for "FirstContact" folder in "FirstContact" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 09FCF1D82F9E91A600A5E20E /* FirstContact */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		09FCF1D62F9E91A600A5E20E /* Frameworks */ = {
