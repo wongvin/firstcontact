@@ -221,3 +221,7 @@ graphify-out/
 # Committed companion stubs (Secrets.example.xcconfig) document the expected shape.
 Secrets.xcconfig
 GeneratedSecrets.swift
+
+# Zephyr build output. `build/` above (Python packaging) already matches this by
+# accident; spelled out so the coverage is deliberate rather than incidental.
+zephyr/*/build/
