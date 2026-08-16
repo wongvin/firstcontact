@@ -101,7 +101,14 @@ private struct DeviceDetailView: View {
     let device: SophonDevice
     let onRefresh: () -> Void
 
-    /// How often the board's counters are re-read while this view is on screen.
+    /// Regular width gets two columns; compact keeps the single list.
+    ///
+    /// Keyed off the size class rather than the device model, so an iPad in a
+    /// narrow split-screen slot correctly gets the phone layout instead of two
+    /// columns squeezed into half a screen.
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// How often the Sophon's counters are re-read while this view is on screen.
     ///
     /// Polling rather than subscribing, and only while visible. A notify would
     /// push on every change, and `sent` changes on *every frame* — so the stats
@@ -112,93 +119,136 @@ private struct DeviceDetailView: View {
     private static let refreshInterval = Duration.seconds(2)
 
     var body: some View {
-        List {
-            Section("Link") {
-                LabeledContent("State", value: device.state.label)
-                if let rssi = device.rssi {
-                    LabeledContent("RSSI", value: "\(rssi) dBm")
-                }
-                if let mtu = device.attMTU {
-                    LabeledContent("ATT MTU", value: "~\(mtu)")
-                }
-            }
-
-            Section("Frames") {
-                LabeledContent("Received", value: "\(device.framesReceived)")
-                LabeledContent("Lost on link", value: "\(device.seqGaps)")
-                if device.boardRestarts > 0 {
-                    // Detected exactly, via board uptime running backwards.
-                    LabeledContent("Sophon restarts", value: "\(device.boardRestarts)")
-                }
-                // Always shown, including at zero. A field that only appears
-                // once something has gone wrong reads as an error banner; a
-                // field permanently at 0 reads as a clean bill of health, and
-                // its absence at startup would leave you wondering whether the
-                // app was measuring this at all.
-                LabeledContent(
-                    "App interruptions",
-                    value: device.interruptions == 0
-                        ? "0"
-                        : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")
-                if let frame = device.lastFrame {
-                    LabeledContent("Last seq", value: "\(frame.seq)")
-                    LabeledContent("Sophon uptime", value: "\(frame.tMillis) ms")
-                }
-            }
-
-            // Deliberately adjacent to the gap count above: a gap says an
-            // interval has no data, and only these say whether the frames were
-            // lost on the air or never left the board.
-            Section {
-                if let tx = device.txThisSession {
-                    // Every figure here is scoped to this connection, so it is
-                    // directly comparable with Received and Sequence gaps above.
-                    LabeledContent("Sent by Sophon", value: "\(tx.sent)")
-                    if let lost = device.lostOnAir {
-                        LabeledContent("Lost on air", value: "\(lost)")
+        Group {
+            if sizeClass == .regular {
+                // Left holds the two counts you scan at a glance; right holds
+                // the live values and the transmit detail.
+                //
+                // This does separate Frames from the transmit counters, which
+                // #219 had placed adjacent because they answer one question
+                // between them — how much arrived, and whose fault the rest
+                // was. On a desk console at large type that pairing loses to
+                // the practical constraint: only so much fits in a column, and
+                // Motion is about to grow six live values (#209).
+                HStack(alignment: .top, spacing: 0) {
+                    List {
+                        linkSection
+                        framesSection
                     }
-                    LabeledContent("TX buffer full", value: "\(tx.noBuffer)")
-                    if tx.other > 0 {
-                        LabeledContent("Other TX errors", value: "\(tx.other)")
+                    Divider()
+                    List {
+                        motionSection
+                        countersSection
                     }
-                    Text(attribution(device: device))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else if device.state.isConnected {
-                    Text("Reading…").foregroundStyle(.secondary)
-                } else {
-                    Text("Available while connected.").foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("Sophon transmit counters")
-            } footer: {
-                if device.txStatsAt != nil {
-                    Text("Scoped to this connection; the Sophon's own totals run since it booted, so they are rebased on connect to stay comparable with the counts above. Re-read every 2s while this screen is open — polled rather than subscribed, and stops when you navigate away.")
-                }
-            }
-
-            if let frame = device.lastFrame {
-                Section("Motion") {
-                    if frame.isAxesZero {
-                        // The skeleton (#208) sends zeroed axes on purpose. Saying
-                        // so beats showing six zeros that look like a bug.
-                        Text("Axes are zero — firmware is streaming the skeleton frame. Real IMU data arrives in #209.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("Accel", value: "\(frame.ax), \(frame.ay), \(frame.az) mg")
-                    LabeledContent("Gyro", value: "\(frame.gx), \(frame.gy), \(frame.gz) cdps")
+            } else {
+                List {
+                    linkSection
+                    framesSection
+                    countersSection
+                    motionSection
                 }
             }
         }
         .navigationTitle(device.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        // .task is cancelled automatically when the view disappears, so the
-        // polling stops the moment you navigate away.
+        // .task sits on the Group, not inside a branch, so the polling behaves
+        // identically in both layouts — and is still cancelled automatically
+        // when the view disappears.
         .task {
             while !Task.isCancelled {
                 onRefresh()
                 try? await Task.sleep(for: Self.refreshInterval)
+            }
+        }
+    }
+
+    // Sections are defined once and composed by both layouts. Two divergent
+    // copies of the same content would drift the moment one was edited.
+
+    @ViewBuilder private var linkSection: some View {
+        Section("Link") {
+            LabeledContent("State", value: device.state.label)
+            if let rssi = device.rssi {
+                LabeledContent("RSSI", value: "\(rssi) dBm")
+            }
+            if let mtu = device.attMTU {
+                LabeledContent("ATT MTU", value: "~\(mtu)")
+            }
+        }
+    }
+
+    @ViewBuilder private var framesSection: some View {
+        Section("Frames") {
+            LabeledContent("Received", value: "\(device.framesReceived)")
+            LabeledContent("Lost on link", value: "\(device.seqGaps)")
+            if device.boardRestarts > 0 {
+                // Detected exactly, via Sophon uptime running backwards.
+                LabeledContent("Sophon restarts", value: "\(device.boardRestarts)")
+            }
+            // Always shown, including at zero. A field that only appears once
+            // something has gone wrong reads as an error banner; a field
+            // permanently at 0 reads as a clean bill of health, and its absence
+            // at startup would leave you wondering whether the app was
+            // measuring this at all.
+            LabeledContent(
+                "App interruptions",
+                value: device.interruptions == 0
+                    ? "0"
+                    : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")
+            if let frame = device.lastFrame {
+                LabeledContent("Last seq", value: "\(frame.seq)")
+                LabeledContent("Sophon uptime", value: "\(frame.tMillis) ms")
+            }
+        }
+    }
+
+    /// A gap says an interval has no data; only these say whether the frames
+    /// were lost on the air or never left the Sophon. The two sit together in
+    /// the compact layout. In the wide layout they are in separate columns but
+    /// both on screen at once, which serves the same comparison.
+    @ViewBuilder private var countersSection: some View {
+        Section {
+            if let tx = device.txThisSession {
+                // Every figure here is scoped to this connection, so it is
+                // directly comparable with the frame counts.
+                LabeledContent("Sent by Sophon", value: "\(tx.sent)")
+                if let lost = device.lostOnAir {
+                    LabeledContent("Lost on air", value: "\(lost)")
+                }
+                LabeledContent("TX buffer full", value: "\(tx.noBuffer)")
+                if tx.other > 0 {
+                    LabeledContent("Other TX errors", value: "\(tx.other)")
+                }
+                Text(attribution(device: device))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if device.state.isConnected {
+                Text("Reading…").foregroundStyle(.secondary)
+            } else {
+                Text("Available while connected.").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Sophon transmit counters")
+        } footer: {
+            if device.txStatsAt != nil {
+                Text("Scoped to this connection; the Sophon's own totals run since it booted, so they are rebased on connect to stay comparable with the counts above. Re-read every 2s while this screen is open — polled rather than subscribed, and stops when you navigate away.")
+            }
+        }
+    }
+
+    @ViewBuilder private var motionSection: some View {
+        if let frame = device.lastFrame {
+            Section("Motion") {
+                if frame.isAxesZero {
+                    // The skeleton (#208) sends zeroed axes on purpose. Saying
+                    // so beats showing six zeros that look like a bug.
+                    Text("Axes are zero — firmware is streaming the skeleton frame. Real IMU data arrives in #209.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Accel", value: "\(frame.ax), \(frame.ay), \(frame.az) mg")
+                LabeledContent("Gyro", value: "\(frame.gx), \(frame.gy), \(frame.gz) cdps")
             }
         }
     }
@@ -229,12 +279,17 @@ private func attribution(device: SophonDevice) -> String {
 }
 
 private extension SophonDevice.State {
+    /// The disconnect reason is deliberately not appended. Core Bluetooth's
+    /// `localizedDescription` is long and rarely informative — "The connection
+    /// has timed out unexpectedly." — and it pushed the State row to two lines
+    /// while saying little the state itself did not. The reason is still
+    /// carried on the case and written to the log, so nothing is lost.
     var label: String {
         switch self {
         case .discovered: "Discovered"
         case .connecting: "Connecting…"
         case .connected: "Connected"
-        case .disconnected(let reason): reason.map { "Disconnected — \($0)" } ?? "Disconnected"
+        case .disconnected: "Disconnected"
         }
     }
 }

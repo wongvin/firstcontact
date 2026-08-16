@@ -2,6 +2,16 @@
 
 ## 2026-08-16
 
+### feat: two-column Sophon device detail on iPad (issue #222)
+
+- `DeviceDetailView` was one long list of four sections. On an iPhone that is right; on an iPad it was a narrow ribbon down the middle of a large screen, with the comparisons that matter unable to be held in view at once.
+- On a **regular** horizontal size class it now splits: **Link + Frames** on the left, **Motion + Sophon transmit counters** on the right. Compact width keeps the existing single-column list untouched, so the iPhone is unaffected.
+- Driven by `horizontalSizeClass`, **not** a device-model check. An iPad in a narrow split-screen slot correctly gets the phone layout rather than two columns squeezed into half a screen — and the 8.3″ mini in portrait falls back the same way, which is behaviour worth having rather than a special case to work around.
+- The four sections are extracted as `@ViewBuilder` properties and composed by both arrangements. Two divergent copies of the same content would drift the moment either was edited. The 2 s counter refresh sits on the outer `Group` rather than inside a branch, so it behaves identically in both and still stops on dismiss.
+- The column split does separate Frames from the transmit counters, which #219 had placed adjacent as two halves of one question. On a desk console at large type that pairing loses to how much fits in a column — and Motion gains six live values in #209. Both remain on screen together, so the comparison survives even though the adjacency does not.
+- **State** now reads just `Disconnected`. Core Bluetooth's `localizedDescription` is long and rarely informative — *"The connection has timed out unexpectedly."* — and wrapped the row onto two lines, especially in the narrower column. The reason still travels on the case and reaches the log.
+- Verified on three physical devices: iPhone 17e (compact, unchanged), iPad mini A17 and iPad mini 5 (regular, two columns confirmed in landscape).
+
 ### fix: stop charging app suspension as Sophon frame loss (issue #214)
 
 - Locking the phone does not disconnect: the BLE link stays up and the board keeps sending, but with no `UIBackgroundModes` iOS suspends the app within seconds. On wake the sequence delta charged **the entire sleep** as dropped frames — 2578 of them observed, about 43 minutes at 1 Hz, on a link with zero real losses. A counter that any screen lock inflates by thousands cannot support #211's multi-device measurement.
