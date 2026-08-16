@@ -2,6 +2,15 @@
 
 ## 2026-08-16
 
+### fix: stop charging app suspension as Sophon frame loss (issue #214)
+
+- Locking the phone does not disconnect: the BLE link stays up and the board keeps sending, but with no `UIBackgroundModes` iOS suspends the app within seconds. On wake the sequence delta charged **the entire sleep** as dropped frames — 2578 of them observed, about 43 minutes at 1 Hz, on a link with zero real losses. A counter that any screen lock inflates by thousands cannot support #211's multi-device measurement.
+- `seqGaps` is now **`Lost on link`** and means only that. Frames missed while the app was not listening are counted separately as **interruptions**, surfaced with their own row rather than silently discarded — an app that stopped listening is not a flawless link, it is an unobserved one.
+- Classification uses **two signals, because each covers the other's blind spot**. iOS's `willResignActive` / `didEnterBackground` are exact but only fire when the app is actually set aside; a 5 s inter-arrival threshold catches long holes that arrive some other way. Observing the *earlier* notification matters: a quick screen toggle can resign active without ever fully backgrounding, and that short case is the common one.
+- Added **board-restart detection**, exact rather than heuristic: the frame's `t_ms` is board uptime, so a value lower than the previous one can only mean a reboot. A quick power cycle can stay inside the supervision timeout, so iOS reports no disconnect and nothing else resets — the sequence jump is not loss, and the board's transmit counters would appear to run backwards. Both are re-baselined.
+- Fixed two defects this exposed in #219's `lostInFlight`: it counted a suspension as air loss (the same defect one counter over), and it flickered between 0 and 1 on every poll because `sent` and `framesReceived` are sampled at different instants — the board has usually just sent a frame the app has not decoded yet. It now measures against the *previous* read, giving every counted frame a full poll interval to arrive, and reports "settling…" rather than a zero it cannot justify. Renamed **`Lost on air`**, since "in flight" described the bug rather than the measurement.
+- Deliberately **not** fixed by adding `bluetooth-central` to `UIBackgroundModes`. That would keep the app running and the counter accurate at the cost of receiving motion data nobody is looking at. This is a visualization app; the metric should tolerate not being watched.
+
 ### feat: surface Sophon transmit stats in the app (issue #219)
 
 - #215's counters were console-only, which is useless for #211's multi-device measurement — that happens with boards in a room and a phone in hand, nothing plugged in. A new **TX Stats characteristic** (`C6560003-…`, read-only, 16 bytes: four `u32` counters little-endian) exposes them, and the app displays them directly beneath its own frame counts.

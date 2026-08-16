@@ -12,7 +12,7 @@ struct ContentView: View {
                     ContentUnavailableView {
                         Label("Looking for Sophons", systemImage: "dot.radiowaves.left.and.right")
                     } description: {
-                        Text("Power on a board and it will appear here.")
+                        Text("Power on a Sophon and it will appear here.")
                     }
                 } else {
                     List(hub.devices) { device in
@@ -125,10 +125,24 @@ private struct DeviceDetailView: View {
 
             Section("Frames") {
                 LabeledContent("Received", value: "\(device.framesReceived)")
-                LabeledContent("Sequence gaps", value: "\(device.seqGaps)")
+                LabeledContent("Lost on link", value: "\(device.seqGaps)")
+                if device.boardRestarts > 0 {
+                    // Detected exactly, via board uptime running backwards.
+                    LabeledContent("Sophon restarts", value: "\(device.boardRestarts)")
+                }
+                // Always shown, including at zero. A field that only appears
+                // once something has gone wrong reads as an error banner; a
+                // field permanently at 0 reads as a clean bill of health, and
+                // its absence at startup would leave you wondering whether the
+                // app was measuring this at all.
+                LabeledContent(
+                    "App interruptions",
+                    value: device.interruptions == 0
+                        ? "0"
+                        : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")
                 if let frame = device.lastFrame {
                     LabeledContent("Last seq", value: "\(frame.seq)")
-                    LabeledContent("Board uptime", value: "\(frame.tMillis) ms")
+                    LabeledContent("Sophon uptime", value: "\(frame.tMillis) ms")
                 }
             }
 
@@ -139,9 +153,9 @@ private struct DeviceDetailView: View {
                 if let tx = device.txThisSession {
                     // Every figure here is scoped to this connection, so it is
                     // directly comparable with Received and Sequence gaps above.
-                    LabeledContent("Sent by board", value: "\(tx.sent)")
-                    if let lost = device.lostInFlight {
-                        LabeledContent("Lost in flight", value: "\(lost)")
+                    LabeledContent("Sent by Sophon", value: "\(tx.sent)")
+                    if let lost = device.lostOnAir {
+                        LabeledContent("Lost on air", value: "\(lost)")
                     }
                     LabeledContent("TX buffer full", value: "\(tx.noBuffer)")
                     if tx.other > 0 {
@@ -156,10 +170,10 @@ private struct DeviceDetailView: View {
                     Text("Available while connected.").foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Board transmit counters")
+                Text("Sophon transmit counters")
             } footer: {
                 if device.txStatsAt != nil {
-                    Text("Scoped to this connection; the board's own totals run since it booted, so they are rebased on connect to stay comparable with the counts above. Re-read every 2s while this screen is open — polled rather than subscribed, and stops when you navigate away.")
+                    Text("Scoped to this connection; the Sophon's own totals run since it booted, so they are rebased on connect to stay comparable with the counts above. Re-read every 2s while this screen is open — polled rather than subscribed, and stops when you navigate away.")
                 }
             }
 
@@ -194,17 +208,23 @@ private struct DeviceDetailView: View {
 /// entire value of showing board counters next to app counters — without it the
 /// reader has to know what `noBuffer` means to interpret a gap.
 private func attribution(device: SophonDevice) -> String {
-    guard let tx = device.txThisSession, let lost = device.lostInFlight else { return "" }
+    guard let tx = device.txThisSession else { return "" }
+    guard let lost = device.lostOnAir else { return "" }
+
+    let interrupted = device.framesDuringInterruptions
+    let aside = interrupted > 0
+        ? " Separately, \(interrupted) frame(s) were sent while this app was not listening — not lost, just unobserved."
+        : ""
 
     switch (tx.noBuffer, lost) {
     case (0, 0):
-        return "Everything the board sent arrived, and nothing was dropped before sending — the link is keeping up."
+        return "Everything the Sophon sent arrived, and nothing was dropped before sending — the link is keeping up." + aside
     case (0, _):
-        return "\(lost) frame(s) left the board but never arrived — lost on the link, or while the app was not listening."
+        return "\(lost) frame(s) left the Sophon but never arrived — lost on the link." + aside
     case (_, 0):
-        return "\(tx.noBuffer) frame(s) were dropped on the board before sending, but everything that did go out arrived."
+        return "\(tx.noBuffer) frame(s) were dropped on the Sophon before sending, but everything that did go out arrived." + aside
     default:
-        return "\(tx.noBuffer) frame(s) never left the board, and a further \(lost) went out but did not arrive."
+        return "\(tx.noBuffer) frame(s) never left the Sophon, and a further \(lost) went out but did not arrive." + aside
     }
 }
 
