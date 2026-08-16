@@ -2,6 +2,23 @@
 
 ## 2026-08-16
 
+### feat: surface Sophon transmit stats in the app (issue #219)
+
+- #215's counters were console-only, which is useless for #211's multi-device measurement — that happens with boards in a room and a phone in hand, nothing plugged in. A new **TX Stats characteristic** (`C6560003-…`, read-only, 16 bytes: four `u32` counters little-endian) exposes them, and the app displays them directly beneath its own frame counts.
+- **Read, not notify.** `sent` changes on every frame, so a subscription would push diagnostics as often as the data itself — 1/s now, **50/s** after #209. The app polls every 2 s *while the detail view is on screen* and stops when it isn't; cost is ~0.5 reads per second regardless of sample rate.
+- Board counters are **rebased on connect**. Its totals run since boot and survive reconnects while the app's reset every time; showing both raw invites a false reading. `framesReceived` is snapshotted at the same instant as the stats baseline — the first read lands a second or two after connect, and frames arriving in that window would otherwise make `lostInFlight` under-report.
+- Adds **`Lost in flight`** (`sent − received`), the one figure neither side can produce alone: the board knows what it handed to the stack, the app knows what it decoded, and the difference is what died on the air. Cleaner than `seqGaps`, which until #214 also counts time the phone spent asleep.
+- The section ends in a plain-English attribution line rather than leaving two raw numbers to interpret — *"Everything the board sent arrived…"*, *"N frames left the board but never arrived…"*, and so on.
+- 16 bytes fits the 20-byte value budget at the default 23-byte ATT MTU, so this needs no MTU change and never fragments — the same constraint that shaped the motion frame. Documented in `PROTOCOL.md` as a second frame type.
+
+### feat: count Sophon notify failures so gaps can be attributed (issue #215)
+
+- A gap in the central's sequence numbers says an interval has **no data**; it cannot say *why*. TX-buffer exhaustion on the board and loss on the air produce an identical gap and point at completely different culprits. `zephyr/sophon/src/ble.c` now counts transmit outcomes by cause (`sent` / `no_conn` / `no_mem` / `other`), exposed via `sophon_ble_tx_stats()` and read under `k_sched_lock()` since the counters are written from the work queue and read from the main thread.
+- **`seq` is deliberately untouched on failure.** Suppressing or reusing it would hand the central a stream that *looks* continuous while silently missing an interval, and #210's fusion would integrate gyro straight across the hole. Attribution gets its own signal; the sequence stays honest. The reasoning is recorded at the failure site.
+- Reporting is a **periodic summary** (30 s), and **silent while healthy** — it speaks only when `no_mem` or `other` moves. `-ENOTCONN` is excluded from that test because "nobody subscribed" is the normal state of an advertising board.
+- `zephyr/sophon/PROTOCOL.md` pins the semantics that were previously ambiguous: `seq` is a **sample-period index**, advances once per period, **only while subscribed**, and is never rewound or reused. Adds a table of the four distinct causes of a gap and which are actually losses.
+- Verified by forcing real failures — a temporary 2 ms flood build drove `-ENOMEM` and the counter tracked it (~1910 failures per 5 s alongside ~570 sends). That test also caught a bug in this change: a leftover per-failure `LOG_WRN` produced **22,781 lines / 2.0 MB in 90 s** against 11 summaries — exactly the flood the periodic summary exists to avoid. Removing it took the same load to **0 lines / 4.0 KB**, a 500× reduction with no loss of diagnostic detail. Production build then confirmed silent across 100 s at 1 Hz.
+
 ### fix: pace Sophon's notify cadence with periodic timers (issue #213)
 
 - `zephyr/sophon/src/main.c` paced everything with `k_msleep(250)` at the bottom of a `while (1)` loop. `k_msleep` sleeps for **at least** its argument, so each iteration cost 250 ms *plus* however long the loop body took, and that overhead was never given back — measured on hardware as `t_ms` deltas of ~1001 ms rather than 1000, i.e. ~3.6 s/hour.

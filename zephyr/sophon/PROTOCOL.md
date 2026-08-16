@@ -20,6 +20,7 @@ following the Nordic UART convention.
 |---|---|
 | Sophon Motion Service | `C6560001-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Motion Data characteristic (notify) | `C6560002-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| TX Stats characteristic (read) | `C6560003-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -27,6 +28,11 @@ required for the app to see anything while backgrounded.
 
 The Motion Data characteristic is notify-only and carries a Client Characteristic
 Configuration descriptor.
+
+The TX Stats characteristic is **read-only, and deliberately not a notify**. The
+counters move slowly and are diagnostics; a subscription would spend
+connection-event budget, which is the exact resource the counters exist to help
+measure. Instrumenting a scarce resource by consuming it defeats the point.
 
 ## Frame
 
@@ -51,9 +57,78 @@ subtracted from the 27-byte link-layer payload. 18 fits with 2 spare, so **one
 sample is exactly one radio packet** — no L2CAP fragmentation, no reassembly logic
 on either side.
 
-`seq` exists so the receiver can detect dropped frames without a timer. It is
-per-device and wraps; the decoder compares against the previous value modulo
-65536.
+### What `seq` means
+
+**`seq` is a sample-period index, not a count of successful transmissions.** It
+is per-device and wraps at 65535; the decoder compares against the previous value
+modulo 65536.
+
+The rules, in full, because the difference between them is load-bearing:
+
+- It advances **once per sample period**, at the moment a frame is built.
+- It advances **only while a client is subscribed.** Nothing is expected while
+  nobody is listening, so the jump across an unsubscribed stretch is not a gap.
+- It is **never rewound or reused**, including when the send fails. A sample that
+  was taken and not delivered is a hole, and the receiver has to be able to see
+  it.
+
+That last rule is the one worth defending. Once real IMU data lands (#209), a
+sample whose notification fails is a physical measurement that no longer exists
+anywhere. Reusing its sequence number would hand the central a stream that
+*looks* continuous while silently missing an interval — and the fusion in #210
+would integrate gyro straight across that hole, producing attitude error that
+never washes out, from data the app had no way to know was missing.
+
+`t_ms` does not cover for this. It timestamps the frames that arrived; two frames
+40 ms apart at 50 Hz are indistinguishable from a hole unless something counts
+the missing one.
+
+### What a gap does *not* tell you
+
+A gap means **"there is no data for this interval."** It does not say why. Four
+different things produce one:
+
+| Cause | Actually lost? |
+|---|---|
+| Dropped on the radio link | yes |
+| Sample taken, but the notification failed (e.g. TX buffers full) | never sent |
+| Central was not listening (app suspended, link still up) | sent fine |
+| Frame arrived but the central rejected it | arrived intact |
+
+Attribution therefore needs a **second signal**, not a cleverer sequence number.
+The peripheral counts its own transmit outcomes — accepted, no-buffer, no-client,
+other — summarises them to the console periodically, and exposes them for reading
+over the **TX Stats characteristic** described below.
+
+They are deliberately kept **out of the sample stream**: they answer a debugging
+question, and the motion frame should carry motion. A separate read-only
+characteristic gets them to a phone in a room full of boards, which is where the
+question actually gets asked, without adding a byte to the 50 Hz path.
+
+## TX Stats frame
+
+**16 bytes, little-endian**, read from the TX Stats characteristic. Four
+cumulative counters, in this order:
+
+| Offset | Size | Type | Field | Meaning |
+|---|---|---|---|---|
+| 0 | 4 | `u32` | `sent` | notifications the stack accepted |
+| 4 | 4 | `u32` | `no_conn` | rejected, nobody subscribed — expected, not a fault |
+| 8 | 4 | `u32` | `no_mem` | rejected, TX buffers full — **the interesting one** |
+| 12 | 4 | `u32` | `other` | anything else the stack returned |
+
+Counters are cumulative **since the board booted** and never reset, so they
+survive a reconnect while the central's own counters do not. A consumer wanting
+per-session figures should snapshot on connect and subtract.
+
+16 bytes fits the 20-byte value budget at the default 23-byte ATT MTU, so this
+needs no MTU change and never fragments — the same constraint that shaped the
+motion frame.
+
+These counters are what make a gap **explicable**: see *What a gap does not tell
+you* above. `no_mem` says the frame never left the board, which distinguishes
+board-side congestion from loss on the air. The two produce an identical gap and
+point at completely different culprits.
 
 ## Rates
 
