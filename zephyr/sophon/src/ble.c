@@ -224,9 +224,13 @@ void sophon_stats_pack(const struct sophon_tx_stats *in, uint8_t out[SOPHON_STAT
 void sophon_ble_tx_stats(struct sophon_tx_stats *out)
 {
 	/*
-	 * Read under the scheduler lock: the counters are written from the
-	 * system work queue and read from the main thread, and a torn read
-	 * across the struct would report a state that never existed.
+	 * Read under the scheduler lock: the counters are written from whichever
+	 * thread produces frames -- the IMU's data-ready thread, or the system
+	 * work queue in the no-IMU fallback -- and read from the main thread. A
+	 * torn read across the struct would report a state that never existed.
+	 *
+	 * Both writers are threads, never ISRs, so locking out preemption is
+	 * enough; no spinlock is needed.
 	 */
 	k_sched_lock();
 	*out = tx_stats;
