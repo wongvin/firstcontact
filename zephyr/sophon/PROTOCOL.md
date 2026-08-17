@@ -49,6 +49,28 @@ measure. Instrumenting a scarce resource by consuming it defeats the point.
 | 14 | 2 | `i16` | `gy` | centi-degrees/second |
 | 16 | 2 | `i16` | `gz` | centi-degrees/second |
 
+### Measurement ranges
+
+The units above bound what the frame *can* express; the sensor's configured
+full-scale bounds what it *does*. Both are set in `prj.conf` and asserted at
+compile time in `src/imu.c`.
+
+| Axis | Full scale | Wire limit | Which one binds |
+|---|---|---|---|
+| Accel | ±4 g | ±32.767 g | the sensor |
+| Gyro | ±250 dps | ±327.67 dps | **the wire** |
+
+The gyro row is a real constraint on this format, not a coincidence. Centi-
+degrees/second in an `i16` saturates at 327.67 dps, so ±250 dps is the largest
+standard LSM6DSL range that fits — the next step up, ±500 dps, would clip every
+fast rotation into a flat top that still decodes as valid data. **Raising the
+gyro range therefore requires a frame change, not a config change.**
+
+Accel is the other way round: the wire quantises to 1 mg while the sensor
+resolves 0.122 mg/LSB at ±4 g, so the frame is the limiting factor at any
+supported range. Moving to ±8 g or ±16 g costs nothing on the wire and needs no
+change here.
+
 ### Why 18 bytes
 
 The ATT MTU is left at Zephyr's default of 23, which leaves 20 bytes of usable
@@ -72,15 +94,15 @@ The rules, in full, because the difference between them is load-bearing:
   was taken and not delivered is a hole, and the receiver has to be able to see
   it.
 
-That last rule is the one worth defending. Once real IMU data lands (#209), a
-sample whose notification fails is a physical measurement that no longer exists
-anywhere. Reusing its sequence number would hand the central a stream that
-*looks* continuous while silently missing an interval — and the fusion in #210
-would integrate gyro straight across that hole, producing attitude error that
-never washes out, from data the app had no way to know was missing.
+That last rule is the one worth defending. Now that real IMU data is flowing
+(#209), a sample whose notification fails is a physical measurement that no
+longer exists anywhere. Reusing its sequence number would hand the central a
+stream that *looks* continuous while silently missing an interval — and #210's
+fusion would integrate gyro straight across that hole, producing attitude error
+that never washes out, from data the app had no way to know was missing.
 
 `t_ms` does not cover for this. It timestamps the frames that arrived; two frames
-40 ms apart at 50 Hz are indistinguishable from a hole unless something counts
+38 ms apart at 52 Hz are indistinguishable from a hole unless something counts
 the missing one.
 
 ### What a gap does *not* tell you
@@ -103,7 +125,7 @@ over the **TX Stats characteristic** described below.
 They are deliberately kept **out of the sample stream**: they answer a debugging
 question, and the motion frame should carry motion. A separate read-only
 characteristic gets them to a phone in a room full of boards, which is where the
-question actually gets asked, without adding a byte to the 50 Hz path.
+question actually gets asked, without adding a byte to the 52 Hz path.
 
 ## TX Stats frame
 
@@ -130,16 +152,99 @@ you* above. `no_mem` says the frame never left the board, which distinguishes
 board-side congestion from loss on the air. The two produce an identical gap and
 point at completely different culprits.
 
+Measured, and the reason to trust the scheme: over a 3-minute soak with
+continuous reads of this characteristic running alongside the stream, the central
+observed **30 sequence gaps** against a board-side `no_mem` delta of **exactly
+30**. Every hole was accounted for board-side; nothing was lost on the air. A gap
+count on its own could not have told those apart.
+
+That soak ran against Zephyr's default of three TX buffers. Raising the pools to
+8 (see `prj.conf`) removed them on a like-for-like comparison — same device, same
+usage, 13 refusals in 56000 frames down to none in 84000. The correspondence
+above is therefore a demonstration that the attribution works, not a description
+of normal operation.
+
+**Always state which central, and whether it was awake.** The refusal rate is a
+property of the radio schedule, not of the peripheral: a central that sleeps
+makes iOS stretch the connection interval, several samples pile up between radio
+events, and refusals reappear at any pool size. The same firmware that refused
+nothing in 84000 frames to a foreground iPad logged 26 in 51000 to a sleeping
+iPhone. Comparing those two numbers as though they measured the same thing is
+how this document previously got the figure wrong.
+
+It is a reduction, not an elimination. A `no_mem` of zero over any given window
+is a sample, not a guarantee — expect an occasional refusal, and expect the
+matching single-frame gap to be attributed rather than mysterious. That is the
+whole point of carrying the counter.
+
+**`no_mem` is only meaningful if the notify path can actually fail rather than
+block.** `bt_gatt_notify()` allocates with `K_FOREVER` on any thread that is not
+the system work queue, so a peripheral that transmits from its own sampling
+thread will hang there instead of returning `-ENOMEM` — and this counter will
+read a reassuring zero while the stream is dead. Sophon transmits from the
+sysqueue for exactly this reason; see the queue comment in `src/main.c`.
+
 ## Rates
 
 | Stage | Notify rate | Axis fields |
 |---|---|---|
 | #208 (skeleton) | 1 Hz | all zero — `seq` and `t_ms` are live |
-| #209 onward | 50 Hz | real IMU data |
+| #209 onward | **52 Hz nominal, ~54.3 Hz measured** | real IMU data |
+| #209, no IMU present | 1 Hz | all zero — the fallback below |
 
 The skeleton's 1 Hz zero-filled frame exists so the subscribe path is verifiable
 end-to-end before the IMU is wired up, and slow enough to read by eye during
 bring-up.
+
+### Why 52 Hz and not 50
+
+The plan derives **50 Hz** from the connection-event budget, and the LSM6DSL
+cannot produce it: its output-data-rate grid is 12.5 / 26 / **52** / 104 / 208 …
+and 50 is not on it.
+
+The stream is paced by the sensor's data-ready interrupt, so the rate is
+whichever grid step is selected — 52 Hz, the nearest. The alternative, running
+the sensor at 52 Hz and notifying from a 50 Hz timer, would reintroduce exactly
+the drift between two independent clocks that the interrupt exists to remove, and
+would drop or duplicate a sample roughly every half second doing it.
+
+The 4% overshoot is free. The capacity analysis in UPDATED-PLAN.md costs 50 Hz at
+**0.75** notifications per 15 ms connection event against iOS's ~4-per-event
+policy; 52 Hz moves that to **0.78**. Every column of that table stays
+comfortable, at 30 ms and 45 ms intervals too.
+
+### The sensor does not deliver its nominal rate either
+
+Measured on hardware, the board streams at **54.2–54.4 Hz**, not 52 — a **+4.6%**
+deviation. Two independent clocks agree: the central's wall clock, and the
+board's own `t_ms` span (mean period 18.392 ms against the nominal 19.231 ms).
+Across a 40 s capture and a 3-minute soak the figure landed at 54.37 and
+54.21 Hz — stable, and stably wrong about 52.
+
+The LSM6DSL derives its ODR from an internal RC oscillator, so the delivered rate
+varies part to part and with temperature. **The nominal rate is what the sensor
+was asked for, not what it produces.**
+
+This is why the pacing decision matters more than the number. A 50 Hz timer would
+not have been resampling a 52 Hz sensor, it would have been resampling a 54.4 Hz
+one, at a ratio nobody could have predicted from the datasheet. Following the
+data-ready line means the drift never has to be discovered.
+
+Budget is unaffected: 54.4 Hz is **0.82** notifications per 15 ms connection event
+against iOS's ~4, and 2.45 at a 45 ms interval — still comfortable everywhere.
+
+Consumers should therefore treat the nominal rate as informational and derive
+real timing from `t_ms`, which is measured rather than assumed. Anything
+integrating gyro (#210) must use `t_ms` deltas; assuming a fixed 52 Hz `dt` would
+accumulate a 4.6% attitude error that never washes out.
+
+### No IMU
+
+A board whose sensor is absent or fails to initialise does **not** go quiet. It
+falls back to the skeleton's 1 Hz zero-filled frame, so the radio, the GATT
+table, and the transmit counters all stay exercisable, and the failure is visible
+from the phone as all-zero axes rather than as a dead link. The iOS decoder's
+`isAxesZero` already carries precisely this meaning.
 
 ## Identity
 
@@ -149,7 +254,7 @@ flashed to every board therefore produces a distinct, stable name.
 
 The device ID is **not** in the frame. iOS already knows the source peripheral on
 every notification callback, so per-sample identity would be redundant bytes at
-50 Hz × N devices for zero information. Identity is a connect-time property.
+52 Hz × N devices for zero information. Identity is a connect-time property.
 
 Note the advertised name carries only 16 bits of the 64-bit FICR ID. That is
 ample for a handful of boards; it is not a collision-proof identifier.
@@ -195,7 +300,7 @@ possible without a format change: send *k* × 18 bytes and the decoder splits on
 offers a 185-byte MTU at negotiation.
 
 Batching is deliberately **not** done at N=1: it trades latency
-(`(k−1)/f`, i.e. 60 ms at k=4 and 50 Hz) for connection-event occupancy, and at one
+(`(k−1)/f`, i.e. ~58 ms at k=4 and 52 Hz) for connection-event occupancy, and at one
 device there is no occupancy pressure to relieve. It becomes correct around N≥4.
 
 When it happens, the ATT MTU and DLE must be raised **together** — raising the MTU

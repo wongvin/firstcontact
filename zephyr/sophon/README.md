@@ -8,9 +8,23 @@ relays continuously to a distant receiver.
 
 ## Status
 
-**Skeleton (#208).** The transport works end to end — advertise, connect,
-subscribe, notify — but the frame's six axis fields are zero and the notify rate
-is 1 Hz. Real IMU data at 50 Hz is #209.
+**Streaming motion (#209).** The board samples the on-board LSM6DS3TR-C at a
+nominal **52 Hz**, paced by the sensor's data-ready interrupt, and notifies one
+18-byte frame per sample. Accel is ±4 g in milli-g; gyro is ±250 dps in
+centi-deg/s.
+
+52 Hz rather than the plan's 50: the LSM6DSL's rate grid has no 50 Hz step, and
+pacing off the sensor beats resampling it onto a timer that drifts against it.
+
+**Measured, it runs at 54.2–54.4 Hz** — the ODR comes off an internal RC
+oscillator and lands 4.6% above nominal on this board. Nothing is wrong; the nominal rate is
+what the sensor was asked for, not what it delivers. **`t_ms` is the only
+trustworthy timebase**, and anything integrating gyro must use it.
+[`PROTOCOL.md`](PROTOCOL.md) has the full argument and the budget it stays inside.
+
+If the IMU is absent or fails to start, the board **falls back to the #208
+behaviour** — 1 Hz, axes zero — rather than going silent, so the link stays
+verifiable and the failure is visible from the phone.
 
 ## Build
 
@@ -72,8 +86,16 @@ the banner survives USB enumeration):
 
 ```
 *** Booting Zephyr OS build ... ***
-[00:00:04.000,000] <inf> sophon: Sophon skeleton starting
+[00:00:04.000,000] <inf> sophon: Sophon starting
+[00:00:04.005,000] <inf> sophon_imu: IMU streaming: accel +/-4 g, gyro +/-250 dps, ODR 52 Hz
 [00:00:04.010,000] <inf> sophon_ble: advertising as Sophon-A3F2
+```
+
+A board with no working IMU says so and keeps going:
+
+```
+[00:00:04.005,000] <err> sophon_imu: LSM6DS3TR-C not ready -- check the sensor power rail
+[00:00:04.005,000] <wrn> sophon: no IMU (-19); falling back to 1000 ms zero-filled frames
 ```
 
 On connect it logs the **negotiated ATT MTU** — expect `23`. That number is not
@@ -93,8 +115,9 @@ Green (`led1`):
 ## Layout
 
 ```
-src/main.c      init, LED heartbeat, 1 Hz notify loop
+src/main.c      init, LED heartbeat, frame assembly + notify policy
 src/ble.c/.h    bt_enable, advertising, GATT service, notify
+src/imu.c/.h    LSM6DS3TR-C data-ready trigger, raw units -> wire units
 src/ident.c/.h  FICR device id -> "Sophon-A3F2"
 src/frame.h     the packed 18-byte wire frame
 prj.conf        Kconfig; note what is deliberately NOT set
@@ -106,9 +129,14 @@ PROTOCOL.md     the wire contract shared with the iOS app
 Read [`PROTOCOL.md`](PROTOCOL.md) for the live contract, and
 [`ios/Sophon/UPDATED-PLAN.md`](../../ios/Sophon/UPDATED-PLAN.md) for the reasoning
 behind it — the ATT MTU budget, the connection-event capacity analysis, and the
-batching/DLE arithmetic. It explains why the frame is 18 bytes, why 50 Hz, and why
-the MTU is left at its default. Those choices are load-bearing and not obvious
+batching/DLE arithmetic. It explains why the frame is 18 bytes, why ~50 Hz, and
+why the MTU is left at its default. Those choices are load-bearing and not obvious
 from the code.
+
+The sensor's full-scale ranges are load-bearing too, and in a way that is easy to
+miss: **the gyro range is capped by the wire format**, not by the sensor. See
+*Measurement ranges* in [`PROTOCOL.md`](PROTOCOL.md); `src/imu.c` asserts it at
+compile time.
 
 [`ORIGINAL-PLAN.md`](../../ios/Sophon/ORIGINAL-PLAN.md) beside it is the frozen
 pre-implementation version of the same document, kept as the record of what was

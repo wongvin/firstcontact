@@ -28,4 +28,5 @@ target_sources(app PRIVATE
   src/main.c
   src/ble.c
   src/ident.c
+  src/imu.c
 )
