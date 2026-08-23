@@ -140,13 +140,24 @@ private struct DeviceRow: View {
     let device: SophonDevice
 
     var body: some View {
-        HStack {
-            StateDot(state: device.state)
+        // A timeline, because staleness is a function of elapsed time and nothing
+        // else invalidates this row. Without it a peripheral could go silent and
+        // the row would keep saying Connected until some unrelated change
+        // happened to redraw it. One second is plenty against a 5 s threshold.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            row(asOf: context.date)
+        }
+    }
+
+    private func row(asOf now: Date) -> some View {
+        let status = device.linkStatus(asOf: now)
+        return HStack {
+            StateDot(status: status)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.displayName).font(.body)
-                Text(device.state.label)
+                Text(status.label)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(status.isWarning ? .orange : .secondary)
             }
             Spacer()
             if let rssi = device.rssi {
@@ -159,7 +170,7 @@ private struct DeviceRow: View {
 }
 
 private struct StateDot: View {
-    let state: SophonDevice.State
+    let status: SophonDevice.LinkStatus
 
     var body: some View {
         Circle()
@@ -168,11 +179,14 @@ private struct StateDot: View {
     }
 
     private var color: Color {
-        switch state {
+        switch status {
         case .connected: .green
         case .connecting: .orange
         case .discovered: .secondary
         case .disconnected: .red
+        // Amber, not green and not red: the link is genuinely up, so red would
+        // be a lie, but nothing is arriving, so green would be a worse one.
+        case .stalled: .orange
         }
     }
 }
@@ -247,13 +261,27 @@ private struct DeviceDetailView: View {
     // copies of the same content would drift the moment one was edited.
 
     @ViewBuilder private var linkSection: some View {
-        Section("Link") {
-            LabeledContent("State", value: device.state.label)
+        Section {
+            // Timeline for the same reason as the list row: staleness changes with
+            // elapsed time and nothing else here would redraw it. The 2 s stats
+            // poll already re-renders this view, but only while a peripheral is
+            // answering -- which is exactly the case this needs to detect.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let status = device.linkStatus(asOf: context.date)
+                LabeledContent("State", value: status.label)
+                    .foregroundStyle(status.isWarning ? .orange : .primary)
+            }
             if let rssi = device.rssi {
                 LabeledContent("RSSI", value: "\(rssi) dBm")
             }
             if let mtu = device.attMTU {
                 LabeledContent("ATT MTU", value: "~\(mtu)")
+            }
+        } header: {
+            Text("Link")
+        } footer: {
+            if case .stalled = device.linkStatus() {
+                Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
             }
         }
     }
@@ -262,17 +290,38 @@ private struct DeviceDetailView: View {
         Section("Frames") {
             LabeledContent("Received", value: "\(device.framesReceived)")
             LabeledContent("Lost on link", value: "\(device.seqGaps)")
-            if device.boardRestarts > 0 {
-                // Detected exactly, via Sophon uptime running backwards.
-                LabeledContent("Sophon restarts", value: "\(device.boardRestarts)")
-            }
+            // Always shown, including at zero, for the same reason as the
+            // interruption count below -- and because its absence was being read
+            // as "not measured" rather than as "none". A row that only appears
+            // once something has gone wrong cannot be used to confirm that
+            // nothing has.
+            //
+            // Named for what it actually counts. It was "Sophon restarts",
+            // which promised to count restarts of the Sophon -- and then read 0
+            // however many times the board was reset, because a board reset
+            // drops the link and returns as a reconnect. The only thing that
+            // reaches this is a peripheral restarting its application state
+            // while holding the link open, which today means the simulator's
+            // Reboot button.
+            //
+            // A counter whose name overstates what it measures is the same
+            // defect as a green dot with no data behind it.
+            LabeledContent("Restarts without disconnect",
+                           value: "\(device.restartsWithoutDisconnect)")
+            // "Viewer", not "App". This was "App interruptions", which was
+            // unambiguous only while every peripheral was a board: there was
+            // one app in the system and it was this one. Since the simulator
+            // (#226) the thing at the other end can be an app too, so on a
+            // screen describing a remote Sophon the old label no longer said
+            // whose interruption it was.
+            //
             // Always shown, including at zero. A field that only appears once
             // something has gone wrong reads as an error banner; a field
             // permanently at 0 reads as a clean bill of health, and its absence
             // at startup would leave you wondering whether the app was
             // measuring this at all.
             LabeledContent(
-                "App interruptions",
+                "Viewer not listening",
                 value: device.interruptions == 0
                     ? "0"
                     : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")
@@ -303,6 +352,11 @@ private struct DeviceDetailView: View {
                 Text(attribution(device: device))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } else if case .stalled = device.linkStatus() {
+                // Distinct from "Reading…" on purpose. A read that never returns
+                // is an answer, and presenting it as an ongoing wait is the same
+                // omission as a green dot with no data behind it.
+                Text("Not responding.").foregroundStyle(.orange)
             } else if device.state.isConnected {
                 Text("Reading…").foregroundStyle(.secondary)
             } else {
@@ -360,7 +414,7 @@ private func attribution(device: SophonDevice) -> String {
     }
 }
 
-private extension SophonDevice.State {
+private extension SophonDevice.LinkStatus {
     /// The disconnect reason is deliberately not appended. Core Bluetooth's
     /// `localizedDescription` is long and rarely informative — "The connection
     /// has timed out unexpectedly." — and it pushed the State row to two lines
@@ -372,7 +426,16 @@ private extension SophonDevice.State {
         case .connecting: "Connecting…"
         case .connected: "Connected"
         case .disconnected: "Disconnected"
+        // Says both halves, because both are true and only together are they
+        // useful: the link is up, and no data is coming over it.
+        case .stalled(let silent): "Connected · no data \(Int(silent))s"
         }
+    }
+
+    /// Worth colouring, because it needs explaining rather than merely reporting.
+    var isWarning: Bool {
+        if case .stalled = self { return true }
+        return false
     }
 }
 

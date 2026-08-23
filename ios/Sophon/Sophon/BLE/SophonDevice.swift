@@ -49,7 +49,14 @@ final class SophonDevice: Identifiable {
     /// Times the board restarted mid-connection. Detected exactly rather than
     /// guessed: the frame's `t_ms` is board uptime, so a value lower than the
     /// previous one can only mean it rebooted.
-    var boardRestarts: Int = 0
+    /// Times the peripheral restarted **without the link dropping**, detected
+    /// from `t_ms` running backwards.
+    ///
+    /// Not a count of peripheral restarts in general, which is why it is not
+    /// named for one. A board reset loses the SoC's connection state, so it
+    /// comes back as a reconnect and never reaches the detector -- measured at
+    /// 0 across repeated resets. See the note in `ingest`.
+    var restartsWithoutDisconnect: Int = 0
     var lastFrame: MotionFrame?
     var lastFrameAt: Date?
 
@@ -101,26 +108,99 @@ final class SophonDevice: Identifiable {
     /// it by thousands.
     private static let interruptionThreshold: TimeInterval = 5
 
+    /// True once the motion characteristic has actually been subscribed — i.e.
+    /// once there is a real Sophon on the other end, not merely a link.
+    ///
+    /// Core Bluetooth's `didConnect` says a connection exists, which between two
+    /// iOS devices on one Apple ID can succeed against a phone whose Sophon app
+    /// is closed. Presenting that as "Connected" claims a session that does not
+    /// exist, so the UI waits for this instead.
+    private(set) var hasSession = false
+
+    /// When the current link was established. Needed so a device that has just
+    /// connected, and legitimately has no frames yet, is not reported as stalled
+    /// the instant it appears.
+    private(set) var connectedAt: Date?
+
+    /// How the link should be *described*, which is not the same as `state`.
+    ///
+    /// `state` reports what Core Bluetooth says about the connection, and Core
+    /// Bluetooth is not wrong -- but it cannot know a peripheral has died until
+    /// the supervision timeout expires. Measured against a SIGKILLed peripheral,
+    /// frames stopped instantly while `didDisconnectPeripheral` took another 49
+    /// seconds; between two iOS devices on one Apple ID, where the system keeps
+    /// its own links up, it has been observed to take minutes.
+    ///
+    /// So a live link is not evidence of a live stream, and this app must not
+    /// present it as though it were. That is the same discipline the `seq` rules
+    /// apply to the data, applied one layer up to the link.
+    ///
+    /// Deliberately NOT a synthesised disconnect: during that window the
+    /// connection really is open, and faking a close would both misreport the
+    /// radio and destroy the transmit-counter baselines.
+    enum LinkStatus: Equatable {
+        case discovered
+        case connecting
+        case connected
+        /// Connected, but nothing has arrived for `silentFor`.
+        case stalled(silentFor: TimeInterval)
+        case disconnected
+    }
+
+    /// Takes `now` explicitly so the caller controls when this is re-evaluated --
+    /// a view can drive it from a timeline and get a value that actually changes,
+    /// rather than one frozen at whenever the body last happened to run.
+    func linkStatus(asOf now: Date = Date()) -> LinkStatus {
+        switch state {
+        case .discovered: return .discovered
+        case .connecting: return .connecting
+        case .disconnected: return .disconnected
+        case .connected:
+            // A link without a subscribed characteristic is not a session. Report
+            // it as still trying rather than as connected, so a phantom link to a
+            // phone with no Sophon running never flashes up as success.
+            guard hasSession else { return .connecting }
+
+            // Falls back to the session start, so "subscribed and never sent
+            // anything" is also caught rather than waiting forever on a first
+            // frame that is not coming.
+            guard let since = lastFrameAt ?? connectedAt else { return .connected }
+            let silent = now.timeIntervalSince(since)
+            return silent > Self.interruptionThreshold ? .stalled(silentFor: silent) : .connected
+        }
+    }
+
     func ingest(_ frame: MotionFrame) {
         let now = Date()
 
         if let previous = previousFrame, frame.tMillis < previous.tMillis {
-            // Board uptime went backwards, so the board rebooted. Its seq and
-            // its transmit counters both restart from zero, which makes every
-            // comparison against the old session meaningless -- the sequence
-            // jump is not loss, and `sent` would appear to run backwards.
+            // Uptime went backwards, so the peripheral restarted while the link
+            // stayed up. Its seq and its transmit counters both restart from
+            // zero, which makes every comparison against the old session
+            // meaningless -- the sequence jump is not loss, and `sent` would
+            // appear to run backwards.
             //
-            // A quick power cycle can stay inside the supervision timeout, so
-            // iOS never reports a disconnect and nothing else resets. This is
-            // the only reliable signal that it happened.
-            boardRestarts += 1
-
-            // Discarding the stats baseline is the whole job: the next read
-            // re-establishes it, and `lostOnAir` reports nil until then
-            // rather than a figure spanning two different boots. No sequence
-            // gap is counted for this frame, and the assignment at the end of
-            // this method makes it the start of the new comparison.
-            txStatsAtConnect = nil
+            // MEASURED CORRECTION, and worth reading before relying on this.
+            //
+            // This branch was justified by the claim that a quick power cycle
+            // stays inside the supervision timeout, so iOS never reports a
+            // disconnect, making uptime the only reliable signal. That is not
+            // what hardware does. Pressing reset on the board never reaches
+            // here: the SoC loses its connection state entirely, so it stops
+            // servicing connection events, the central's supervision timeout
+            // expires, and the board is picked up again through a normal
+            // reconnect -- beginSession(), not this path. Confirmed on the
+            // board across repeated resets, with this counter staying at 0.
+            //
+            // A peripheral cannot hold a link it has forgotten. So for real
+            // hardware the reliable signal is the reconnect itself.
+            //
+            // The branch is kept because it is cheap and correct when it does
+            // fire, and it is reachable: a peripheral that restarts its
+            // *application* state without dropping the link lands here. The
+            // simulator's Reboot button is currently the only such thing, and
+            // exists precisely to exercise this.
+            noteBoardRestart()
         } else if let previous = previousFrame {
             let missing = max(0, frame.gap(since: previous))
             if missing > 0 {
@@ -158,12 +238,81 @@ final class SophonDevice: Identifiable {
     /// Counters describe one connection, so they reset when a new one starts —
     /// otherwise a gap is counted across a disconnect, where a sequence jump is
     /// expected rather than a dropped frame.
-    func resetLinkStats() {
+    /// The board rebooted underneath a link that never dropped.
+    ///
+    /// Everything session-scoped is cleared, because the board's own figures just
+    /// went back to zero: its `seq`, its uptime and its transmit counters all
+    /// restart from boot. Keeping the app's running totals across that boundary
+    /// left the detail view comparing two different intervals -- the transmit
+    /// counters rebased onto the new boot while `framesReceived` still spanned
+    /// both -- and the attribution sentence is built on exactly that comparison.
+    ///
+    /// It also makes the display independent of which path ran. A board reset
+    /// always comes back through `beginSession()` (see the note in `ingest`);
+    /// an application-level restart on a live link reaches here. Those should
+    /// not read differently to someone watching the screen, and now they do not
+    /// -- both leave the counters fresh.
+    ///
+    /// Deliberately NOT resetLinkStats():
+    ///   - `restartsWithoutDisconnect` has to survive, and be incremented -- it is the record
+    ///     that this happened at all, and resetLinkStats() would zero it;
+    ///   - `attMTU` has to survive, because the *connection* did. The MTU was
+    ///     negotiated before the reboot and is still in force.
+    ///
+    /// No sequence gap is counted for the frame that triggers this: the jump is a
+    /// new boot's numbering, not loss. The caller assigns `previousFrame` at the
+    /// end of `ingest`, making this frame the start of the new comparison.
+    private func noteBoardRestart() {
+        restartsWithoutDisconnect += 1
+
         framesReceived = 0
         seqGaps = 0
         interruptions = 0
         framesDuringInterruptions = 0
-        boardRestarts = 0
+        previousFrame = nil
+
+        // The next read re-establishes the baseline; until then `lostOnAir`
+        // reports nil rather than a figure spanning two boots.
+        txStats = nil
+        txStatsAtConnect = nil
+        txStatsAt = nil
+
+        // Staleness is measured from here, since this is where the new session
+        // begins as far as the data is concerned.
+        connectedAt = Date()
+    }
+
+    /// Begins a session: a real Sophon has been found behind the link.
+    ///
+    /// Idempotent, because it resets the counters. `didDiscoverServices` is
+    /// normally called once per connection, but iOS may report services again
+    /// mid-connection, and a second call must not wipe a session in progress.
+    func beginSession() {
+        guard !hasSession else { return }
+        hasSession = true
+        resetLinkStats()
+
+        // Re-established AFTER the reset, which clears it. The MTU is a property
+        // of the connection, and the connection is older than the session -- it
+        // was negotiated back at didConnect. Letting resetLinkStats() clear it
+        // and leaving it cleared silently dropped the ATT MTU row from the
+        // detail view once the reset moved out of didConnect.
+        attMTU = peripheral.maximumWriteValueLength(for: .withoutResponse) + 3
+    }
+
+    /// Ends it. The counters are deliberately left alone so the record of what
+    /// just happened survives on screen for reading.
+    func endSession() {
+        hasSession = false
+    }
+
+    func resetLinkStats() {
+        connectedAt = Date()
+        framesReceived = 0
+        seqGaps = 0
+        interruptions = 0
+        framesDuringInterruptions = 0
+        restartsWithoutDisconnect = 0
         previousFrame = nil
         lastFrame = nil
         lastFrameAt = nil
