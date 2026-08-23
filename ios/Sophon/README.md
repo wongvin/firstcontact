@@ -125,6 +125,13 @@ the stream stops. A **location session** is used as a keep-alive to hold the
 process scheduled. No location is read, stored or sent; only the session matters.
 Expect a When-In-Use prompt and the blue status indicator while simulating.
 
+**Killing the app stops it, and stays stopped.** Core Bluetooth state restoration
+is deliberately not enabled: it got the app relaunched in the background with the
+link restored but sampling never restarted, so the viewer saw a peripheral that
+was connected and permanently silent. A dead simulator behaving like a
+powered-off board is the honest outcome. See the comment in
+`Simulator/SophonPeripheral.swift`.
+
 "Keep the screen awake" is on by default, so the common case never needs any of
 that. Turn it off to test the background path deliberately.
 

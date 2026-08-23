@@ -54,14 +54,29 @@ final class SophonPeripheral: NSObject {
         // Created lazily so viewer mode holds no peripheral-role radio, and
         // released in stop() so the counters get clean "board boot" semantics.
         //
-        // The restore identifier lets iOS hand the session back if it relaunches
-        // us in the background rather than leaving the viewer staring at a
-        // peripheral that silently stopped existing.
-        manager = CBPeripheralManager(
-            delegate: self,
-            queue: .main,
-            options: [CBPeripheralManagerOptionRestoreIdentifierKey: "com.vwong.Sophon.peripheral"]
-        )
+        // Deliberately NO CBPeripheralManagerOptionRestoreIdentifierKey.
+        //
+        // State restoration was tried and removed, because it made things worse
+        // rather than better. With a restore identifier, killing this app got it
+        // relaunched in the background to restore the Core Bluetooth session:
+        // the service came back, advertising resumed, and the central
+        // reconnected -- observed as the viewer flicking to Disconnected and
+        // straight back to Connected.
+        //
+        // But a restoration launch has no UI, and sampling is started from the
+        // view (ContentView applies the mode). So CoreMotion never restarted and
+        // the result was a zombie: advertising, connectable, subscribed, and
+        // permanently silent. The viewer was not even wrong to say "Connected" --
+        // the link was real; only the data was missing. That is a worse failure
+        // than being absent, because absence is unambiguous.
+        //
+        // Without the identifier, a killed simulator stays dead, which is also
+        // how a powered-off board behaves -- and being board-like is this whole
+        // file's purpose. Resuming in the background would mean driving the
+        // simulator from the app rather than the view, and verifying CoreMotion
+        // starts on a UI-less launch; worth doing deliberately if ever wanted,
+        // not worth inheriting by accident.
+        manager = CBPeripheralManager(delegate: self, queue: .main)
     }
 
     func stop() {
@@ -146,23 +161,6 @@ extension SophonPeripheral: CBPeripheralManagerDelegate {
                 return
             }
             publishService(on: peripheral)
-        }
-    }
-
-    nonisolated func peripheralManager(
-        _ peripheral: CBPeripheralManager,
-        willRestoreState dict: [String: Any]
-    ) {
-        MainActor.assumeIsolated {
-            log.info("restored by the system")
-            // Recover the characteristic we must notify on. Rebuilding the
-            // service instead would register a second copy of it.
-            let services = dict[CBPeripheralManagerRestoredStateServicesKey] as? [CBMutableService]
-            motionCharacteristic = services?
-                .compactMap(\.characteristics)
-                .flatMap { $0 }
-                .compactMap { $0 as? CBMutableCharacteristic }
-                .first { $0.uuid == SophonProtocol.motionCharacteristicUUID }
         }
     }
 
