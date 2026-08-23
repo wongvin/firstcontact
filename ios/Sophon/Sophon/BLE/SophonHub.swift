@@ -28,6 +28,11 @@ final class SophonHub: NSObject {
     private var byID: [UUID: SophonDevice] = [:]
     /// Held per device so stats can be re-read on demand without rediscovering.
     private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
+
+    /// Peripherals that accepted a connection but had no Sophon service behind
+    /// it. Tracked so the disconnect they are about to get is not treated as a
+    /// dropout worth re-arming against. See `didDiscoverServices`.
+    private var withoutService: Set<UUID> = []
     private let log = Logger(subsystem: "com.vwong.Sophon", category: "ble")
 
     override init() {
@@ -141,6 +146,7 @@ final class SophonHub: NSObject {
         for device in devices {
             central.cancelPeripheralConnection(device.peripheral)
             device.state = .disconnected(reason: "simulator mode")
+            device.endSession()
         }
         statsCharacteristics.removeAll()
     }
@@ -202,6 +208,11 @@ extension SophonHub: CBCentralManagerDelegate {
 
             // Auto-connect: with one board there is nothing to choose between,
             // and reconnect-on-return-to-range should not need a tap.
+            // A fresh advertisement means it is worth another attempt, including
+            // after it was dropped for having no service — advertising our UUID
+            // is exactly the evidence that the app is back.
+            self.withoutService.remove(peripheral.identifier)
+
             if case .discovered = device.state {
                 self.connect(device)
             } else if case .disconnected = device.state {
@@ -214,7 +225,25 @@ extension SophonHub: CBCentralManagerDelegate {
         Task { @MainActor in
             guard let device = self.byID[peripheral.identifier] else { return }
             device.state = .connected
-            device.resetLinkStats()
+
+            // Deliberately NOT resetLinkStats() here.
+            //
+            // didConnect means a link exists, not that a Sophon is behind it.
+            // Between two iOS devices on one Apple ID the system keeps its own
+            // links up, so the re-arm in didDisconnectPeripheral can succeed
+            // against a phone whose Sophon app has been swiped away: the central
+            // reports connected, service discovery finds nothing, and no frames
+            // ever arrive.
+            //
+            // Resetting here wiped the session record on every one of those
+            // phantom connects -- observed as the frame counts dropping to zero
+            // and the transmit counters falling back to "Reading..." while the
+            // peripheral no longer existed. Destroying the measurement you were
+            // studying because the radio twitched is the worst possible moment
+            // to do it.
+            //
+            // The stats are cleared once the motion characteristic is actually
+            // subscribed, which is the real start of a session.
 
             // maximumWriteValueLength(.withoutResponse) is the negotiated ATT
             // MTU minus the 3-byte ATT header — the closest iOS exposes.
@@ -245,6 +274,7 @@ extension SophonHub: CBCentralManagerDelegate {
         Task { @MainActor in
             guard let device = self.byID[peripheral.identifier] else { return }
             device.state = .disconnected(reason: reason)
+            device.endSession()
             self.log.info("disconnected \(device.displayName, privacy: .public)")
             self.statsCharacteristics[peripheral.identifier] = nil
 
@@ -253,6 +283,12 @@ extension SophonHub: CBCentralManagerDelegate {
             // the phone reacquires the board's only connection slot while it is
             // supposed to be impersonating one.
             guard !self.isSuspended else { return }
+
+            // Nor one dropped for having no Sophon service. Re-arming there is
+            // what produced the endless Connected/Disconnected cycle against a
+            // phone whose app had been closed. Rediscovery via the scan brings
+            // it back when there is actually something to talk to.
+            if self.withoutService.remove(peripheral.identifier) != nil { return }
 
             // Re-arm. The scan is still running, so walking back into range
             // rediscovers and reconnects without a relaunch.
@@ -263,12 +299,51 @@ extension SophonHub: CBCentralManagerDelegate {
 
 extension SophonHub: CBPeripheralDelegate {
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard error == nil, let services = peripheral.services else { return }
-        for service in services where service.uuid == SophonProtocol.serviceUUID {
+        // MainActor.assumeIsolated rather than a Task hop, for two reasons.
+        //
+        // CBService is not Sendable, so it cannot cross an isolation boundary --
+        // the same constraint that shapes the peripheral side.
+        //
+        // And the ordering here is load-bearing: the session must be reset before
+        // any characteristic work is issued. Deferring the reset into a Task while
+        // issuing discovery synchronously let the first frames, or the stats read
+        // response, arrive and then be zeroed by a reset that landed after them.
+        MainActor.assumeIsolated {
+            let services = peripheral.services ?? []
+            let sophon = error == nil
+                ? services.first { $0.uuid == SophonProtocol.serviceUUID }
+                : nil
+
+            guard let sophon else {
+                // Connected to something that is not currently a Sophon.
+                //
+                // This is a real state, not a theoretical one. Between two iOS
+                // devices on one Apple ID the system keeps its own links up, so a
+                // connect can succeed against a phone whose Sophon app has been
+                // swiped away. The link is genuine; the service is simply not there.
+                //
+                // Left alone this spun forever: connect succeeds, nothing is ever
+                // discovered, no frames arrive, the link eventually times out, the
+                // disconnect handler re-arms, and round it goes -- a device row
+                // permanently claiming Connected to an app that does not exist.
+                //
+                // So drop it and do not re-arm. Recovery does not depend on the
+                // re-arm anyway: the scan is still running, so the moment the app
+                // starts advertising again it is rediscovered and reconnected.
+                self.log.info("no Sophon service on this peripheral; dropping")
+                self.withoutService.insert(peripheral.identifier)
+                self.central.cancelPeripheralConnection(peripheral)
+                return
+            }
+
+            // The session starts here -- a real Sophon is known to be behind the
+            // link -- and everything below is ordered behind it.
+            self.byID[peripheral.identifier]?.beginSession()
+
             peripheral.discoverCharacteristics(
                 [SophonProtocol.motionCharacteristicUUID,
                  SophonProtocol.statsCharacteristicUUID],
-                for: service)
+                for: sophon)
         }
     }
 
@@ -277,20 +352,23 @@ extension SophonHub: CBPeripheralDelegate {
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
-        guard error == nil, let characteristics = service.characteristics else { return }
-        for characteristic in characteristics {
-            switch characteristic.uuid {
-            case SophonProtocol.motionCharacteristicUUID:
-                peripheral.setNotifyValue(true, for: characteristic)
-            case SophonProtocol.statsCharacteristicUUID:
-                // Read once on connect to establish the session baseline; after
-                // that it is refreshed on demand from the detail view.
-                peripheral.readValue(for: characteristic)
-                Task { @MainActor in
+        // assumeIsolated for the same reason as didDiscoverServices: CBCharacteristic
+        // is not Sendable, and caching one inside a Task was reaching across an
+        // isolation boundary with a reference type that must not cross it.
+        MainActor.assumeIsolated {
+            guard error == nil, let characteristics = service.characteristics else { return }
+            for characteristic in characteristics {
+                switch characteristic.uuid {
+                case SophonProtocol.motionCharacteristicUUID:
+                    peripheral.setNotifyValue(true, for: characteristic)
+                case SophonProtocol.statsCharacteristicUUID:
+                    // Read once at session start to establish the baseline; after
+                    // that it is refreshed on demand from the detail view.
                     self.statsCharacteristics[peripheral.identifier] = characteristic
+                    peripheral.readValue(for: characteristic)
+                default:
+                    break
                 }
-            default:
-                break
             }
         }
     }

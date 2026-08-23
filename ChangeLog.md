@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-24
+
+### fix: report stream state rather than link state (issue #228)
+
+- The viewer kept showing **Connected** long after a peripheral had died. Core Bluetooth cannot know a peripheral is gone until its supervision timeout expires: measured against a SIGKILLed simulator, frames stopped instantly while the disconnect callback took a further **49 s**, and between two iOS devices on one Apple ID — where the system keeps its own links alive — it ran to minutes. `SophonDevice.linkStatus(asOf:)` now reports **`Connected · no data 12s`** in amber once nothing has arrived for #214's existing 5 s threshold. Amber, not red: the link genuinely is open, so red would be a lie and green a worse one. Deliberately **not** a synthesised disconnect — the radio is not wrong, and faking a close would destroy the transmit-counter baselines.
+- A stats read that never returns now says **"Not responding."** instead of sitting on `Reading…` forever. Same omission one field over: presenting the absence of an answer as though it were an ongoing wait.
+- **Counters are reset when a session begins, not when a link opens.** `didConnect` was calling `resetLinkStats()`, so every phantom reconnect to a phone whose app had been closed wiped the frame counts to `0 0 0` and dropped the counters back to `Reading…`. Destroying the measurement you are studying because the radio twitched is the worst available moment to do it.
+- **A connection with no Sophon service is dropped and not re-armed.** That re-arm was the engine of an endless Connected/Disconnected cycle against a closed app: connect succeeds at the link level, nothing is discovered, no frames arrive, the link times out, the handler re-arms, repeat. Recovery does not need it — the scan keeps running, so a restarted app is rediscovered within seconds.
+- **`Connected` now requires a subscribed characteristic.** A link to a phone with no Sophon running reports `Connecting…` and settles on `Disconnected`, rather than flashing success on each doomed retry.
+- Device rows gained a 1 s `TimelineView`, because staleness is a function of elapsed time and nothing else would have redrawn the row.
+- Two regressions caught in review before they shipped, both affecting the **real board**. Relocating the reset let it clear `attMTU`, which is a property of the *connection* and older than the session — the ATT MTU row would have silently vanished from the detail view. And `didDiscoverCharacteristicsFor` iterates characteristics in unspecified order, so dispatching the reset through a `Task` let the first frames or the stats read response arrive and then be zeroed by a reset landing after them. The session now starts in `didDiscoverServices` with characteristic discovery issued behind it, so the ordering is guaranteed rather than probable.
+- Switched both discovery callbacks to `MainActor.assumeIsolated`. `CBService` and `CBCharacteristic` are not `Sendable`, and a `CBCharacteristic` was being cached inside a `Task { @MainActor }` — reaching across an isolation boundary with a reference type that must not cross it. `beginSession()` is also idempotent now, since iOS may report services again mid-connection and a second call would wipe a live session.
+- The through-line, worth stating because it explains why one symptom produced five defects: `PROTOCOL.md` argues at length that a gap must never be silently misattributed, and the whole `seq`/`no_mem` design exists for that. **None of that scepticism had ever been applied to the link.** Frames were treated as data to be doubted; connection state was treated as fact. A link is not a stream, a connect is not a session, and a reachable peripheral is not a Sophon.
+
 ## 2026-08-22
 
 ### feat: Sophon iPhone simulator streaming CoreMotion over BLE (issue #226)

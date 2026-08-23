@@ -101,6 +101,68 @@ final class SophonDevice: Identifiable {
     /// it by thousands.
     private static let interruptionThreshold: TimeInterval = 5
 
+    /// True once the motion characteristic has actually been subscribed — i.e.
+    /// once there is a real Sophon on the other end, not merely a link.
+    ///
+    /// Core Bluetooth's `didConnect` says a connection exists, which between two
+    /// iOS devices on one Apple ID can succeed against a phone whose Sophon app
+    /// is closed. Presenting that as "Connected" claims a session that does not
+    /// exist, so the UI waits for this instead.
+    private(set) var hasSession = false
+
+    /// When the current link was established. Needed so a device that has just
+    /// connected, and legitimately has no frames yet, is not reported as stalled
+    /// the instant it appears.
+    private(set) var connectedAt: Date?
+
+    /// How the link should be *described*, which is not the same as `state`.
+    ///
+    /// `state` reports what Core Bluetooth says about the connection, and Core
+    /// Bluetooth is not wrong -- but it cannot know a peripheral has died until
+    /// the supervision timeout expires. Measured against a SIGKILLed peripheral,
+    /// frames stopped instantly while `didDisconnectPeripheral` took another 49
+    /// seconds; between two iOS devices on one Apple ID, where the system keeps
+    /// its own links up, it has been observed to take minutes.
+    ///
+    /// So a live link is not evidence of a live stream, and this app must not
+    /// present it as though it were. That is the same discipline the `seq` rules
+    /// apply to the data, applied one layer up to the link.
+    ///
+    /// Deliberately NOT a synthesised disconnect: during that window the
+    /// connection really is open, and faking a close would both misreport the
+    /// radio and destroy the transmit-counter baselines.
+    enum LinkStatus: Equatable {
+        case discovered
+        case connecting
+        case connected
+        /// Connected, but nothing has arrived for `silentFor`.
+        case stalled(silentFor: TimeInterval)
+        case disconnected
+    }
+
+    /// Takes `now` explicitly so the caller controls when this is re-evaluated --
+    /// a view can drive it from a timeline and get a value that actually changes,
+    /// rather than one frozen at whenever the body last happened to run.
+    func linkStatus(asOf now: Date = Date()) -> LinkStatus {
+        switch state {
+        case .discovered: return .discovered
+        case .connecting: return .connecting
+        case .disconnected: return .disconnected
+        case .connected:
+            // A link without a subscribed characteristic is not a session. Report
+            // it as still trying rather than as connected, so a phantom link to a
+            // phone with no Sophon running never flashes up as success.
+            guard hasSession else { return .connecting }
+
+            // Falls back to the session start, so "subscribed and never sent
+            // anything" is also caught rather than waiting forever on a first
+            // frame that is not coming.
+            guard let since = lastFrameAt ?? connectedAt else { return .connected }
+            let silent = now.timeIntervalSince(since)
+            return silent > Self.interruptionThreshold ? .stalled(silentFor: silent) : .connected
+        }
+    }
+
     func ingest(_ frame: MotionFrame) {
         let now = Date()
 
@@ -158,7 +220,32 @@ final class SophonDevice: Identifiable {
     /// Counters describe one connection, so they reset when a new one starts —
     /// otherwise a gap is counted across a disconnect, where a sequence jump is
     /// expected rather than a dropped frame.
+    /// Begins a session: a real Sophon has been found behind the link.
+    ///
+    /// Idempotent, because it resets the counters. `didDiscoverServices` is
+    /// normally called once per connection, but iOS may report services again
+    /// mid-connection, and a second call must not wipe a session in progress.
+    func beginSession() {
+        guard !hasSession else { return }
+        hasSession = true
+        resetLinkStats()
+
+        // Re-established AFTER the reset, which clears it. The MTU is a property
+        // of the connection, and the connection is older than the session -- it
+        // was negotiated back at didConnect. Letting resetLinkStats() clear it
+        // and leaving it cleared silently dropped the ATT MTU row from the
+        // detail view once the reset moved out of didConnect.
+        attMTU = peripheral.maximumWriteValueLength(for: .withoutResponse) + 3
+    }
+
+    /// Ends it. The counters are deliberately left alone so the record of what
+    /// just happened survives on screen for reading.
+    func endSession() {
+        hasSession = false
+    }
+
     func resetLinkStats() {
+        connectedAt = Date()
         framesReceived = 0
         seqGaps = 0
         interruptions = 0
