@@ -124,7 +124,7 @@ final class SophonSimulator {
     ///
     /// The link part is the whole point. Toggling out of simulator mode drops the
     /// connection, and the viewer's `resetLinkStats()` runs on the next connect
-    /// and zeroes `boardRestarts` before the new `t_ms` is ever compared to the
+    /// and zeroes `restartsWithoutDisconnect` before the new `t_ms` is ever compared to the
     /// old one. So mode-toggling cannot exercise restart detection. Only this
     /// can: uptime running backwards on a link that never went away is exactly
     /// the signal `SophonDevice` watches for.

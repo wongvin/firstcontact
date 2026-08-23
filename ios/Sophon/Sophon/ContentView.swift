@@ -290,17 +290,38 @@ private struct DeviceDetailView: View {
         Section("Frames") {
             LabeledContent("Received", value: "\(device.framesReceived)")
             LabeledContent("Lost on link", value: "\(device.seqGaps)")
-            if device.boardRestarts > 0 {
-                // Detected exactly, via Sophon uptime running backwards.
-                LabeledContent("Sophon restarts", value: "\(device.boardRestarts)")
-            }
+            // Always shown, including at zero, for the same reason as the
+            // interruption count below -- and because its absence was being read
+            // as "not measured" rather than as "none". A row that only appears
+            // once something has gone wrong cannot be used to confirm that
+            // nothing has.
+            //
+            // Named for what it actually counts. It was "Sophon restarts",
+            // which promised to count restarts of the Sophon -- and then read 0
+            // however many times the board was reset, because a board reset
+            // drops the link and returns as a reconnect. The only thing that
+            // reaches this is a peripheral restarting its application state
+            // while holding the link open, which today means the simulator's
+            // Reboot button.
+            //
+            // A counter whose name overstates what it measures is the same
+            // defect as a green dot with no data behind it.
+            LabeledContent("Restarts without disconnect",
+                           value: "\(device.restartsWithoutDisconnect)")
+            // "Viewer", not "App". This was "App interruptions", which was
+            // unambiguous only while every peripheral was a board: there was
+            // one app in the system and it was this one. Since the simulator
+            // (#226) the thing at the other end can be an app too, so on a
+            // screen describing a remote Sophon the old label no longer said
+            // whose interruption it was.
+            //
             // Always shown, including at zero. A field that only appears once
             // something has gone wrong reads as an error banner; a field
             // permanently at 0 reads as a clean bill of health, and its absence
             // at startup would leave you wondering whether the app was
             // measuring this at all.
             LabeledContent(
-                "App interruptions",
+                "Viewer not listening",
                 value: device.interruptions == 0
                     ? "0"
                     : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")

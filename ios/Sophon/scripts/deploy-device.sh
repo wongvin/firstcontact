@@ -174,7 +174,13 @@ while IFS="$(printf '\t')" read -r DEVICE_ID NAME TUNNEL; do
   fi
 
   echo "==> Launching ${BUNDLE_ID} on ${NAME}…"
-  if ! xcrun devicectl device process launch --device "${DEVICE_ID}" "${BUNDLE_ID}"; then
+  # --terminate-existing is not optional here. Installing over a RUNNING app
+  # replaces the bundle on disk but leaves the old process executing, and a
+  # plain launch then just foregrounds that stale process -- so the build you
+  # just deployed never actually runs. Silently testing the previous build is a
+  # far worse failure than a launch error, because nothing looks wrong.
+  if ! xcrun devicectl device process launch --terminate-existing \
+       --device "${DEVICE_ID}" "${BUNDLE_ID}"; then
     echo "warning: launch failed on ${NAME} (is it unlocked?). The app is installed — open it from the home screen." >&2
   fi
 done < "${DEVICE_TABLE}"
