@@ -1,47 +1,127 @@
 import SwiftUI
 
+/// Which role this device is playing.
+///
+/// Mutually exclusive on purpose: the two roles contend for one radio, and a
+/// phone that keeps scanning while advertising as a Sophon will connect to a real
+/// board and hold its only connection slot.
+enum AppMode: String, CaseIterable, Identifiable {
+    case viewer
+    case simulator
+
+    var id: String { rawValue }
+
+    var label: String { self == .viewer ? "Viewer" : "Simulator" }
+    var icon: String { self == .viewer ? "dot.radiowaves.left.and.right" : "sensor.tag.radiowaves.forward" }
+}
+
 struct ContentView: View {
+    @AppStorage("appMode") private var mode: AppMode = .viewer
     @State private var hub = SophonHub()
+    @State private var simulator = SophonSimulator()
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !hub.radio.isUsable {
-                    RadioUnavailableView(state: hub.radio)
-                } else if hub.devices.isEmpty {
-                    ContentUnavailableView {
-                        Label("Looking for Sophons", systemImage: "dot.radiowaves.left.and.right")
-                    } description: {
-                        Text("Power on a Sophon and it will appear here.")
-                    }
-                } else {
-                    List(hub.devices) { device in
-                        NavigationLink {
-                            DeviceDetailView(device: device) { hub.refreshStats(device) }
-                        } label: {
-                            DeviceRow(device: device)
-                        }
+        Group {
+            NavigationStack {
+                Group {
+                    switch mode {
+                    case .viewer:
+                        ViewerView(hub: hub)
+                    case .simulator:
+                        SimulatorView(simulator: simulator)
                     }
                 }
+                .navigationTitle("Sophon")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) { modePicker }
+                }
             }
-            .navigationTitle("Sophon")
+            // Rebuilt on a mode change so the navigation stack resets. A
+            // DeviceDetailView pushed in viewer mode must not survive into
+            // simulator mode, where its 2 s stats poll would keep running
+            // against a peripheral this app has deliberately disconnected.
+            //
+            // On the NavigationStack, never on ContentView: there it would
+            // destroy @State hub and build a fresh CBCentralManager on every
+            // toggle.
+            .id(mode)
+        }
+        .onChange(of: mode, initial: true) { _, newMode in
+            // One role down before the other comes up. Never both on air.
+            switch newMode {
+            case .viewer:
+                simulator.stop()
+                hub.resume()
+            case .simulator:
+                hub.suspend()
+                simulator.start()
+            }
+        }
+    }
+
+    private var modePicker: some View {
+        // A Menu rather than a segmented control: the toolbar is cramped on an
+        // iPhone, and this is a mode you set once rather than flick between.
+        Menu {
+            Picker("Mode", selection: $mode) {
+                ForEach(AppMode.allCases) { mode in
+                    Label(mode.label, systemImage: mode.icon).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(mode.label, systemImage: mode.icon)
         }
     }
 }
 
-/// The simulator has no Core Bluetooth hardware, so this is what a simulator
+/// The original central-side UI, lifted out of `ContentView` unchanged when
+/// simulator mode arrived.
+private struct ViewerView: View {
+    let hub: SophonHub
+
+    var body: some View {
+        if !hub.radio.isUsable {
+            RadioUnavailableView(state: hub.radio, purpose: "to find Sophons")
+        } else if hub.devices.isEmpty {
+            ContentUnavailableView {
+                Label("Looking for Sophons", systemImage: "dot.radiowaves.left.and.right")
+            } description: {
+                Text("Power on a Sophon and it will appear here.")
+            }
+        } else {
+            List(hub.devices) { device in
+                NavigationLink {
+                    DeviceDetailView(device: device) { hub.refreshStats(device) }
+                } label: {
+                    DeviceRow(device: device)
+                }
+            }
+        }
+    }
+}
+
+/// The iOS Simulator has no Core Bluetooth hardware, so this is what a simulator
 /// screenshot shows. Worth rendering properly rather than leaving blank.
-private struct RadioUnavailableView: View {
-    let state: SophonHub.RadioState
+///
+/// Shared by both roles. The four failure reasons are properties of the radio and
+/// read identically whether this device is scanning or advertising; only the
+/// sentence explaining what it was *for* differs, which is what `purpose` carries.
+struct RadioUnavailableView: View {
+    let state: RadioState
+    /// Completes "Turn Bluetooth on …" — e.g. "to find Sophons".
+    let purpose: String
 
     private var message: (icon: String, title: String, detail: String) {
         switch state {
         case .poweredOff:
-            ("bluetooth.slash", "Bluetooth is off", "Turn Bluetooth on to find Sophons.")
+            ("bluetooth.slash", "Bluetooth is off", "Turn Bluetooth on \(purpose).")
         case .unauthorized:
             ("hand.raised", "Bluetooth not permitted", "Allow Bluetooth for Sophon in Settings.")
         case .unsupported:
             ("iphone.slash", "No Bluetooth radio", "This device has no Core Bluetooth support — expected in the Simulator.")
+        case .idle:
+            ("pause.circle", "Radio not in use", "This role is off the air while the other one has the radio.")
         default:
             ("hourglass", "Starting up", "Waiting for the Bluetooth radio.")
         }
@@ -241,9 +321,11 @@ private struct DeviceDetailView: View {
         if let frame = device.lastFrame {
             Section("Motion") {
                 if frame.isAxesZero {
-                    // The skeleton (#208) sends zeroed axes on purpose. Saying
-                    // so beats showing six zeros that look like a bug.
-                    Text("Axes are zero — firmware is streaming the skeleton frame. Real IMU data arrives in #209.")
+                    // Zeroed axes are a deliberate signal, not a bug: a board
+                    // whose IMU failed to start falls back to them rather than
+                    // going quiet, and the simulator can emit them on demand.
+                    // Saying so beats showing six zeros that look broken.
+                    Text("Axes are zero — the Sophon is streaming frames but has no IMU data.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

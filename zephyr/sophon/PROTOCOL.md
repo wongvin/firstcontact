@@ -286,6 +286,48 @@ its keys while the phone still believes it is bonded, which requires a manual
 Full reasoning, and the shape of the change if it is ever wanted, is in
 UPDATED-PLAN.md.
 
+## A second peripheral implementation
+
+Since #226 this contract has **three** implementers, not two: the firmware, the
+iOS decoder, and an iOS *encoder* — a simulator mode in the same app that lets an
+iPhone advertise as a Sophon and stream its own CoreMotion data. It exists so app
+work is not gated on the one board, and so #211 can be exercised with more than
+one peripheral.
+
+Changing the wire format now means changing three places. The encoder is
+deliberately written directly beneath the decoder in `SophonProtocol.swift` so two
+of the three are always visible at once, and both are checked at launch against
+byte vectors transcribed from the table above rather than against each other.
+
+The simulator honours the parts of this document that matter — frame layout, the
+`seq` rules, the transmit counters, the read-only stats characteristic — but it is
+**not** a substitute for hardware. Where it differs, and why:
+
+| | Board | Simulator |
+|---|---|---|
+| ATT MTU | 23, negotiated down | ~185 iPhone-to-iPad; Core Bluetooth exposes no control |
+| Connections | 1 (`CONFIG_BT_MAX_CONN=1`) | several; iOS has no equivalent limit |
+| `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
+| `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
+| Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
+| `t_ms` | since board boot | since simulator start |
+| Rate | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
+
+The MTU row is the one that matters most for #211: **the "one sample is exactly
+one radio packet" property that shaped this format does not hold between two iOS
+devices.** The simulator is a way to exercise logic and timing, not to measure
+radio capacity.
+
+The axis row matters for #210: fusion developed against the simulator will need
+its signs checked against a real board before it can be trusted.
+
+So does the rate row, and in a way that is easy to miss. The board runs about 4%
+**fast** and the simulator about 4% **slow**, which puts them roughly **8% apart
+from each other** while both claim 52 Hz. Anything that batches, aligns or
+integrates across the two must key off `t_ms` rather than a nominal rate — the
+same conclusion #209 reached from one device, now with a second data point that
+misses in the opposite direction.
+
 ## Known gaps
 
 - **No common time base.** `t_ms` is relative to each board's own boot. Adequate

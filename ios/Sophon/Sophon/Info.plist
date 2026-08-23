@@ -21,10 +21,42 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 
-	<!-- Core Bluetooth central. Without this string the OS kills the app the
-	     moment CBCentralManager is constructed. -->
+	<!-- Core Bluetooth, both roles. Without this string the OS kills the app the
+	     moment CBCentralManager or CBPeripheralManager is constructed. One key
+	     covers central and peripheral, but the wording is what the user reads,
+	     so it names both. -->
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Connects to your Sophon motion sensors to receive live motion data.</string>
+	<string>Connects to your Sophon motion sensors, and lets this device act as one.</string>
+
+	<!-- CoreMotion. Raw CMMotionManager accelerometer and gyroscope access is
+	     NOT gated by the Motion & Fitness permission -- that gates
+	     CMMotionActivityManager, CMPedometer and CMAltimeter -- so no prompt
+	     appears for what this app actually does. Declared anyway: the penalty
+	     for guessing wrong is a hard TCC termination rather than a graceful
+	     denial, and an unused usage string costs nothing, since the prompt is
+	     triggered by the API call and never by the key's presence. -->
+	<key>NSMotionUsageDescription</key>
+	<string>Reads this device's accelerometer and gyroscope so it can act as a simulated Sophon motion sensor.</string>
+
+	<!-- Location is used ONLY to keep the app scheduled while it is streaming in
+	     the background. No location is read, stored or transmitted.
+	     See Simulator/BackgroundKeepAlive.swift for why a keep-alive is needed
+	     at all: bluetooth-peripheral keeps a peripheral wakeable for incoming
+	     events, but this one is push-driven, so once suspended nothing arrives
+	     to wake it and the stream stops. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Keeps Sophon running while it streams motion in the background. Your location is never recorded or sent anywhere.</string>
+
+	<!-- bluetooth-peripheral keeps the GATT server registered while backgrounded.
+	     location is the keep-alive that keeps the process scheduled so CoreMotion
+	     and the notify loop keep running; CLLocationManager throws at runtime if
+	     allowsBackgroundLocationUpdates is set without it, so this entry and that
+	     line are a single change. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-peripheral</string>
+		<string>location</string>
+	</array>
 
 	<key>UIApplicationSceneManifest</key>
 	<dict>
