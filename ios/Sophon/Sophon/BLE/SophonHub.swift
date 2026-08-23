@@ -12,18 +12,17 @@ import os
 @MainActor
 @Observable
 final class SophonHub: NSObject {
-    enum RadioState: Equatable {
-        case unknown
-        case unauthorized
-        case unsupported
-        case poweredOff
-        case scanning
-
-        var isUsable: Bool { self == .scanning }
-    }
-
     private(set) var radio: RadioState = .unknown
     private(set) var devices: [SophonDevice] = []
+
+    /// True while this role has been deliberately taken off the air so the
+    /// simulator can use the radio instead. See `suspend()`.
+    private(set) var isSuspended = false
+
+    /// Last state the manager reported. Kept because whether the scan should be
+    /// running depends on this *and* on `isSuspended`, and deciding that in two
+    /// places is how the two get out of step.
+    private var managerState: CBManagerState = .unknown
 
     private var central: CBCentralManager!
     private var byID: [UUID: SophonDevice] = [:]
@@ -63,7 +62,9 @@ final class SophonHub: NSObject {
     }
 
     func connect(_ device: SophonDevice) {
-        guard radio.isUsable else { return }
+        // isSuspended is checked as well as the radio state: a discovery Task
+        // queued just before suspend() can land just after it.
+        guard radio.isUsable, !isSuspended else { return }
         device.state = .connecting
         central.connect(device.peripheral)
     }
@@ -79,17 +80,82 @@ final class SophonHub: NSObject {
         device.peripheral.readValue(for: characteristic)
     }
 
-    private func startScan() {
-        // Filtered by service UUID, which is REQUIRED: an unfiltered scan
-        // returns nothing while the app is backgrounded. It also means the
-        // firmware must keep the service UUID in the advertisement, not the
-        // scan response.
-        central.scanForPeripherals(
-            withServices: [SophonProtocol.serviceUUID],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
-        )
-        radio = .scanning
-        log.info("scanning for Sophon peripherals")
+    /// The single decision point for whether the scan should be running.
+    ///
+    /// Two independent inputs govern it -- the radio's own state and whether this
+    /// role has been deliberately suspended -- and they change from unrelated
+    /// callbacks. Resolving them in one place means the answer cannot depend on
+    /// which one happened to fire last, which is exactly the bug that appears
+    /// when a second condition is bolted into the state callback.
+    private func applyRadioState() {
+        let wantScan = (managerState == .poweredOn) && !isSuspended
+
+        if wantScan {
+            if radio != .ready {
+                // Filtered by service UUID, which is REQUIRED: an unfiltered scan
+                // returns nothing while the app is backgrounded. It also means the
+                // peripheral must keep the service UUID in the advertisement, not
+                // the scan response.
+                central.scanForPeripherals(
+                    withServices: [SophonProtocol.serviceUUID],
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+                )
+                log.info("scanning for Sophon peripherals")
+            }
+            radio = .ready
+            return
+        }
+
+        if radio == .ready {
+            central.stopScan()
+            log.info("stopped scanning")
+        }
+
+        // poweredOn here can only mean deliberately suspended -- the radio is
+        // fine, this role is just not using it.
+        radio = isSuspended && managerState == .poweredOn ? .idle : RadioState(managerState)
+    }
+
+    /// Take the central off the air so this device can advertise as a Sophon
+    /// instead.
+    ///
+    /// Not merely cosmetic: a real board is `CONFIG_BT_MAX_CONN=1`, so a phone
+    /// that keeps scanning while pretending to be a board will connect to the
+    /// real one and hold its only connection slot.
+    func suspend() {
+        guard !isSuspended else { return }
+
+        // Set FIRST, before any cancel. cancelPeripheralConnection is
+        // asynchronous and didDisconnectPeripheral's body runs inside a
+        // Task { @MainActor }, so those bodies land after this function returns
+        // and must be able to see the flag -- otherwise each one re-arms the
+        // very connection being torn down.
+        isSuspended = true
+        applyRadioState()
+
+        // Every known peripheral, not just the connected ones. An outstanding
+        // connect() on iOS never times out, so a device sitting in .disconnected
+        // may still have a live request pending that would grab the board the
+        // moment it comes into range. cancelPeripheralConnection cancels pending
+        // requests as well as established links.
+        for device in devices {
+            central.cancelPeripheralConnection(device.peripheral)
+            device.state = .disconnected(reason: "simulator mode")
+        }
+        statsCharacteristics.removeAll()
+    }
+
+    /// Put the central back on the air after `suspend()`.
+    ///
+    /// `devices` is deliberately kept across the suspension: `resetLinkStats()`
+    /// already runs on every `didConnect`, so no stale counters survive, and
+    /// keeping the objects means a reconnect is immediate rather than waiting on
+    /// rediscovery.
+    func resume() {
+        guard isSuspended else { return }
+        isSuspended = false
+        applyRadioState()
+        for device in devices { connect(device) }
     }
 }
 
@@ -97,19 +163,8 @@ extension SophonHub: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         let state = central.state
         Task { @MainActor in
-            switch state {
-            case .poweredOn:
-                self.startScan()
-            case .poweredOff:
-                self.radio = .poweredOff
-            case .unauthorized:
-                self.radio = .unauthorized
-            case .unsupported:
-                // Also the simulator, which has no Core Bluetooth hardware.
-                self.radio = .unsupported
-            default:
-                self.radio = .unknown
-            }
+            self.managerState = state
+            self.applyRadioState()
         }
     }
 
@@ -127,6 +182,12 @@ extension SophonHub: CBCentralManagerDelegate {
             let device: SophonDevice
             if let known = self.byID[peripheral.identifier] {
                 device = known
+                // Only overwrite when a name was actually advertised. This
+                // matters more since the simulator: iOS strips the local name
+                // from advertisements while the app is backgrounded, so a
+                // backgrounded Sophon keeps re-advertising with no name, and
+                // clobbering the good one would rename it to the phone's own
+                // device name mid-session.
                 if let advertisedName { device.displayName = advertisedName }
             } else {
                 device = SophonDevice(peripheral: peripheral, advertisedName: advertisedName)
@@ -186,6 +247,12 @@ extension SophonHub: CBCentralManagerDelegate {
             device.state = .disconnected(reason: reason)
             self.log.info("disconnected \(device.displayName, privacy: .public)")
             self.statsCharacteristics[peripheral.identifier] = nil
+
+            // Do not re-arm a link that was dropped on purpose. Without this,
+            // suspend()'s cancels each bounce straight back into a connect() and
+            // the phone reacquires the board's only connection slot while it is
+            // supposed to be impersonating one.
+            guard !self.isSuspended else { return }
 
             // Re-arm. The scan is still running, so walking back into range
             // rediscovers and reconnects without a relaunch.
