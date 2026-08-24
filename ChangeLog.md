@@ -2,6 +2,13 @@
 
 ## 2026-08-24
 
+### docs: correct the iOS ATT MTU ceiling (issue #211, #226)
+
+- The planning documents put iOS's ATT MTU negotiation ceiling at **185 bytes**, from published findings that predate current iOS. Measured on an iOS-to-iOS link — the #226 simulator advertising to the viewer — it negotiated **~515**. The board never reveals iOS's offer because Zephyr's 23 wins the `min()`, which is why this stood uncorrected until a second iOS device was on the other end.
+- `PROTOCOL.md` now states the measured figure in the simulator-divergence table and flags the stale one in *Designed scaling path*. `UPDATED-PLAN.md` is **annotated rather than rewritten**: every figure derived from 185 — the ⌊182 / 18⌋ = 10 samples per PDU, the fragmentation counts, the "iOS is the real ceiling" claim — needs re-deriving before #211 acts on it, and re-deriving an analysis from one observation would trade a known wrong number for unverified new ones.
+- The conclusion those figures supported is unaffected, and in fact strengthened: the ATT MTU was never the binding constraint. A link-layer payload is at most 251 bytes even with DLE, so a large ATT PDU still fragments and raising the MTU without raising DLE returns a fraction of the benefit. A bigger MTU widens the gap between ATT capacity and link-layer capacity rather than closing it.
+- `ORIGINAL-PLAN.md` and `SIMULATOR-PLAN.md` are deliberately untouched — both are frozen records of what was approved, and the 185 in them is what was believed at the time.
+
 ### fix: report stream state rather than link state (issue #228)
 
 - The viewer kept showing **Connected** long after a peripheral had died. Core Bluetooth cannot know a peripheral is gone until its supervision timeout expires: measured against a SIGKILLed simulator, frames stopped instantly while the disconnect callback took a further **49 s**, and between two iOS devices on one Apple ID — where the system keeps its own links alive — it ran to minutes. `SophonDevice.linkStatus(asOf:)` now reports **`Connected · no data 12s`** in amber once nothing has arrived for #214's existing 5 s threshold. Amber, not red: the link genuinely is open, so red would be a lie and green a worse one. Deliberately **not** a synthesised disconnect — the radio is not wrong, and faking a close would destroy the transmit-counter baselines.

@@ -107,12 +107,32 @@ The MTU is negotiated as `min(central proposal, peripheral maximum)`:
 
 | | Value |
 |---|---|
-| iOS proposes (iOS 10+; 158 before) | 185 |
+| iOS proposes (iOS 10+; 158 before) | 185 — **stale, see below** |
 | Zephyr `CONFIG_BT_L2CAP_TX_MTU` default | **23** ← binding constraint |
 | Negotiated result | 23 |
 
-iOS asking for 185 buys nothing unless the peripheral's config is raised too.
-Staying at 23 is deliberate.
+iOS asking for more than 23 buys nothing unless the peripheral's config is raised
+too. Staying at 23 is deliberate, and that part is unaffected by what follows.
+
+> **Measured correction, 2026-08-24 (#226).** The 185 above comes from published
+> findings that predate current iOS, and it is **wrong for current iOS**. An
+> iOS-to-iOS link — the simulator advertising to the viewer — negotiated **~515**.
+> The board never reveals iOS's offer, because Zephyr's 23 wins the `min()`, which
+> is why this went unnoticed until a second iOS device was on the other end.
+>
+> **Every figure in this document derived from 185 needs re-deriving before #211
+> acts on it** — the ⌊182 / 18⌋ = 10 samples per PDU, the fragmentation counts, and
+> the "iOS is the real ceiling" claim in the Kconfig section.
+>
+> The *conclusion* those figures support is not in doubt: the ATT MTU was never
+> the binding constraint. A link-layer payload is at most 251 bytes even with DLE,
+> so a large ATT PDU still fragments and raising the MTU without DLE returns a
+> fraction of the benefit. That argument survives a bigger MTU intact — it gets
+> stronger, since the gap between ATT capacity and link-layer capacity widens.
+>
+> Left annotated rather than rewritten on purpose. Re-deriving an analysis from a
+> single observation, on a document that is the basis for #211, would trade a known
+> wrong number for an unverified set of new ones.
 
 #### No pairing — and why the 65-byte footnote exists
 

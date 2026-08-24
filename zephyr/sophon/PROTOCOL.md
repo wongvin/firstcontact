@@ -305,7 +305,7 @@ The simulator honours the parts of this document that matter — frame layout, t
 
 | | Board | Simulator |
 |---|---|---|
-| ATT MTU | 23, negotiated down | ~185 iPhone-to-iPad; Core Bluetooth exposes no control |
+| ATT MTU | 23, negotiated down | **~515 measured** iOS-to-iOS; Core Bluetooth exposes no control |
 | Connections | 1 (`CONFIG_BT_MAX_CONN=1`) | several; iOS has no equivalent limit |
 | `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
 | `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
@@ -338,8 +338,21 @@ misses in the opposite direction.
 
 The frame is fixed-size and sequence-numbered specifically so that batching is
 possible without a format change: send *k* × 18 bytes and the decoder splits on
-18-byte boundaries. That is a peripheral-side config change only — iOS already
-offers a 185-byte MTU at negotiation.
+18-byte boundaries. That is a peripheral-side config change only — iOS offers far
+more than the frame needs at negotiation.
+
+**Measured correction.** The planning documents put iOS's negotiation ceiling at
+**185 bytes**, taken from published findings that predate current iOS. An
+iOS-to-iOS link between the simulator and the viewer negotiated **~515**. So iOS
+is not the 185-byte ceiling those documents describe, and any figure derived from
+that number needs re-deriving rather than trusting.
+
+What does *not* change is the conclusion built on it: the ATT MTU was never the
+binding constraint. A link-layer payload is 251 bytes at most even with DLE, so a
+large ATT PDU still fragments across link-layer packets, and raising the MTU
+without raising DLE returns a fraction of the benefit. The reasoning stands; only
+the number was wrong. Read the real value off the app's ATT MTU row rather than
+assuming either figure.
 
 Batching is deliberately **not** done at N=1: it trades latency
 (`(k−1)/f`, i.e. ~58 ms at k=4 and 52 Hz) for connection-event occupancy, and at one
