@@ -2,6 +2,12 @@
 
 ## 2026-08-24
 
+### chore: install-only deploy mode (issue #226)
+
+- `scripts/deploy-device.sh --no-launch` installs and stops there. Install **is** the deployment; launching is only how the new code comes to run, because installing over a running app replaces the bundle while leaving the old process executing. Two reasons to want it: it does not kill a session in progress, so a device mid-measurement keeps running until you restart it deliberately; and install works on a **locked** device where launch is refused, which is what most of the `launch failed (is it unlocked?)` noise actually was. The run ends by stating plainly that the devices are still on the previous build, because the failure mode of install-only is silent — nothing on the device says it is stale.
+- Fixed two latent bugs in `--help`, both invisible until the header grew: the printed range was hardcoded to lines 2–32, so extending the usage block truncated the help instead of failing, and `BASH_SOURCE[0]` is relative while the script has already `cd`'d to the project directory, so `sed` could not find its own file. It now prints the leading comment block dynamically from an absolute path.
+- **Not verified on hardware** — the devices were off the network when this was written, so `--no-launch` passed a syntax check and a code read but was never run against a device.
+
 ### docs: a connected board is invisible, not busy (issue #226)
 
 - With two viewers and one board, the first to connect gets it and the second shows **nothing at all** — no greyed row, no "busy". A connected board stops advertising (`CONFIG_BT_MAX_CONN=1`, and `adv_work` restarts advertising only on disconnect), and a central cannot see a peripheral that is not advertising. There is no BLE signal distinguishing "taken" from "powered off", so no app-side change can invent one. Looks like a fault the first time it happens, which is why `PROTOCOL.md` now says so outright rather than leaving it implied by a table cell reading "1".

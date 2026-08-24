@@ -13,7 +13,22 @@
 #   ios/Sophon/scripts/deploy-device.sh              # one device connected
 #   ios/Sophon/scripts/deploy-device.sh iPad         # pick by substring
 #   ios/Sophon/scripts/deploy-device.sh --all        # every usable device
+#   ios/Sophon/scripts/deploy-device.sh --no-launch  # install only, do not restart
 #   SOPHON_DEVICE=iPhone ios/Sophon/scripts/deploy-device.sh
+#
+# --no-launch installs and stops there. Install IS the deployment; launching is
+# only how the new code gets to run, because installing over a running app
+# replaces the bundle while leaving the old process executing. Two reasons to
+# want it:
+#
+#   - it does not kill a session in progress, so a device mid-measurement keeps
+#     running the old build until you restart it yourself;
+#   - install works on a LOCKED device, whereas launch is refused. Most of the
+#     "launch failed (is it unlocked?)" noise is this, and with --no-launch it
+#     stops being a warning about something you did not ask for.
+#
+# The cost is that nothing tells you the app is stale. Restart it by hand, or
+# re-run without the flag, before believing you are testing the new build.
 #
 # The selector exists because simulator mode needs two devices at once — an
 # iPhone advertising as a Sophon and an iPad viewing it — so "the connected
@@ -38,12 +53,25 @@ cd "$PROJECT_DIR"
 
 # --- 0. Parse the optional selector ------------------------------------------
 DEPLOY_ALL=0
+NO_LAUNCH=0
 FILTER="${SOPHON_DEVICE:-}"
 for arg in "$@"; do
   case "${arg}" in
     --all) DEPLOY_ALL=1 ;;
+    --no-launch) NO_LAUNCH=1 ;;
     -h|--help)
-      sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      # Two things that were wrong here, both only visible once the header grew:
+      #
+      #   - the range was hardcoded to lines 2-32, so extending the usage block
+      #     silently truncated the help rather than failing;
+      #   - BASH_SOURCE[0] is relative when invoked as ./deploy-device.sh, and
+      #     this script has already cd'd to PROJECT_DIR by now, so sed could not
+      #     find its own file.
+      #
+      # Printing the leading comment block dynamically, from an absolute path,
+      # cannot drift out of sync with the header.
+      awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' \
+        "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
       exit 0 ;;
     -*)
       echo "error: unknown option ${arg}" >&2
@@ -173,6 +201,11 @@ while IFS="$(printf '\t')" read -r DEVICE_ID NAME TUNNEL; do
     fi
   fi
 
+  if [ "${NO_LAUNCH}" -eq 1 ]; then
+    echo "    installed, not launched — restart the app to pick it up"
+    continue
+  fi
+
   echo "==> Launching ${BUNDLE_ID} on ${NAME}…"
   # --terminate-existing is not optional here. Installing over a RUNNING app
   # replaces the bundle on disk but leaves the old process executing, and a
@@ -186,7 +219,12 @@ while IFS="$(printf '\t')" read -r DEVICE_ID NAME TUNNEL; do
 done < "${DEVICE_TABLE}"
 
 if [ "${FAILED}" -eq 0 ]; then
-  echo "==> Done."
+  if [ "${NO_LAUNCH}" -eq 1 ]; then
+    echo "==> Done — installed only. The devices are still running the previous"
+    echo "    build until each app is restarted."
+  else
+    echo "==> Done."
+  fi
 else
   echo "==> Finished with warnings." >&2
   exit 1
