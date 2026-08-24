@@ -2,6 +2,11 @@
 
 ## 2026-08-24
 
+### docs: a connected board is invisible, not busy (issue #226)
+
+- With two viewers and one board, the first to connect gets it and the second shows **nothing at all** — no greyed row, no "busy". A connected board stops advertising (`CONFIG_BT_MAX_CONN=1`, and `adv_work` restarts advertising only on disconnect), and a central cannot see a peripheral that is not advertising. There is no BLE signal distinguishing "taken" from "powered off", so no app-side change can invent one. Looks like a fault the first time it happens, which is why `PROTOCOL.md` now says so outright rather than leaving it implied by a table cell reading "1".
+- Also records that the simulator behaves the **opposite** way — it serves several centrals at once — so a multi-device test mixing a board with simulators will not behave uniformly, and that inconsistency will look like a bug in whatever is being measured.
+
 ### docs: correct the iOS ATT MTU ceiling (issue #211, #226)
 
 - The planning documents put iOS's ATT MTU negotiation ceiling at **185 bytes**, from published findings that predate current iOS. Measured on an iOS-to-iOS link — the #226 simulator advertising to the viewer — it negotiated **~515**. The board never reveals iOS's offer because Zephyr's 23 wins the `min()`, which is why this stood uncorrected until a second iOS device was on the other end.

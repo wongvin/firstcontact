@@ -306,12 +306,24 @@ The simulator honours the parts of this document that matter — frame layout, t
 | | Board | Simulator |
 |---|---|---|
 | ATT MTU | 23, negotiated down | **~515 measured** iOS-to-iOS; Core Bluetooth exposes no control |
-| Connections | 1 (`CONFIG_BT_MAX_CONN=1`) | several; iOS has no equivalent limit |
+| Connections | 1 (`CONFIG_BT_MAX_CONN=1`), and **invisible while taken** | several, simultaneously; iOS has no equivalent limit |
 | `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
 | `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
 | Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
 | `t_ms` | since board boot | since simulator start |
 | Rate | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
+
+The connections row has a consequence worth stating outright, because it looks like
+a fault the first time it happens. **A connected board stops advertising**, and a
+central cannot see a peripheral that is not advertising. So with two viewers and one
+board, the first to connect gets it and the second shows *nothing at all* — not a
+greyed-out row, not "busy", nothing. There is no BLE signal to distinguish "taken"
+from "powered off", and no amount of app-side work can invent one.
+
+Advertising restarts only on disconnect (`adv_work` in `ble.c`), so releasing the
+board means disconnecting the holder, or closing the app on it. Note the simulator
+behaves the *opposite* way and will happily serve both viewers at once, so a
+multi-device test that mixes a board with simulators will not behave uniformly.
 
 The MTU row is the one that matters most for #211: **the "one sample is exactly
 one radio packet" property that shaped this format does not hold between two iOS
