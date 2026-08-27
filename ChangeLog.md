@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-27
+
+### docs: root README covers all five projects
+
+- The root README described `web/` as the homepage — a target retired in #88 and since deleted — and pointed at `web/TEST-PLAN.md`, which no longer exists. It called `ios/` a single app, and omitted `webapp/`, `zephyr/`, `api/` and `postman/` entirely: four of the five projects in the repo.
+- Now describes each: the Vercel-hosted Next.js app, the two iOS apps (FirstContact, and Sophon's viewer plus simulator), the Zephyr firmware, the deliberately local-only FastAPI backend, and the Postman collections. Every relative link verified to resolve.
+- Calls out the two things least guessable from the layout: that **Sophon spans `zephyr/sophon/` and `ios/Sophon/` as one logical project** with one issue and one branch per change, and that **`api/` is never deployed** — the webapp degrades without it. Keeps a short note that `web/` was retired and superseded, since stale links to it exist elsewhere.
+
 ## 2026-08-24
 
 ### chore: install-only deploy mode (issue #226)
