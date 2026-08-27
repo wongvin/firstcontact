@@ -2,6 +2,13 @@
 
 ## 2026-08-27
 
+### docs: ios README highlights the technologies used
+
+- `ios/README.md` still described a single app "in early development" and claimed **no third-party dependencies**. Both were false: there are two apps, and FirstContact depends on `google/generative-ai-swift` via SPM for the 30-day summary panel.
+- Now maps each framework to the app that uses it and to *what for*, taken from the imports rather than from memory: Core Bluetooth in both roles, Core Motion, Core Location **used as a keep-alive rather than for location**, Multipeer Connectivity, CryptoKit, Combine, WebKit, `os.Logger`, Observation with `@ObservationIgnored` on hot state.
+- Documents the concurrency shape, since `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` drives more of the code than it appears to — including why `Task { @MainActor }` and `MainActor.assumeIsolated` are not interchangeable: `CBService`, `CBCharacteristic` and `CBATTRequest` are not `Sendable` and cannot cross an isolation boundary at all.
+- Records that neither project has a test target, so a simulator screenshot and a physical-device run are the actual gates, and that Sophon's wire format is checked at launch against byte vectors from `PROTOCOL.md` rather than round-tripped through its own decoder.
+
 ### docs: root README covers all five projects
 
 - The root README described `web/` as the homepage — a target retired in #88 and since deleted — and pointed at `web/TEST-PLAN.md`, which no longer exists. It called `ios/` a single app, and omitted `webapp/`, `zephyr/`, `api/` and `postman/` entirely: four of the five projects in the repo.
