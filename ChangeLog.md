@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-29
+
+### feat: advertise device type, versions and TX power (#230)
+
+- A Sophon board now says what it is **before you connect**: device type, a scan-response structure version, hardware and firmware versions in one Manufacturer Specific Data structure, plus TX power as the standard AD type. Scan response goes from 13 to **26 of 31 bytes**; the advertisement is untouched.
+- One structure rather than two. An earlier design split it across both packets, which would have put two manufacturer-data structures with the same company ID on the air — `CBAdvertisementDataManufacturerDataKey` is a single `Data`, and nothing in the SDK defines what a central does with that.
+- `company_id` is first because the Core Spec Supplement requires it, not by choice. `0xFFFF` reads the same in either byte order so it cannot catch an endianness mistake; device type (`0x0001` → `01 00`) is the field that can, and the self-check asserts exactly that.
+- Firmware version comes from a new `zephyr/sophon/VERSION` via Zephyr's standard `APP_VERSION_MAJOR`/`_MINOR`; `CMakeLists.txt` needs no change for it, since the mechanism keys off the file existing. Hardware version stays a hand-maintained constant — nothing on the board can read its own revision.
+- Boot banner now prints the version and a **generated** build timestamp. Not `__DATE__`/`__TIME__`: those record when one translation unit was compiled, so an incremental build that misses that file would claim you had not flashed the new build when you had.
+- Scan-response size is bounded by a `BUILD_ASSERT` using Zephyr's own `BT_DATA_SERIALIZED_SIZE()` and `BT_GAP_ADV_MAX_ADV_DATA_LEN`, and the actual on-air size is logged via `bt_data_get_len()` — turning what was a bare `-EINVAL` into a build failure and a number.
+- App parses the structure and TX power **before** the `@MainActor` hop, since `[String: Any]` is not `Sendable`, and latches both so an advertisement without them cannot blank a good value. Both are excluded from `resetLinkStats()`: their lifetime is the advertisement, not the session.
+- The parser requires a **minimum** length, not an exact one, so the firmware's append-only rule does not become a parse failure the first time a field is appended.
+- Detail view shows Hardware, Firmware and TX power **unconditionally**, reading `Not reported` when absent and not styled as a fault — an iOS peripheral cannot advertise manufacturer data at all, so every simulator reads that way permanently. Connection policy therefore fails open: an absent or unrecognised device type still connects.
+- `zephyr/sophon/SCAN-RESPONSE-PLAN.md` records the approved design, including the alternatives that were rejected and do not survive in the diff — the two-structure split, broadcasting the FICR chip ID, extended advertising, and deriving the firmware version from `git describe`.
+- **Transmit power drops from 0 to −4 dBm** (`prj.conf`), so each board stops shouting across the whole 2.4 GHz band — which matters once #211 puts several in one room.
+- The value was picked by **measurement, not arithmetic**, over three flash-and-observe rounds: −16 dBm lost frames beyond ~1 m, −8 dBm still lost them at desk range in line of sight, −4 dBm is clean. A free-space link budget had predicted ~8–10 m at −16 dBm — wrong by about an order of magnitude, and it then over-predicted −8 dBm too, so `prj.conf` no longer derives distances at all. It records the measured series and presents the per-step figures as an *ordering*.
+- `prj.conf` also records that **0 dBm is the validated baseline** — every prior Sophon measurement, including the 84,000-frame runs in #209 and all of #226/#228, was taken there — so anyone tempted to lower this further knows what they are departing from.
+- `prj.conf` now lists the nRF52840's **native** power steps and warns off the rest. Kconfig offers levels (−1, −2, −3, −9 …) that this SoC does not have: `hal_radio_tx_power_value()` rounds down to a real step while `CONFIG_BT_CTLR_TX_PWR_DBM` keeps the requested number — and that requested number is what we advertise. Picking −1 would transmit −4 and advertise −1, and since centrals estimate distance as `TX power − RSSI`, the error would propagate to every scanner. An earlier draft of this work claimed the advertised value simply "cannot drift"; it cannot only for native steps, and the code and `PROTOCOL.md` now say so.
+- `PROTOCOL.md` documents the layout, the append-only rule, and a new simulator-divergence row for the manufacturer data.
+
 ## 2026-08-27
 
 ### docs: ios README highlights the technologies used

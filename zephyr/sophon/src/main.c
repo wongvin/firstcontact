@@ -16,9 +16,12 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include <sophon_build_time.h>
+
 #include "ble.h"
 #include "frame.h"
 #include "imu.h"
+#include "version.h"
 
 LOG_MODULE_REGISTER(sophon, LOG_LEVEL_INF);
 
@@ -277,7 +280,14 @@ int main(void)
 	uint32_t tick = 0;
 	int err;
 
-	LOG_INF("Sophon starting");
+	/*
+	 * Firmware version is hand-maintained in zephyr/sophon/VERSION, so print
+	 * it where it will actually be read. The build time answers the separate
+	 * question the version cannot -- is this the build I just flashed -- and
+	 * unlike the version it cannot be forgotten.
+	 */
+	LOG_INF("Sophon starting -- fw %s, hw %u, built %s", APP_VERSION_STRING,
+		SOPHON_HW_VERSION, SOPHON_BUILD_TIME);
 
 	(void)led_init();
 

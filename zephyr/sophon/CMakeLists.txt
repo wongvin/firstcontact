@@ -30,3 +30,27 @@ target_sources(app PRIVATE
   src/ident.c
   src/imu.c
 )
+
+# Build timestamp, regenerated on every build.
+#
+# The second OUTPUT below is a file the command never creates, which is the
+# standard way to force a custom command to re-run each time. Without it the
+# timestamp would only move when something else triggered a rebuild of this
+# rule, which is exactly the staleness the generator exists to avoid.
+#
+# Own directory rather than Zephyr's generated one: in this file
+# PROJECT_BINARY_DIR is the build root, while Zephyr's headers land under
+# build/zephyr/include/generated -- a distinction that is easy to get wrong and
+# fails only at compile time.
+set(SOPHON_GEN_DIR ${PROJECT_BINARY_DIR}/sophon_generated)
+set(SOPHON_BUILD_TIME_H ${SOPHON_GEN_DIR}/sophon_build_time.h)
+
+add_custom_command(
+  OUTPUT ${SOPHON_BUILD_TIME_H} sophon_build_time_always
+  COMMAND ${CMAKE_COMMAND} -DOUT_FILE=${SOPHON_BUILD_TIME_H}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_build_time.cmake
+  COMMENT "Generating Sophon build timestamp"
+)
+add_custom_target(sophon_build_time DEPENDS ${SOPHON_BUILD_TIME_H})
+add_dependencies(app sophon_build_time)
+target_include_directories(app PRIVATE ${SOPHON_GEN_DIR})

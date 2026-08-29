@@ -31,6 +31,22 @@ final class SophonDevice: Identifiable {
     var state: State = .discovered
     var rssi: Int?
 
+    /// What the peripheral advertises about itself, or nil if never observed.
+    ///
+    /// Nil is **normal**, not a fault: an iOS peripheral cannot advertise
+    /// manufacturer data at all, so every simulator reads this way permanently,
+    /// as does any board not yet reflashed. Display-only — nothing may branch on
+    /// it, least of all whether to connect.
+    ///
+    /// Deliberately absent from `resetLinkStats()`: its lifetime is the
+    /// advertisement, not the session. `attMTU` below records what happens when
+    /// that distinction is missed, and there the reset at least had
+    /// `beginSession()` to recover the value.
+    var identity: SophonIdentity?
+
+    /// Advertised TX power in dBm, from the standard AD type. Signed.
+    var txPower: Int?
+
     // Link health. These are in the skeleton rather than deferred because they
     // are what turn "does it still work with 4 boards?" into an observation
     // instead of a guess (#211).
