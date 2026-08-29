@@ -184,6 +184,17 @@ extension SophonHub: CBCentralManagerDelegate {
         let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
         let rssi = RSSI.intValue
 
+        // Read and parse everything out of the dictionary HERE: [String: Any] is
+        // not Sendable, so it cannot cross into the Task below.
+        //
+        // Core Bluetooth hands back the whole manufacturer-data structure,
+        // company ID included, which is what SophonIdentity expects.
+        let identity = (advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data)
+            .flatMap(SophonIdentity.init)
+
+        // Signed dBm. Reading this as unsigned would render -8 as 248.
+        let txPower = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
+
         Task { @MainActor in
             let device: SophonDevice
             if let known = self.byID[peripheral.identifier] {
@@ -201,6 +212,13 @@ extension SophonHub: CBCentralManagerDelegate {
                 self.devices.append(device)
                 self.log.info("discovered \(device.displayName, privacy: .public)")
             }
+
+            // Latch both, for the same reason the name is latched above: a
+            // callback that carried no scan response must not blank a good value.
+            // Feeding the update path only would miss the common case, where the
+            // create above is the only callback we ever get for a device.
+            if let identity { device.identity = identity }
+            if let txPower { device.txPower = txPower }
 
             // 127 is Core Bluetooth's "not available" sentinel, not a real reading.
             device.rssi = rssi == 127 ? nil : rssi

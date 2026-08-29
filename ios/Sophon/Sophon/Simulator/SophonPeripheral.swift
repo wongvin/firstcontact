@@ -298,6 +298,13 @@ private extension SophonPeripheral {
         // advertisement because the viewer's scan is filtered on it; iOS decides
         // for itself whether the name travels in the advertisement or the scan
         // response, and there is no API to influence that.
+        //
+        // In particular there is NO way to advertise manufacturer data from an
+        // iOS peripheral, so a simulated Sophon can never carry the device type,
+        // versions or TX power that the board advertises (#230) — the viewer
+        // shows "Not reported" for all of them, permanently and correctly.
+        // Do not try to "fix" this by adding CBAdvertisementDataManufacturerDataKey:
+        // it is not a supported key and iOS silently ignores it.
         peripheral.startAdvertising([
             CBAdvertisementDataLocalNameKey: advertisedName,
             CBAdvertisementDataServiceUUIDsKey: [SophonProtocol.serviceUUID],

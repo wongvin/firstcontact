@@ -22,6 +22,85 @@ nonisolated enum SophonProtocol {
     /// notification would spend connection-event budget, which is the resource
     /// #211 is trying to measure.
     static let statsCharacteristicUUID = CBUUID(string: "C6560003-84D5-4DC2-8C1E-4B4EB2337CE4")
+
+    /// Manufacturer Specific Data company ID, mirroring `SOPHON_COMPANY_ID` in
+    /// `zephyr/sophon/src/version.h`.
+    ///
+    /// `0xFFFF` is reserved for internal/test use, which is what applies without
+    /// SIG membership. It is **not** exclusive, so matching it is a label check,
+    /// not proof the peripheral is a Sophon — the service UUID does that, and the
+    /// scan is already filtered on it.
+    static let companyID: UInt16 = 0xFFFF
+
+    /// The scan-response layout this build knows, mirroring
+    /// `SOPHON_SCAN_RSP_VERSION`. An unrecognised value is still parsed: fields
+    /// are append-only and never reordered, so the offsets below stay valid.
+    static let knownScanRspVersion: UInt8 = 0x01
+
+    /// Mirrors `SOPHON_DEVICE_TYPE`. Display-only — see `SophonIdentity`.
+    static let knownDeviceType: UInt16 = 0x0001
+}
+
+/// What a Sophon says about itself before you connect.
+///
+/// Parsed from `CBAdvertisementDataManufacturerDataKey`. Mirrors
+/// `struct sophon_mfg_data` in `zephyr/sophon/src/version.h`; any change there
+/// needs the same change here.
+///
+/// Every field is **display-only**. Nothing branches on them — in particular,
+/// connection policy must not, because an iOS peripheral cannot advertise
+/// manufacturer data at all, so the simulator never has any of this.
+nonisolated struct SophonIdentity: Equatable, Sendable {
+    /// Minimum, not exact. Trailing bytes are ignored so that appending a field
+    /// firmware-side does not turn into a parse failure here.
+    static let minWireSize = 8
+
+    let scanRspVersion: UInt8
+    let deviceType: UInt16
+    let hardwareVersion: UInt8
+    let firmwareMajor: UInt8
+    let firmwareMinor: UInt8
+
+    var firmwareVersion: String { "\(firmwareMajor).\(firmwareMinor)" }
+
+    /// True when both the structure layout and the device type are ones this
+    /// build knows. Surfaced to the user only when false.
+    var isFullyRecognised: Bool {
+        scanRspVersion == SophonProtocol.knownScanRspVersion
+            && deviceType == SophonProtocol.knownDeviceType
+    }
+
+    /// - Parameter data: the **whole** manufacturer-data structure, company ID
+    ///   included. That is what Core Bluetooth hands back; note `bleak` and some
+    ///   other stacks strip the company ID into a dictionary key instead, so byte
+    ///   offsets quoted elsewhere may be two lower.
+    init?(_ data: Data) {
+        guard data.count >= Self.minWireSize else { return nil }
+
+        var bytes = [UInt8](repeating: 0, count: Self.minWireSize)
+        data.copyBytes(to: &bytes, count: Self.minWireSize)
+
+        func u16(_ offset: Int) -> UInt16 {
+            UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+        }
+
+        guard u16(0) == SophonProtocol.companyID else { return nil }
+
+        scanRspVersion = bytes[2]
+        deviceType = u16(3)
+        hardwareVersion = bytes[5]
+        firmwareMajor = bytes[6]
+        firmwareMinor = bytes[7]
+    }
+
+    init(scanRspVersion: UInt8, deviceType: UInt16, hardwareVersion: UInt8,
+         firmwareMajor: UInt8, firmwareMinor: UInt8) {
+        self.scanRspVersion = scanRspVersion
+        self.deviceType = deviceType
+        self.hardwareVersion = hardwareVersion
+        self.firmwareMajor = firmwareMajor
+        self.firmwareMinor = firmwareMinor
+    }
 }
 
 /// The peripheral's transmit outcome counters, cumulative since its boot.
@@ -253,6 +332,7 @@ nonisolated enum SophonProtocolSelfCheck {
     static func run() {
         checkMotionFrame()
         checkTxStats()
+        checkIdentity()
     }
 
     private static func checkMotionFrame() {
@@ -315,6 +395,45 @@ nonisolated enum SophonProtocolSelfCheck {
                "TxStats wire layout disagrees with PROTOCOL.md")
         assert(TxStats(expected) == stats,
                "TxStats does not decode its own PROTOCOL.md byte vector")
+    }
+
+    private static func checkIdentity() {
+        // Written out from the offset table, not produced by an encoder: this
+        // type is decode-only, so there is no round trip available even if one
+        // were wanted.
+        let wire = Data([
+            0xFF, 0xFF, // company ID   @0
+            0x01,       // scan rsp ver @2
+            0x01, 0x00, // device type  @3, little-endian
+            0x01,       // hw version   @5
+            0x02,       // fw major     @6
+            0x00,       // fw minor     @7
+        ])
+
+        guard let identity = SophonIdentity(wire) else {
+            assertionFailure("SophonIdentity failed to decode its PROTOCOL.md byte vector")
+            return
+        }
+
+        // The device-type bytes are the only asymmetric field in the structure,
+        // so they are the only ones that can catch a byte-order mistake — 0xFFFF
+        // reads the same either way round.
+        assert(identity.deviceType == SophonProtocol.knownDeviceType,
+               "device type decoded byte-swapped: expected 0x0001 from 01 00")
+        assert(identity.scanRspVersion == SophonProtocol.knownScanRspVersion)
+        assert(identity.hardwareVersion == 1)
+        assert(identity.firmwareVersion == "2.0")
+        assert(identity.isFullyRecognised)
+
+        // Trailing bytes must be tolerated, or the firmware's append-only rule
+        // becomes a parse failure the first time anything is appended.
+        assert(SophonIdentity(wire + Data([0xAB, 0xCD])) == identity,
+               "SophonIdentity must ignore trailing bytes, not reject them")
+
+        // A short structure and a foreign company ID are both refusals.
+        assert(SophonIdentity(wire.prefix(7)) == nil)
+        assert(SophonIdentity(Data([0xF1, 0x05]) + wire.dropFirst(2)) == nil,
+               "manufacturer data from another company must not be parsed as ours")
     }
 }
 #endif

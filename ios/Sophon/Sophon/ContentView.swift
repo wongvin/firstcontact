@@ -195,6 +195,11 @@ private struct DeviceDetailView: View {
     let device: SophonDevice
     let onRefresh: () -> Void
 
+    /// What the app knows it observed — not a claim about the peripheral. Worded
+    /// so it does not read as a fault, because for every simulator it is
+    /// permanent and correct.
+    static let notReported = "Not reported"
+
     /// Regular width gets two columns; compact keeps the single list.
     ///
     /// Keyed off the size class rather than the device model, so an iPad in a
@@ -277,11 +282,30 @@ private struct DeviceDetailView: View {
             if let mtu = device.attMTU {
                 LabeledContent("ATT MTU", value: "~\(mtu)")
             }
+
+            // Shown unconditionally, unlike RSSI and ATT MTU above: absence is
+            // itself the answer here — this peripheral does not advertise who it
+            // is — and a row that vanishes cannot say that. Same argument the
+            // frames section already makes for showing zero.
+            LabeledContent("Hardware", value: device.identity.map { "rev \($0.hardwareVersion)" }
+                ?? Self.notReported)
+            LabeledContent("Firmware", value: device.identity?.firmwareVersion ?? Self.notReported)
+            LabeledContent("TX power", value: device.txPower.map { "\($0) dBm" } ?? Self.notReported)
+
+            // Only when unrecognised. Surfacing a version the app already knows
+            // would be noise on every screen, every session.
+            if let identity = device.identity, !identity.isFullyRecognised {
+                LabeledContent("Scan response", value: "v\(identity.scanRspVersion), type \(identity.deviceType)")
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text("Link")
         } footer: {
             if case .stalled = device.linkStatus() {
                 Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
+            }
+            if device.identity == nil {
+                Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon never reports these — nor does a board running firmware older than #230.")
             }
         }
     }

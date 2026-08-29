@@ -261,19 +261,103 @@ ample for a handful of boards; it is not a collision-proof identifier.
 
 ## Advertising layout
 
-Legacy advertising carries 31 bytes per packet. Flags + the 128-bit service UUID +
-the name is 34 bytes, so the name moves to the scan response:
+The advertisement and the scan response are **separate** 31-byte budgets, not one
+shared pool. Every field costs 1 length byte + 1 type byte before its payload.
+Flags + the 128-bit service UUID + the name is 34 bytes, so the name moves to the
+scan response, which is also where everything a central can learn *without
+connecting* now lives:
 
 ```
-Advertisement (21 B of 31)        Scan response (13 B of 31)
-  Flags                    3 B      Complete Local Name   2 + 11 B
-  128-bit service UUID    18 B
+Advertisement (21 B of 31)        Scan response (26 B of 31)
+  Flags                    3 B      Complete Local Name    2 + 11 B
+  128-bit service UUID    18 B      TX Power               2 +  1 B
+                                    Manufacturer Data      2 +  8 B
+                                      Company ID       0xFFFF  2 B
+                                      Scan rsp version   0x01  1 B
+                                      Device type      0x0001  2 B
+                                      HW version         0x01  1 B
+                                      FW version major   0x02  1 B
+                                      FW version minor   0x00  1 B
 ```
 
-iOS active-scans by default, so `CBAdvertisementDataLocalNameKey` and
-`peripheral.name` both populate normally. The scan response's remaining 18 bytes
-are unused — see UPDATED-PLAN.md for what could go there and why none of it is in
-the skeleton.
+iOS active-scans by default, so `CBAdvertisementDataLocalNameKey`,
+`CBAdvertisementDataManufacturerDataKey` and `CBAdvertisementDataTxPowerLevelKey`
+all populate before connecting. 5 bytes remain.
+
+The name row is its longest form. On the `hwinfo` fallback path the name is plain
+`Sophon`, 5 bytes shorter, putting the scan response at 21 of 31.
+
+### Manufacturer Specific Data
+
+Company ID `0xFFFF` is the value reserved for internal/test use, which is what
+applies without SIG membership. It is **not exclusive** — anyone may use it — so
+matching it labels the payload, it does not identify the peripheral. The service
+UUID does that.
+
+`company_id` is first because the Core Spec Supplement defines AD type `0xFF` that
+way: *the first 2 octets contain the Company Identifier, followed by additional
+manufacturer specific data*. Note that Core Bluetooth returns the whole structure
+including those 2 bytes, while `bleak` and some other stacks strip them into a
+dictionary key — so the same wire bytes appear as 8 on iOS and 6 there.
+
+`0xFFFF` reads the same in either byte order, so it can never catch an endianness
+mistake. **Device type is the field that can**: `0x0001` must appear on air as
+`01 00`.
+
+### The version byte versions this structure only
+
+Not the GATT contract, not the 18-byte frame. A byte claiming to version
+everything would have to be bumped for changes it cannot describe.
+
+**Fields are append-only and never reordered.** Parsers read the offsets they know
+and ignore trailing bytes, so appending needs no bump — only changing the meaning
+of an existing field does. That also makes an unrecognised version safe to parse,
+since the known offsets still hold, so the app parses regardless and surfaces the
+version rather than refusing.
+
+The frame contract still has no version anywhere on the wire; see #231.
+
+### Versions are display-only, and two of them can go stale
+
+`SOPHON_HW_VERSION` is hand-maintained — nothing on the board can read its own
+revision. The firmware version comes from `zephyr/sophon/VERSION` via Zephyr's
+`APP_VERSION_MAJOR`/`_MINOR`, which is also a hand edit. Both are therefore
+display-only: nothing branches on them, so a stale value misinforms rather than
+misbehaves. The boot banner prints the version and a generated build timestamp so
+staleness is visible on the console, where it will actually be read.
+
+TX power is built from `CONFIG_BT_CTLR_TX_PWR_DBM`, the same symbol that sets the
+radio, and currently reads **−4 dBm**, chosen in `prj.conf` by measurement rather
+than by calculation: −16 dBm lost frames beyond ~1 m and −8 dBm still lost them at
+desk range in line of sight. A free-space link budget had predicted ~8–10 m at
+−16 dBm, wrong by about an order of magnitude. The XIAO's chip antenna,
+the board lying on a desk, and 2.4 GHz congestion all cost more than the arithmetic
+allows for. It
+uses the standard AD type rather than a byte of ours so iOS fills
+`CBAdvertisementDataTxPowerLevelKey` for free. Zephyr cannot insert it
+automatically here — `BT_LE_ADV_OPT_USE_TX_POWER` requires extended advertising,
+and Sophon uses legacy.
+
+That coupling holds **only for TX power levels the radio actually has**. The
+nRF52840's steps are +8, +7, +6, +5, +4, +3, +2, 0, −4, −8, −12, −16, −20, −40 dBm;
+`hal_radio_tx_power_value()` rounds down to one of those while
+`CONFIG_BT_CTLR_TX_PWR_DBM` keeps the number that was asked for. Selecting −1 dBm
+therefore transmits at −4 while advertising −1. Since a central estimates distance
+as `TX power − RSSI`, that error propagates into every scanner's distance
+estimate. `prj.conf` lists the native steps for this reason.
+
+### Connection policy must fail open
+
+An absent or unrecognised device type means **connect anyway**. The decisive case
+is the simulator: an iOS peripheral cannot advertise manufacturer data at all
+(next section), so a simulated Sophon has no device type, ever, and any policy
+requiring one would refuse every simulator. Boards not yet reflashed are the same.
+
+Little is lost, because the scan is already filtered on the Sophon service UUID —
+the field's real use is telling *variants* apart once more than one exists. Note
+this rule is the **opposite** of #231's, deliberately: showing wrong motion as
+good is worse than showing none, while hiding a working board is worse than
+showing it unlabelled.
 
 ## Security
 
@@ -310,6 +394,7 @@ The simulator honours the parts of this document that matter — frame layout, t
 | `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
 | `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
 | Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
+| Scan-response identity | device type, versions, TX power | **none of it — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
 | `t_ms` | since board boot | since simulator start |
 | Rate | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
 

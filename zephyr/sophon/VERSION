@@ -1,0 +1,10 @@
+# Sophon firmware version. Bump the minor for each build you flash; bump the
+# major and zero the minor when cutting a sophon-fw-vN tag.
+#
+# Advertised over BLE as two bytes -- see src/version.h. Keep both within
+# 0-255; version.cmake fails the build above that.
+VERSION_MAJOR = 2
+VERSION_MINOR = 0
+PATCHLEVEL = 0
+VERSION_TWEAK = 0
+EXTRAVERSION =

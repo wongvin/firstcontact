@@ -8,8 +8,11 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 
+#include <sophon_build_time.h>
+
 #include "ble.h"
 #include "ident.h"
+#include "version.h"
 
 LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
 
@@ -84,19 +87,81 @@ BT_GATT_SERVICE_DEFINE(sophon_svc,
 );
 
 /*
- * Advertisement carries flags + the 128-bit service UUID = 21 B. The name does
- * NOT fit alongside it (3 + 18 + 13 = 34 > 31), so it goes in the scan response.
- * Getting this wrong surfaces only as a bare -EINVAL from bt_le_adv_start().
+ * The advertisement and the scan response are SEPARATE 31-byte budgets, not one
+ * shared pool. Every field costs 1 length byte + 1 type byte before its payload
+ * (Zephyr calls that sum BT_DATA_SERIALIZED_SIZE).
+ *
+ * Advertisement -- 21 of 31, 10 spare:
+ *   flags                 1+1+1  =  3 B
+ *   128-bit service UUID  1+1+16 = 18 B
+ *
+ * The name does not fit alongside the UUID here (3 + 18 + 13 = 34 > 31), which
+ * is why it lives in the scan response with everything else. Getting either
+ * budget wrong surfaces only as a bare -EINVAL from bt_le_adv_start(), so the
+ * scan response is bounded by a BUILD_ASSERT below.
  */
 static const struct bt_data adv_data[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SOPHON_UUID_SERVICE),
 };
 
+/*
+ * Who we are, readable before connecting. One structure rather than two: a
+ * second one with the same company ID has undefined merge behaviour on iOS,
+ * which exposes a single CBAdvertisementDataManufacturerDataKey.
+ */
+static const struct sophon_mfg_data mfg_data = {
+	.company_id       = SOPHON_COMPANY_ID,
+	.scan_rsp_version = SOPHON_SCAN_RSP_VERSION,
+	.device_type      = SOPHON_DEVICE_TYPE,
+	.hw_version       = SOPHON_HW_VERSION,
+	.fw_version_major = SOPHON_FW_VERSION_MAJOR,
+	.fw_version_minor = SOPHON_FW_VERSION_MINOR,
+};
+
+/*
+ * Scan response -- 26 of 31, 5 spare:
+ *   complete local name   1+1+11 = 13 B   worst case, "Sophon-4D88"
+ *   TX power              1+1+1  =  3 B
+ *   manufacturer data     1+1+8  = 10 B
+ *
+ * Bound the worst case at compile time. The name is the only runtime-sized
+ * entry and SOPHON_NAME_MAX - 1 is its longest form, so this is exact rather
+ * than approximate. Note sizeof(scan_rsp) would NOT work: struct bt_data holds
+ * {type, data_len, *data}, so it measures descriptors, not on-air bytes.
+ */
+BUILD_ASSERT(BT_DATA_SERIALIZED_SIZE(SOPHON_NAME_MAX - 1) +
+		     BT_DATA_SERIALIZED_SIZE(1) +
+		     BT_DATA_SERIALIZED_SIZE(sizeof(struct sophon_mfg_data)) <=
+	     BT_GAP_ADV_MAX_ADV_DATA_LEN,
+	     "Sophon scan response exceeds the legacy 31-byte limit");
+
 static int start_advertising(void)
 {
+	/*
+	 * Function-local rather than static const like adv_data[], because the
+	 * name entry's length is only known at runtime.
+	 *
+	 * Do NOT replace strlen() with 11: the name is 6 bytes on the hwinfo
+	 * fallback path (see ident.c), and a hardcoded 11 would broadcast the
+	 * terminator plus 4 bytes of uninitialised buffer.
+	 *
+	 * TX power is the standard AD type rather than a byte of ours, because
+	 * iOS then fills CBAdvertisementDataTxPowerLevelKey for free. Zephyr
+	 * cannot insert it automatically here -- BT_LE_ADV_OPT_USE_TX_POWER
+	 * requires extended advertising, and this is legacy.
+	 *
+	 * It comes from the same Kconfig that sets the radio, which keeps the two
+	 * in step only as long as the configured value is one the radio actually
+	 * has. hal_radio_tx_power_value() rounds DOWN to a native step while this
+	 * symbol keeps the requested number, so a non-native choice would put a
+	 * value on the air that the radio never transmits. prj.conf lists the
+	 * native steps and says so.
+	 */
 	const struct bt_data scan_rsp[] = {
 		BT_DATA(BT_DATA_NAME_COMPLETE, device_name, strlen(device_name)),
+		BT_DATA_BYTES(BT_DATA_TX_POWER, CONFIG_BT_CTLR_TX_PWR_DBM),
+		BT_DATA(BT_DATA_MANUFACTURER_DATA, &mfg_data, sizeof(mfg_data)),
 	};
 	int err;
 
@@ -109,7 +174,9 @@ static int start_advertising(void)
 		return err;
 	}
 
-	LOG_INF("advertising as %s", device_name);
+	LOG_INF("advertising as %s (scan rsp %zu B of %d)", device_name,
+		bt_data_get_len(scan_rsp, ARRAY_SIZE(scan_rsp)),
+		BT_GAP_ADV_MAX_ADV_DATA_LEN);
 	return 0;
 }
 
