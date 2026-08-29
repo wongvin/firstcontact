@@ -78,6 +78,28 @@ final class SophonHub: NSObject {
         central.cancelPeripheralConnection(device.peripheral)
     }
 
+    /// Let a board go, and mean it (#233).
+    ///
+    /// A real board is `CONFIG_BT_MAX_CONN=1` and invisible while taken, so this
+    /// is what hands it to another tablet, or to nRF Connect, without a power
+    /// cycle.
+    ///
+    /// The flag is set BEFORE the cancel, for the same reason `suspend()` sets
+    /// `isSuspended` first: `cancelPeripheralConnection` is asynchronous and the
+    /// disconnect callback runs inside a `Task { @MainActor }`, so it lands after
+    /// this returns and must already be able to see the intent — otherwise it
+    /// re-arms the connection being torn down.
+    func release(_ device: SophonDevice) {
+        device.isReleasedByUser = true
+        central.cancelPeripheralConnection(device.peripheral)
+    }
+
+    /// Take a released board back, or connect one that was never auto-connected.
+    func reclaim(_ device: SophonDevice) {
+        device.isReleasedByUser = false
+        connect(device)
+    }
+
     /// Re-read the board's transmit counters. Cheap and on demand — deliberately
     /// not a subscription, so it costs no connection-event budget.
     func refreshStats(_ device: SophonDevice) {
@@ -161,7 +183,10 @@ final class SophonHub: NSObject {
         guard isSuspended else { return }
         isSuspended = false
         applyRadioState()
-        for device in devices { connect(device) }
+        // Skips boards the user released: resume() connects directly rather than
+        // waiting for a fresh advertisement, so it bypasses the guard in
+        // didDiscover and would otherwise quietly undo the release (#233).
+        for device in devices where !device.isReleasedByUser { connect(device) }
     }
 }
 
@@ -230,6 +255,12 @@ extension SophonHub: CBCentralManagerDelegate {
             // after it was dropped for having no service — advertising our UUID
             // is exactly the evidence that the app is back.
             self.withoutService.remove(peripheral.identifier)
+
+            // ...but not if the user let this one go. A Sophon advertises
+            // continuously, so without this check a manual release would be
+            // undone by the next advertisement, about a second later (#233).
+            // Per-device: releasing one board must not stop another connecting.
+            guard !device.isReleasedByUser else { return }
 
             if case .discovered = device.state {
                 self.connect(device)
@@ -307,6 +338,15 @@ extension SophonHub: CBCentralManagerDelegate {
             // phone whose app had been closed. Rediscovery via the scan brings
             // it back when there is actually something to talk to.
             if self.withoutService.remove(peripheral.identifier) != nil { return }
+
+            // Nor one the user let go of. This is the path that would actually
+            // undo a manual release: cancelPeripheralConnection lands here, and
+            // this re-arm fires immediately, without waiting on the scan -- so
+            // the guard in didDiscover would never even be reached (#233).
+            guard !device.isReleasedByUser else {
+                self.log.info("released \(device.displayName, privacy: .public), not re-arming")
+                return
+            }
 
             // Re-arm. The scan is still running, so walking back into range
             // rediscovers and reconnects without a relaunch.

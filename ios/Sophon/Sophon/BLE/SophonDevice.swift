@@ -31,6 +31,36 @@ final class SophonDevice: Identifiable {
     var state: State = .discovered
     var rssi: Int?
 
+    /// The user has deliberately let this board go, so auto-connect must leave it
+    /// alone until they say otherwise.
+    ///
+    /// Without this a manual disconnect would survive about a second: auto-connect
+    /// re-fires from `didDiscover` for anything `.disconnected`, and a Sophon
+    /// advertises continuously, so the button would look broken.
+    ///
+    /// **In-memory by design — not persisted** (#233). A relaunched app connects
+    /// again, as it always has. Persisting it would mean a board that silently
+    /// refuses to connect after a relaunch with no visible cause, which is the same
+    /// confusion the control exists to remove. `SophonHub` uses no
+    /// `CBCentralManagerOptionRestoreIdentifierKey`, so there is no background
+    /// relaunch that could carry a stale value past the process it belongs to.
+    ///
+    /// Survives `resetLinkStats()` deliberately: it is a statement about the user,
+    /// not about the session.
+    var isReleasedByUser = false
+
+    /// Whether the app is holding this board's single connection slot, or trying
+    /// to. The connect/disconnect control is a function of exactly this.
+    ///
+    /// `.connecting` counts as held, so the control offers *Release* rather than
+    /// being disabled. That is deliberate and contradicts #233's checklist, which
+    /// said to disable it while connecting: an outstanding `connect()` on iOS
+    /// never times out — the comment in `SophonHub.suspend()` is there because of
+    /// it — so disabling would strand a device that is stuck acquiring, with no
+    /// way out but killing the app. `cancelPeripheralConnection` cancels pending
+    /// requests as well as live links, so *Release* is meaningful here.
+    var isHeld: Bool { state == .connected || state == .connecting }
+
     /// What the peripheral advertises about itself, or nil if never observed.
     ///
     /// Nil is **normal**, not a fault: an iOS peripheral cannot advertise
@@ -161,12 +191,23 @@ final class SophonDevice: Identifiable {
         /// Connected, but nothing has arrived for `silentFor`.
         case stalled(silentFor: TimeInterval)
         case disconnected
+        /// Disconnected because the user asked for it, and staying that way.
+        ///
+        /// Distinct from `disconnected` because the two mean opposite things to a
+        /// reader: one is something going wrong, the other is the app doing as it
+        /// was told. Reporting a deliberate release in red as a fault would be the
+        /// same category of lie this type exists to avoid.
+        case released
     }
 
     /// Takes `now` explicitly so the caller controls when this is re-evaluated --
     /// a view can drive it from a timeline and get a value that actually changes,
     /// rather than one frozen at whenever the body last happened to run.
     func linkStatus(asOf now: Date = Date()) -> LinkStatus {
+        // Checked before `state`, because a released board sits in `.disconnected`
+        // and would otherwise be indistinguishable from one that dropped out.
+        if isReleasedByUser, !state.isConnected { return .released }
+
         switch state {
         case .discovered: return .discovered
         case .connecting: return .connecting
