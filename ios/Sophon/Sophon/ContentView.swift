@@ -92,9 +92,27 @@ private struct ViewerView: View {
         } else {
             List(hub.devices) { device in
                 NavigationLink {
-                    DeviceDetailView(device: device) { hub.refreshStats(device) }
+                    DeviceDetailView(
+                        device: device,
+                        onRefresh: { hub.refreshStats(device) },
+                        onToggleConnection: {
+                            if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
+                        }
+                    )
                 } label: {
                     DeviceRow(device: device)
+                }
+                // A swipe rather than a button in the row: the row IS a
+                // NavigationLink, and an inline button inside one competes with
+                // it for the tap. The detail view carries the visible control;
+                // this is the fast path for switching between boards, which is
+                // where the choice actually gets made (#233).
+                .swipeActions(edge: .trailing) {
+                    if device.isHeld {
+                        Button("Release") { hub.release(device) }.tint(.orange)
+                    } else {
+                        Button("Connect") { hub.reclaim(device) }.tint(.green)
+                    }
                 }
             }
         }
@@ -184,6 +202,9 @@ private struct StateDot: View {
         case .connecting: .orange
         case .discovered: .secondary
         case .disconnected: .red
+        // Grey like .discovered, not red: nothing is wrong. The board is simply
+        // not ours at the moment, which is a state the user chose.
+        case .released: .secondary
         // Amber, not green and not red: the link is genuinely up, so red would
         // be a lie, but nothing is arriving, so green would be a worse one.
         case .stalled: .orange
@@ -194,6 +215,7 @@ private struct StateDot: View {
 private struct DeviceDetailView: View {
     let device: SophonDevice
     let onRefresh: () -> Void
+    let onToggleConnection: () -> Void
 
     /// What the app knows it observed — not a claim about the peripheral. Worded
     /// so it does not read as a fault, because for every simulator it is
@@ -298,11 +320,22 @@ private struct DeviceDetailView: View {
                 LabeledContent("Scan response", value: "v\(identity.scanRspVersion), type \(identity.deviceType)")
                     .foregroundStyle(.orange)
             }
+
+            // The visible control. The swipe action on the list row is the fast
+            // path; this is the discoverable one, since a swipe affordance is
+            // invisible until you try it.
+            Button(role: device.isHeld ? .destructive : nil, action: onToggleConnection) {
+                Text(device.isHeld ? "Release board" : "Connect")
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         } header: {
             Text("Link")
         } footer: {
             if case .stalled = device.linkStatus() {
                 Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
+            }
+            if case .released = device.linkStatus() {
+                Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
             }
             if device.identity == nil {
                 Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon never reports these — nor does a board running firmware older than #230.")
@@ -453,6 +486,7 @@ private extension SophonDevice.LinkStatus {
         // Says both halves, because both are true and only together are they
         // useful: the link is up, and no data is coming over it.
         case .stalled(let silent): "Connected · no data \(Int(silent))s"
+        case .released: "Released"
         }
     }
 

@@ -2,6 +2,15 @@
 
 ## 2026-08-29
 
+### feat: connect/disconnect control per Sophon (#233)
+
+- The viewer auto-connected to every board it found and offered **no way to let go** — `SophonHub.disconnect(_:)` existed but had no caller in the UI. Since a board is `CONFIG_BT_MAX_CONN=1` and invisible while taken, whichever device saw it first silently owned it, and freeing it meant a power cycle. That was the actual friction during #230's verification.
+- Each device now has a control in two places: a visible button in the detail view, and a swipe action on the list row for switching quickly between boards. Not an inline button in the row — the row is a `NavigationLink` and would compete for the tap.
+- **A button alone would not have worked**, which is the substance of the change. Four separate paths start a connection, and each had to learn to respect user intent: `didDiscover` auto-connect, `resume()` after simulator mode, and — the one that actually mattered — the re-arm at the end of `didDisconnectPeripheral`. That last one runs `central.connect(peripheral)` immediately after a cancel, without waiting for an advertisement, so the discovery guard would never have been reached and Release would have appeared to do nothing.
+- New `LinkStatus.released`, shown grey as **Released** rather than red as "Disconnected", with a footer explaining why it will not reconnect. A deliberate release is the app obeying, not a fault, and colouring it as one would be the same class of lie the stalled state exists to avoid.
+- Intent is **in-memory only and per-device**: restarting the app auto-connects again, and releasing one board does not stop another connecting. Unambiguous because `SophonHub` uses no `CBCentralManagerOptionRestoreIdentifierKey`, so no background relaunch can carry a stale value past its process.
+- The control offers **Release** while `.connecting` rather than being disabled, contradicting the issue's own checklist. An outstanding `connect()` on iOS never times out, so disabling would strand a device stuck acquiring; `cancelPeripheralConnection` cancels pending requests too.
+
 ### feat: advertise device type, versions and TX power (#230)
 
 - A Sophon board now says what it is **before you connect**: device type, a scan-response structure version, hardware and firmware versions in one Manufacturer Specific Data structure, plus TX power as the standard AD type. Scan response goes from 13 to **26 of 31 bytes**; the advertisement is untouched.
