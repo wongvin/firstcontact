@@ -2,6 +2,18 @@
 
 ## 2026-08-31
 
+### feat: swift-reviewer agent (#236)
+
+- New `.claude/agents/swift-reviewer.md`. The case for it is not that reviews are good, it is that **`xcodebuild` succeeding proves almost nothing here**: neither iOS project has a test target, and the Simulator has no Core Bluetooth radio or motion hardware, so anything touching BLE cannot be exercised there at all.
+- Nine rules, every one a defect that **actually shipped or nearly shipped in this repo** — not a style guide. Time-dependent state read in a view body and model upkeep owned by a view's `.task` both shipped to devices in #235; the `127` sentinel blanking RSSI was user-reported; `resetLinkStats()` clearing advertisement-scoped state is documented in `SophonDevice.swift` as having bitten once already.
+- Each rule cites the code that now does it correctly, so the agent points at live examples rather than describing them. All thirteen references were checked to resolve against the merged tree, including its claim that no test target exists.
+- **Review-only** — `Read, Grep, Glob, Bash`, no `Edit` or `Write`. A reviewer that quietly rewrites what it reviews cannot be trusted to report honestly, and `test-runner-jsdom` already sets that precedent.
+- Told to read `ios/CLAUDE.md` rather than restate conventions from memory, and to say plainly when a change claims verification it cannot have — a green build, or a Simulator screenshot standing in for a radio.
+- `.claude/agents/swift-reviewer-fixtures.md` holds the six known-bad snippets verbatim, with the rule each must trigger, so the agent can be re-validated whenever it changes. Markdown rather than Swift so it cannot compile into a target.
+- **Acceptance test run in both directions.** Sensitivity: all six planted defects found with the correct rules, each with a concrete failure sequence, plus one nobody planted. Specificity, against merged `main`: **not clean** — it found two real, previously unknown bugs, both verified by hand before being believed. Filed as #241 (a mode switch silently undoes a release, because the sweep keeps running while the scan is stopped) and #242 (the stall explanation is gated on a value that cannot change during a stall).
+- The fixture file could not be used as the test input directly: it contains an answer key mapping each defect to its expected rule. The excerpts were stripped to bare code first, or the agent would have been marking its own homework.
+- Not established by this run: a false-positive rate. The specificity check did not return clean, for a legitimate reason, so that question is still open.
+
 ### fix: distinguish untrusted signing from a locked device (#239)
 
 - Both deploy scripts threw away `devicectl`'s error and printed one fixed guess — `launch failed (is it unlocked?)` — for every launch failure. On 2026-08-31 that was wrong on all three devices: a regenerated free-signing certificate meant `FBSOpenApplicationErrorDomain error 3`, *untrusted developer*, not error 7, *locked*. The advice sent you to unlock devices that were already unlocked, while the real instruction sat unread in the output above it.
