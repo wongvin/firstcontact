@@ -2,6 +2,14 @@
 
 ## 2026-08-31
 
+### fix: a release survives a Simulator-mode switch (#241)
+
+- Releasing a board and switching to Simulator mode silently took it back. `suspend()` stops the scan but never touched the sweep, whose condition was only *"is anything released"* — so it kept judging staleness from an absence of advertisements while the app was deliberately not listening. After 15 s the board was forgotten; on returning to Viewer it was rediscovered as a **fresh** device with the intent flag gone, and auto-connect claimed its single connection slot. Exactly what `release()` (#233) and `suspend()` (#226) each exist to prevent.
+- Two halves, both needed. The sweep now also requires `radio == .ready` — absence of advertisements is only evidence when something is listening. And `restampReleased()`, factored out of the existing `didBecomeActive` observer that solved the identical problem for backgrounding, now also runs when a stopped scan restarts; without it, restarting the sweep would forget everything immediately, since `lastSeenAt` froze while the scan was off.
+- `applyRadioState()` now drives `applySweepState()` on both paths, with a `defer` on the stop path so it evaluates after `radio` is updated. The explicit calls in `release`/`reclaim`/`forget` are gone: two functions that must agree but were called separately is precisely how this arose.
+- Also covers the stops nobody initiates — Bluetooth switched off, permission revoked — which took the same path.
+- Found by the `swift-reviewer` agent (#236) on its first run against merged code, hand-verified, then confirmed fixed on hardware.
+
 ### feat: swift-reviewer agent (#236)
 
 - New `.claude/agents/swift-reviewer.md`. The case for it is not that reviews are good, it is that **`xcodebuild` succeeding proves almost nothing here**: neither iOS project has a test target, and the Simulator has no Core Bluetooth radio or motion hardware, so anything touching BLE cannot be exercised there at all.

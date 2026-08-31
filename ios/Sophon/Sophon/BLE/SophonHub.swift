@@ -96,12 +96,22 @@ final class SophonHub: NSObject {
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                let now = Date()
-                for device in self.devices where device.isReleasedByUser {
-                    device.lastSeenAt = now
-                }
+                self?.restampReleased()
             }
+        }
+    }
+
+    /// Give every released device a fresh window to prove itself in.
+    ///
+    /// Called whenever the app starts listening again after a period of not
+    /// listening -- returning to the foreground, or restarting a scan this role
+    /// had stopped. In both cases `lastSeenAt` froze for reasons that say nothing
+    /// about the board, so judging staleness against it would forget peripherals
+    /// for our silence rather than theirs.
+    private func restampReleased() {
+        let now = Date()
+        for device in devices where device.isReleasedByUser {
+            device.lastSeenAt = now
         }
     }
 
@@ -139,7 +149,6 @@ final class SophonHub: NSObject {
         device.lastSeenAt = Date()
         central.cancelPeripheralConnection(device.peripheral)
         applyRadioState()
-        applySweepState()
     }
 
     /// Take a released board back, or connect one that was never auto-connected.
@@ -148,7 +157,6 @@ final class SophonHub: NSObject {
         connect(device)
         // Back to consolidated discovery if nothing else is released.
         applyRadioState()
-        applySweepState()
     }
 
     /// Drop a board the app can no longer see, so the list stops implying it is
@@ -166,16 +174,26 @@ final class SophonHub: NSObject {
         withoutService.remove(device.id)
         log.info("forgot \(device.displayName, privacy: .public)")
         applyRadioState()
-        applySweepState()
     }
 
     /// Sweep released boards that have gone quiet.
     ///
     /// Skips the one whose detail view is open: a row vanishing from a list is
     /// ordinary, but pulling the screen out from under someone is not.
-    /// Starts or stops the sweep to match whether anything is released.
+    /// Starts or stops the sweep to match whether anything is released AND the
+    /// scan is running.
+    ///
+    /// Called only from `applyRadioState()`, on both its paths. Every caller that
+    /// changes either input -- `release`, `reclaim`, `forget` -- goes through
+    /// there already, so one place decides what should be running rather than
+    /// each site remembering to ask twice.
     private func applySweepState() {
-        let wantSweep = devices.contains { $0.isReleasedByUser }
+        // Both conditions, not just the first. The sweep decides a board is gone
+        // from an ABSENCE of advertisements, which is only evidence when we are
+        // actually listening -- otherwise it measures our own silence and forgets
+        // peripherals for it (#241). radio == .ready is exactly "the scan is
+        // running": applyRadioState sets it there and nowhere else.
+        let wantSweep = radio == .ready && devices.contains { $0.isReleasedByUser }
 
         guard wantSweep else {
             sweepTask?.cancel()
@@ -223,6 +241,7 @@ final class SophonHub: NSObject {
     /// when a second condition is bolted into the state callback.
     private func applyRadioState() {
         let wantScan = (managerState == .poweredOn) && !isSuspended
+        let wasScanning = (radio == .ready)
 
         // Duplicate reporting costs a callback per advertisement -- tens per
         // second per board -- so it is on ONLY while something is released and
@@ -244,10 +263,20 @@ final class SophonHub: NSObject {
                 )
                 scanningWithDuplicates = wantDuplicates
                 log.info("scanning for Sophon peripherals (duplicates \(wantDuplicates, privacy: .public))")
+
+                // Only when the scan was genuinely off. This branch also runs for
+                // a duplicates-mode switch, where nothing was missed and a
+                // re-stamp would just extend the window for free.
+                if !wasScanning { restampReleased() }
             }
             radio = .ready
+            applySweepState()
             return
         }
+
+        // Falling through means the scan is stopping, so the sweep must stop with
+        // it -- see applySweepState. Ordered after `radio` is set below.
+        defer { applySweepState() }
 
         if radio == .ready {
             central.stopScan()
