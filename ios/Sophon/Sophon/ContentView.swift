@@ -368,10 +368,24 @@ private struct DeviceDetailView: View {
         } header: {
             Text("Link")
         } footer: {
-            if case .stalled = device.linkStatus() {
+            // Timeline, for the same reason as the State row above: during a stall
+            // NOTHING observable on the device changes -- frames stop and the
+            // stats read goes unanswered -- so an enclosing body is never
+            // re-evaluated, and this text could not appear in the one situation it
+            // was written for (#242). A footer is a single block of prose, so
+            // wrapping it changes no row layout.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                linkFooter(asOf: context.date)
+            }
+        }
+    }
+
+    @ViewBuilder private func linkFooter(asOf now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if case .stalled = device.linkStatus(asOf: now) {
                 Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
             }
-            if case .released = device.linkStatus() {
+            if case .released = device.linkStatus(asOf: now) {
                 if device.isStaleReleased {
                     Text("Not reachable. Another device may have taken this board, or it is off or out of range — it stops advertising either way, so the app cannot tell which. It will be dropped from the list when you go back, and picked up again automatically if it returns.")
                 } else {
@@ -447,16 +461,38 @@ private struct DeviceDetailView: View {
                 if tx.other > 0 {
                     LabeledContent("Other TX errors", value: "\(tx.other)")
                 }
-                Text(attribution(device: device))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else if case .stalled = device.linkStatus() {
-                // Distinct from "Reading…" on purpose. A read that never returns
-                // is an answer, and presenting it as an ongoing wait is the same
-                // omission as a green dot with no data behind it.
-                Text("Not responding.").foregroundStyle(.orange)
+                // The numbers above are a LAST READ, not a live value, and during
+                // a stall they stop moving with nothing to say so -- the same
+                // "reads as more than it says" failure the link states exist to
+                // avoid. One row either way, so the layout is unchanged (#242).
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    if case .stalled = device.linkStatus(asOf: context.date) {
+                        Text("Not responding. The Sophon has stopped answering, so these are the last figures it returned, not current ones.")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text(attribution(device: device))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } else if device.state.isConnected {
-                Text("Reading…").foregroundStyle(.secondary)
+                // One row either way, so this stays a single List cell and the
+                // layout is untouched -- but it now re-evaluates on a timeline.
+                // Without that, "Not responding." could never replace "Reading…":
+                // an unanswered read changes nothing observable, so the body would
+                // never run again (#242).
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    if case .stalled = device.linkStatus(asOf: context.date) {
+                        // Distinct from "Reading…" on purpose. A read that never
+                        // returns is an answer, and presenting it as an ongoing
+                        // wait is the same omission as a green dot with no data
+                        // behind it.
+                        Text("Not responding.").foregroundStyle(.orange)
+                    } else {
+                        Text("Reading…").foregroundStyle(.secondary)
+                    }
+                }
             } else {
                 Text("Available while connected.").foregroundStyle(.secondary)
             }

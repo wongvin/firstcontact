@@ -294,7 +294,14 @@ final class SophonDevice: Identifiable {
     /// Takes `now` explicitly so the caller controls when this is re-evaluated --
     /// a view can drive it from a timeline and get a value that actually changes,
     /// rather than one frozen at whenever the body last happened to run.
-    func linkStatus(asOf now: Date = Date()) -> LinkStatus {
+    ///
+    /// **No default on purpose (#242).** A default of `Date()` let three call
+    /// sites read this at body-evaluation time without it being visible in
+    /// review, and the failure is silent: during a stall nothing observable on
+    /// this object changes, so those bodies were never re-evaluated and the text
+    /// written to explain a stall could not render during one. Requiring the
+    /// argument makes a body-time read something you have to type.
+    func linkStatus(asOf now: Date) -> LinkStatus {
         // Checked before `state`, because a released board sits in `.disconnected`
         // and would otherwise be indistinguishable from one that dropped out.
         if isReleasedByUser, !state.isConnected {

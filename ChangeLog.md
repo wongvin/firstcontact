@@ -2,6 +2,14 @@
 
 ## 2026-08-31
 
+### fix: the stall explanation can now appear during a stall (#242)
+
+- `DeviceDetailView`'s State row was wrapped in a `TimelineView`; the footer explaining the stall, and the `Not responding.` text under the transmit counters, were not. All three read `linkStatus()` at body-evaluation time. During a stall **nothing observable on the device changes** — frames stop, the stats read goes unanswered — so those bodies were never re-evaluated and the text written for that exact situation could not render in it. The State row ticked over inside its own timeline while its own explanation stayed hidden.
+- Both now run on their own timelines. The footer is one block of prose, so wrapping it changes no row layout; in the counters section the stalled and connected branches were merged into a single timeline-driven row, so it stays one `List` cell either way. A first attempt wrapped whole section contents and would have collapsed several rows into one — a regression no build catches and no simulator screenshot can reach, since the Simulator has no radio and never renders this view.
+- **The defect was worse than the issue described.** `if let tx = device.txThisSession` takes precedence over the whole `else if` chain, so `Not responding.` could only ever appear if the *first* stats read never returned. In a real stall the reads had succeeded, so the counters branch won and frozen figures were shown as though current, with no route to any warning at all — the same "reads as more than it says" failure the link states exist to prevent, one section further down the same screen. The counters now carry an orange line saying they are the last figures returned, not current ones.
+- **`linkStatus(asOf:)` lost its `= Date()` default.** That default is what let three call sites read the clock invisibly at body time. Requiring the argument makes a body-time read something you have to type on purpose. This was the third instance of that defect class, so removing the invitation matters more than patching the sites.
+- Found by the `swift-reviewer` agent (#236) on its first run against merged code. The agent had hedged that the `Not responding.` path was narrower than the footer case; that hedge was under-read when the issue was written, and hardware testing caught the mis-scoping.
+
 ### fix: a release survives a Simulator-mode switch (#241)
 
 - Releasing a board and switching to Simulator mode silently took it back. `suspend()` stops the scan but never touched the sweep, whose condition was only *"is anything released"* — so it kept judging staleness from an absence of advertisements while the app was deliberately not listening. After 15 s the board was forgotten; on returning to Viewer it was rediscovered as a **fresh** device with the intent flag gone, and auto-connect claimed its single connection slot. Exactly what `release()` (#233) and `suspend()` (#226) each exist to prevent.
