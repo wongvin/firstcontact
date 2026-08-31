@@ -65,8 +65,22 @@ echo "==> Installing ${WRAPPER} → ${DEVICE_ID}…"
 xcrun devicectl device install app --device "${DEVICE_ID}" "${APP}"
 
 echo "==> Launching ${BUNDLE_ID}…"
-if xcrun devicectl device process launch --device "${DEVICE_ID}" "${BUNDLE_ID}"; then
+LAUNCH_LOG="$(mktemp)"
+trap 'rm -f "${LAUNCH_LOG}"' EXIT
+if xcrun devicectl device process launch --device "${DEVICE_ID}" "${BUNDLE_ID}" 2>&1 | tee "${LAUNCH_LOG}"; then
   echo "==> Done — launched on device."
 else
-  echo "warning: launch failed (is the device unlocked?). The app is installed — open it from the home screen." >&2
+    # devicectl reports several distinct causes through the same non-zero exit,
+    # and the wrong guess sends you to the wrong fix -- this used to blame a
+    # locked device for what was almost always an untrusted certificate (#239).
+    if grep -qE "not been explicitly trusted|invalid code signature|inadequate entitlements" "${LAUNCH_LOG}"; then
+      echo "warning: the device has not trusted this developer certificate, so the app cannot launch." >&2
+      echo "         Settings > General > VPN & Device Management > Developer App > Trust." >&2
+      echo "         Free-signing certificates are reissued about weekly, so expect this again." >&2
+    elif grep -qE "could not be, unlocked|FBSOpenApplicationErrorDomain error 7" "${LAUNCH_LOG}"; then
+      echo "warning: the device is locked, so launch was refused. Unlock and re-run, or open the app from the home screen." >&2
+    else
+      echo "warning: launch failed on the device. The app is installed -- open it from the home screen." >&2
+      echo "         devicectl's own output above says why." >&2
+    fi
 fi

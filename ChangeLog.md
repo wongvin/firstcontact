@@ -2,6 +2,15 @@
 
 ## 2026-08-31
 
+### fix: distinguish untrusted signing from a locked device (#239)
+
+- Both deploy scripts threw away `devicectl`'s error and printed one fixed guess — `launch failed (is it unlocked?)` — for every launch failure. On 2026-08-31 that was wrong on all three devices: a regenerated free-signing certificate meant `FBSOpenApplicationErrorDomain error 3`, *untrusted developer*, not error 7, *locked*. The advice sent you to unlock devices that were already unlocked, while the real instruction sat unread in the output above it.
+- Not a rare case, either. Free-signing profiles expire about weekly, and regenerating one issues a **new certificate** every device must trust again — so the most common launch failure in this project was precisely the one the message misdescribed.
+- The output is now classified rather than guessed at: untrusted names the Settings → VPN & Device Management → Trust path and warns that it recurs; locked keeps the old advice, which is right for that case alone; anything else says a launch failed without asserting a cause and points at `devicectl`'s own output.
+- Captured with `tee`, so the output still streams exactly as before, and `pipefail` keeps the pipeline carrying `devicectl`'s status rather than `tee`'s.
+- Fixed in **both** scripts; FirstContact's wording differed but the defect did not.
+- `ios/CLAUDE.md` documented only the locked cause for `Code=10002`; it now names both and which fix each needs.
+
 ### feat: forget a released Sophon once it goes silent (#235)
 
 - A released board stayed in the list reading `Released` forever, in three situations the app cannot tell apart because all three produce **zero advertisements**: another central took it, it was powered off, or it went out of range. Only the first is reclaimable, but **Connect** was offered in all three — and `central.connect()` on iOS never times out, so tapping it stranded the device in `.connecting` with no feedback.
