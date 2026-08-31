@@ -23,6 +23,17 @@ nonisolated enum SophonProtocol {
     /// #211 is trying to measure.
     static let statsCharacteristicUUID = CBUUID(string: "C6560003-84D5-4DC2-8C1E-4B4EB2337CE4")
 
+    /// Read-only, 8-byte value: the connection parameters iOS granted.
+    ///
+    /// This exists because **Core Bluetooth exposes no API for them** — an iOS app
+    /// cannot ask what interval, latency or supervision timeout it was given. Only
+    /// the peripheral can see them, so they have to travel back over GATT (#224).
+    ///
+    /// Read rather than notify for the same reason as the stats: they change
+    /// rarely, and a subscription would spend the connection-event budget these
+    /// values exist to explain.
+    static let linkParamsCharacteristicUUID = CBUUID(string: "C6560004-84D5-4DC2-8C1E-4B4EB2337CE4")
+
     /// Manufacturer Specific Data company ID, mirroring `SOPHON_COMPANY_ID` in
     /// `zephyr/sophon/src/version.h`.
     ///
@@ -50,6 +61,63 @@ nonisolated enum SophonProtocol {
 /// Every field is **display-only**. Nothing branches on them — in particular,
 /// connection policy must not, because an iOS peripheral cannot advertise
 /// manufacturer data at all, so the simulator never has any of this.
+/// The connection parameters the peripheral reports iOS granted.
+///
+/// Mirrors `struct sophon_link_params` in `zephyr/sophon/src/ble.h`; any change
+/// there needs the same change here.
+///
+/// Governs buffer refusals, frame gaps and stream latency — and iOS revises the
+/// interval on its own schedule, notably stretching it to save power, which is
+/// what #209's frame loss turned out to be.
+nonisolated struct LinkParams: Equatable, Sendable {
+    static let wireSize = 8
+
+    /// Microseconds. The peripheral deliberately sends `interval_us` rather than
+    /// the deprecated 1.25 ms unit, so no conversion happens on this side.
+    let intervalMicros: UInt32
+
+    /// Connection events the peripheral may skip.
+    let latency: UInt16
+
+    /// Supervision timeout in **10 ms units**, as carried on the wire.
+    let timeoutUnits: UInt16
+
+    var intervalMillis: Double { Double(intervalMicros) / 1000 }
+    var timeoutMillis: Int { Int(timeoutUnits) * 10 }
+
+    /// Connection events per second, which is the form worth comparing against a
+    /// sample rate: 50 Hz of frames through 33 events/s cannot fit, and that is
+    /// the arithmetic #248 is about.
+    var eventsPerSecond: Double? {
+        guard intervalMicros > 0 else { return nil }
+        return 1_000_000 / Double(intervalMicros)
+    }
+
+    init?(_ data: Data) {
+        guard data.count == Self.wireSize else { return nil }
+
+        var bytes = [UInt8](repeating: 0, count: Self.wireSize)
+        data.copyBytes(to: &bytes, count: Self.wireSize)
+
+        func u16(_ offset: Int) -> UInt16 {
+            UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+        }
+
+        intervalMicros = UInt32(bytes[0])
+            | (UInt32(bytes[1]) << 8)
+            | (UInt32(bytes[2]) << 16)
+            | (UInt32(bytes[3]) << 24)
+        latency = u16(4)
+        timeoutUnits = u16(6)
+    }
+
+    init(intervalMicros: UInt32, latency: UInt16, timeoutUnits: UInt16) {
+        self.intervalMicros = intervalMicros
+        self.latency = latency
+        self.timeoutUnits = timeoutUnits
+    }
+}
+
 nonisolated struct SophonIdentity: Equatable, Sendable {
     /// Minimum, not exact. Trailing bytes are ignored so that appending a field
     /// firmware-side does not turn into a parse failure here.
@@ -333,6 +401,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkMotionFrame()
         checkTxStats()
         checkIdentity()
+        checkLinkParams()
     }
 
     private static func checkMotionFrame() {
@@ -395,6 +464,37 @@ nonisolated enum SophonProtocolSelfCheck {
                "TxStats wire layout disagrees with PROTOCOL.md")
         assert(TxStats(expected) == stats,
                "TxStats does not decode its own PROTOCOL.md byte vector")
+    }
+
+    private static func checkLinkParams() {
+        // Written out from the offset table in PROTOCOL.md, not produced by an
+        // encoder: this type is decode-only.
+        let wire = Data([
+            0x40, 0x9C, 0x00, 0x00, // interval_us @0 = 40000 (40 ms)
+            0x04, 0x00,             // latency     @4 = 4
+            0x48, 0x00,             // timeout     @6 = 72 units = 720 ms
+        ])
+
+        guard let params = LinkParams(wire) else {
+            assertionFailure("LinkParams failed to decode its PROTOCOL.md byte vector")
+            return
+        }
+
+        assert(params.intervalMicros == 40_000,
+               "interval decoded byte-swapped or misaligned")
+        assert(params.latency == 4)
+        assert(params.timeoutUnits == 72)
+        assert(params.timeoutMillis == 720, "timeout is 10 ms units on the wire")
+        assert(params.intervalMillis == 40)
+
+        // 40 ms -> 25 events/s. The figure #248 needs, so a mistake here would
+        // corrupt the capacity arithmetic rather than merely a displayed number.
+        assert(params.eventsPerSecond == 25)
+
+        // Exact length, unlike SophonIdentity: this is a fixed GATT value with no
+        // append-only rule behind it, so a wrong length means a wrong contract.
+        assert(LinkParams(wire.dropLast()) == nil)
+        assert(LinkParams(wire + Data([0x00])) == nil)
     }
 
     private static func checkIdentity() {

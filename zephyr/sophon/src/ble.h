@@ -56,4 +56,40 @@ void sophon_ble_tx_stats(struct sophon_tx_stats *out);
 
 void sophon_stats_pack(const struct sophon_tx_stats *in, uint8_t out[SOPHON_STATS_SIZE]);
 
+/*
+ * The connection parameters iOS actually granted -- the one number that governs
+ * buffer refusals, frame gaps and stream latency, and which the central cannot
+ * see for itself.
+ *
+ * Core Bluetooth exposes NO API for connection parameters: an iOS app cannot ask
+ * what interval, latency or supervision timeout it was given. Only the peripheral
+ * can, via bt_conn_get_info(), which is why this has to travel back over GATT
+ * rather than simply being read on the phone (#224).
+ *
+ * The cost of the blind spot is on record: during #209 a board streaming to a
+ * sleeping iPhone produced transmit refusals and frame loss, and the diagnosis
+ * detoured through buffer sizing before the cause turned out to be iOS stretching
+ * the interval to save power. On screen it would have been a glance.
+ */
+struct sophon_link_params {
+	uint32_t interval_us; /* microseconds. NOT the deprecated 1.25 ms unit. */
+	uint16_t latency;     /* connection events the peripheral may skip */
+	uint16_t timeout;     /* supervision timeout, 10 ms units */
+};
+
+/*
+ * Wire form: u32 + u16 + u16, little-endian, in struct order. 8 bytes fits the
+ * 20-byte value budget at the default 23-byte ATT MTU, so this needs no MTU
+ * change and never fragments -- the same constraint that shaped the motion frame
+ * and the stats frame.
+ *
+ * Packed field by field rather than by copying the struct, matching
+ * sophon_stats_pack: the byte order is stated here rather than inherited from
+ * whatever the compiler laid out.
+ */
+#define SOPHON_LINK_PARAMS_SIZE 8
+
+void sophon_link_params_pack(const struct sophon_link_params *in,
+			     uint8_t out[SOPHON_LINK_PARAMS_SIZE]);
+
 #endif /* SOPHON_BLE_H */

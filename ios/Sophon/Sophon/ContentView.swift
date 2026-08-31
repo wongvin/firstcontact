@@ -327,6 +327,20 @@ private struct DeviceDetailView: View {
                 LabeledContent("ATT MTU", value: "~\(mtu)")
             }
 
+            // The interval iOS granted, which Core Bluetooth will not tell this
+            // app — it comes back from the peripheral, the only side that can see
+            // it (#224). Shown with events/second because that is the form worth
+            // comparing against a sample rate: 50 Hz of frames cannot fit through
+            // 25 events/s, which is the arithmetic #248 is about.
+            if let params = device.linkParams {
+                LabeledContent("Interval",
+                               value: params.eventsPerSecond.map {
+                                   String(format: "%.2f ms · %.0f/s", params.intervalMillis, $0)
+                               } ?? String(format: "%.2f ms", params.intervalMillis))
+                LabeledContent("Peripheral latency", value: "\(params.latency)")
+                LabeledContent("Supervision timeout", value: "\(params.timeoutMillis) ms")
+            }
+
             // Shown unconditionally, unlike RSSI and ATT MTU above: absence is
             // itself the answer here — this peripheral does not advertise who it
             // is — and a row that vanishes cannot say that. Same argument the
