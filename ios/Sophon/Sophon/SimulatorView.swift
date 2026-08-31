@@ -104,6 +104,41 @@ struct SimulatorView: View {
         } footer: {
             Text("The same four counters a board exposes, readable by the viewer over the stats characteristic. A refused frame is dropped rather than retried, and seq is never rewound — so the hole stays visible.")
         }
+
+        Section {
+            if let mean = display.readyGapMeanMillis {
+                LabeledContent("Drain interval",
+                               value: String(format: "%.1f ms", mean))
+                if let lo = display.readyGapMinMillis, let hi = display.readyGapMaxMillis {
+                    // The range is what says whether the mean means anything.
+                    LabeledContent("Range",
+                                   value: String(format: "%.1f – %.1f ms", lo, hi))
+                }
+                if mean > 0 {
+                    LabeledContent("Drains per second",
+                                   value: String(format: "%.1f", 1000 / mean))
+                }
+                if let accepted = display.acceptedPerCycleMean {
+                    LabeledContent("Accepted per drain",
+                                   value: String(format: "%.2f", accepted))
+                }
+            } else {
+                Text("Nothing yet — the queue has not filled twice.")
+                    .foregroundStyle(.secondary)
+            }
+            if let mean = display.sampleGapMeanMillis {
+                LabeledContent("CoreMotion arrival",
+                               value: String(format: "%.1f ms", mean))
+                if let lo = display.sampleGapMinMillis, let hi = display.sampleGapMaxMillis {
+                    LabeledContent("Arrival range",
+                                   value: String(format: "%.1f – %.1f ms", lo, hi))
+                }
+            }
+        } header: {
+            Text("Scheduling cadence")
+        } footer: {
+            Text("Core Bluetooth cannot tell a peripheral its connection interval — no API exists — so this infers the cadence from when iOS drains the transmit queue (#248). It is only the connection interval while the queue stays saturated: then every connection event frees space and fires the callback. Judge that from the range, not the mean — 45–55 ms around a 50 ms mean is an interval, 8–400 ms is an artefact. Accepted per drain is then notifications placed per connection event, which is the figure #211's capacity table assumes.\n\nCoreMotion arrival is the other half: an even ~20 ms stream refused at 8.8% means the link is the limit, while a clumped one means the queue cannot absorb a burst the link could carry on average. The rate alone cannot tell these apart — bursts of five every 100 ms average to 50 Hz just like an even stream.")
+        }
     }
 
     @ViewBuilder private var benchSection: some View {

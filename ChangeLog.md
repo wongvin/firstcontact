@@ -2,6 +2,16 @@
 
 ## 2026-08-31
 
+### feat: measure the simulator's scheduling cadence (#248)
+
+- Added instrumentation to answer *why* an iOS peripheral refuses 8.80% of frames, since **Core Bluetooth cannot tell a peripheral its connection interval** — no API exists. Two measurements, both inferred from timing the simulator already had and discarded.
+- **Drain cadence** — gap between `peripheralManagerIsReady` callbacks, with min and max alongside the mean, plus notifications accepted per drain. In a saturated queue the gap *is* the connection interval and the accepted count *is* notifications per connection event, the figure #211's capacity table assumes. Measured: **1.0 – 4006.6 ms**, so the queue is nowhere near saturated and neither inference applies. Reporting the range is what made that visible; the mean alone would have looked like a plausible interval.
+- **CoreMotion inter-arrival** — mean **20.0 ms**, range **0.2 – 55.3 ms**. Average exactly right for 50 Hz, distribution badly clumped. `sensorRateHz` could never have shown this: bursts of five every 100 ms average to 50 Hz identically to an even stream.
+- Together these resolved #248, and not in its favour. The loss is **not** link capacity — the link is idle for seconds at a time. CoreMotion delivers clumped, `onSample` calls `notify()` synchronously with no buffer, and iOS's transmit queue cannot absorb the burst. The **firmware has an 8-deep `k_msgq`** for exactly this; the simulator has no equivalent. Fix filed as #255.
+- Three earlier framings of #248 died to cheap measurements rather than argument: attribution is misleading (no — the books balance, #247), iOS has a per-event ceiling of ~2.28 (no — that needs a saturated queue), our own 2 s GATT poll causes it (no — 928 refusals accumulated with the poll stopped).
+- Consequence worth more than the fix: **a simulator is not a faithful stand-in for the board on loss behaviour.** #226's premise holds for wire format and UI; it does not hold for anything measuring loss, gaps or attribution.
+- Timing uses `ContinuousClock`, so a wall-clock adjustment mid-run cannot skew it, and the first drain cycle is excluded from the accepted-per-drain mean — those frames were not bounded by a cycle and would bias it upward by however long the queue took to fill.
+
 ### feat: expose the granted connection parameters (#224)
 
 - New read-only Link Params characteristic (`C6560004-…`), 8 bytes: `interval_us` (u32), `latency` (u16), `timeout` (u16, 10 ms units). This exists because **Core Bluetooth exposes no API for connection parameters** — an iOS app cannot ask what interval it was granted, and only the peripheral can see it via `bt_conn_get_info()`, so the values have to travel back over GATT.

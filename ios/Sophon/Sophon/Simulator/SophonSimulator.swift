@@ -31,6 +31,18 @@ final class SophonSimulator {
         var lastFrame: MotionFrame?
         var stats = TxStats(sent: 0, noConn: 0, noBuffer: 0, other: 0)
         var queueFullRecoveries = 0
+        /// How often iOS drains the transmit queue, and how much it takes each
+        /// time. In the saturated regime this is the connection interval and the
+        /// notifications-per-event figure -- see SophonPeripheral (#248).
+        var readyGapMeanMillis: Double?
+        var readyGapMinMillis: Double?
+        var readyGapMaxMillis: Double?
+        var acceptedPerCycleMean: Double?
+        /// CoreMotion inter-arrival, which says whether generation is even or
+        /// bursty (#248).
+        var sampleGapMeanMillis: Double?
+        var sampleGapMinMillis: Double?
+        var sampleGapMaxMillis: Double?
         var keepAliveAuthorized = false
         var motionAvailable = true
     }
@@ -141,7 +153,42 @@ final class SophonSimulator {
 
     // MARK: - Sampling
 
+    /// Inter-arrival of CoreMotion deliveries: mean, shortest, longest, in ms.
+    ///
+    /// `sensorRateHz` is an average and cannot show clumping — 50 Hz delivered in
+    /// bursts of five every 100 ms averages to 50 Hz exactly like an even stream.
+    /// That distinction decides what #248 is about: an even stream refused at
+    /// 8.8% is a link capacity ceiling, whereas a bursty stream refused at 8.8%
+    /// is the transmit queue being unable to absorb a burst the link could
+    /// otherwise carry on average.
+    ///
+    /// Monotonic clock, so a wall-clock adjustment cannot skew it.
+    private(set) var sampleGapMeanMillis: Double?
+    private(set) var sampleGapMinMillis: Double?
+    private(set) var sampleGapMaxMillis: Double?
+    private var lastSampleAt: ContinuousClock.Instant?
+    private var sampleGapTotalMillis: Double = 0
+    private var sampleGapCount = 0
+
+    private func recordSampleArrival() {
+        let now = ContinuousClock.now
+        defer { lastSampleAt = now }
+        guard let last = lastSampleAt else { return }
+
+        let elapsed = (now - last).components
+        let gap = Double(elapsed.seconds) * 1000
+            + Double(elapsed.attoseconds) / 1_000_000_000_000_000
+
+        sampleGapTotalMillis += gap
+        sampleGapCount += 1
+        sampleGapMeanMillis = sampleGapTotalMillis / Double(sampleGapCount)
+        sampleGapMinMillis = min(sampleGapMinMillis ?? gap, gap)
+        sampleGapMaxMillis = max(sampleGapMaxMillis ?? gap, gap)
+    }
+
     private func onSample(_ sample: MotionSource.Sample) {
+        recordSampleArrival()
+
         // Unconditional, subscribers or not: it keeps the measured sensor rate
         // honest and the t_ms base anchored to the first sample after start.
         // imu.c's fetch is unconditional too, though for a harder reason — there,
@@ -211,6 +258,13 @@ final class SophonSimulator {
         display.lastFrame = lastFrame
         display.stats = peripheral.counters
         display.queueFullRecoveries = peripheral.queueFullRecoveries
+        display.readyGapMeanMillis = peripheral.readyGapMeanMillis
+        display.readyGapMinMillis = peripheral.readyGapMinMillis
+        display.readyGapMaxMillis = peripheral.readyGapMaxMillis
+        display.acceptedPerCycleMean = peripheral.acceptedPerCycleMean
+        display.sampleGapMeanMillis = sampleGapMeanMillis
+        display.sampleGapMinMillis = sampleGapMinMillis
+        display.sampleGapMaxMillis = sampleGapMaxMillis
         display.keepAliveAuthorized = keepAlive.isAuthorized
         display.motionAvailable = motion.isAvailable
     }

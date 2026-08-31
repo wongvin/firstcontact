@@ -27,6 +27,39 @@ final class SophonPeripheral: NSObject {
     /// visibility only — see `notify(_:)` for why nothing is retried.
     private(set) var queueFullRecoveries = 0
 
+    /// Mean, shortest and longest gap between `peripheralManagerIsReady`
+    /// callbacks, in milliseconds, or nil until two have been seen.
+    ///
+    /// **This is the only window this app has onto how often iOS schedules it.**
+    /// `CBPeripheralManager` cannot report the connection interval — no API
+    /// exists — so it is inferred from when the transmit queue is drained (#248).
+    ///
+    /// The inference holds only while the queue is **saturated**: once generation
+    /// outruns drain, every connection event frees space and fires this callback,
+    /// so the gap is the interval. If generation sits below capacity the queue
+    /// rarely fills, the callback fires sporadically, and the gap means nothing.
+    /// Min and max are reported alongside the mean precisely so that can be
+    /// judged rather than assumed — a mean of 50 ms with a range of 45-55 is an
+    /// interval; a mean of 50 ms spanning 8-400 is an artefact.
+    private(set) var readyGapMeanMillis: Double?
+    private(set) var readyGapMinMillis: Double?
+    private(set) var readyGapMaxMillis: Double?
+
+    /// Mean notifications accepted between consecutive drains.
+    ///
+    /// In the saturated regime this is **notifications placed per connection
+    /// event** — the figure #248 and #211 both rest on, and which has only ever
+    /// been derived from a frame rate and an assumed interval.
+    private(set) var acceptedPerCycleMean: Double?
+
+    /// Monotonic, so it cannot be skewed by a wall-clock adjustment mid-run.
+    private var lastReadyAt: ContinuousClock.Instant?
+    private var readyGapTotalMillis: Double = 0
+    private var readyGapSamples = 0
+    private var acceptedSinceReady = 0
+    private var acceptedInCyclesTotal = 0
+    private var acceptedCycles = 0
+
     /// Cumulative since this simulator started, never reset except by `reboot()`.
     /// Kept out of observation because they move at the sample rate.
     @ObservationIgnored private var sent: UInt32 = 0
@@ -104,6 +137,16 @@ final class SophonPeripheral: NSObject {
         sent = 0
         noConn = 0
         noBuffer = 0
+        readyGapMeanMillis = nil
+        readyGapMinMillis = nil
+        readyGapMaxMillis = nil
+        acceptedPerCycleMean = nil
+        lastReadyAt = nil
+        readyGapTotalMillis = 0
+        readyGapSamples = 0
+        acceptedSinceReady = 0
+        acceptedInCyclesTotal = 0
+        acceptedCycles = 0
         other = 0
         queueFullRecoveries = 0
     }
@@ -134,7 +177,12 @@ final class SophonPeripheral: NSObject {
         // rewound. `seq` is not even reachable from here — it lives in
         // SophonSimulator and has already advanced — and that is deliberate
         // structure rather than an accident of layering.
-        if accepted { sent &+= 1 } else { noBuffer &+= 1 }
+        if accepted {
+            sent &+= 1
+            acceptedSinceReady &+= 1
+        } else {
+            noBuffer &+= 1
+        }
         return accepted
     }
 
@@ -225,7 +273,42 @@ extension SophonPeripheral: CBPeripheralManagerDelegate {
             // bt_gatt_notify() every sample and lets the failures fall where
             // they may.
             queueFullRecoveries += 1
+            recordDrain()
         }
+    }
+
+    /// Records the cadence at which iOS drains the transmit queue.
+    ///
+    /// Called from `peripheralManagerIsReady`, which fires when space appears
+    /// after a refusal. Two things are worth knowing per drain: how long since
+    /// the last one, and how many notifications were accepted in between.
+    private func recordDrain() {
+        let now = ContinuousClock.now
+
+        if let last = lastReadyAt {
+            // 1 ms is 1e15 attoseconds. Spelled out rather than folded into a
+            // literal, because getting this wrong scales every reported figure by
+            // a thousand and still looks plausible.
+            let elapsed = (now - last).components
+            let gap = Double(elapsed.seconds) * 1000
+                + Double(elapsed.attoseconds) / 1_000_000_000_000_000
+
+            readyGapTotalMillis += gap
+            readyGapSamples += 1
+            readyGapMeanMillis = readyGapTotalMillis / Double(readyGapSamples)
+            readyGapMinMillis = min(readyGapMinMillis ?? gap, gap)
+            readyGapMaxMillis = max(readyGapMaxMillis ?? gap, gap)
+
+            // Only counted for a complete cycle -- the frames accepted before the
+            // FIRST drain were not bounded by one, so including them would bias
+            // the mean upward by however long the queue took to fill initially.
+            acceptedInCyclesTotal += acceptedSinceReady
+            acceptedCycles += 1
+            acceptedPerCycleMean = Double(acceptedInCyclesTotal) / Double(acceptedCycles)
+        }
+
+        lastReadyAt = now
+        acceptedSinceReady = 0
     }
 
     nonisolated func peripheralManager(
