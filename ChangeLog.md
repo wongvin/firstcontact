@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-08-31
+
+### feat: forget a released Sophon once it goes silent (#235)
+
+- A released board stayed in the list reading `Released` forever, in three situations the app cannot tell apart because all three produce **zero advertisements**: another central took it, it was powered off, or it went out of range. Only the first is reclaimable, but **Connect** was offered in all three — and `central.connect()` on iOS never times out, so tapping it stranded the device in `.connecting` with no feedback.
+- A released board that goes quiet past **15 s** is now dropped from the list and picked up again automatically if it returns. Forgetting discards `isReleasedByUser` along with the object, so rediscovery constructs a fresh device and the existing auto-connect path fires with no special case — the reconnect behaviour falls out of the removal rather than needing its own mechanism.
+- **Removal never takes away the screen you are on.** A row vanishing from a list is ordinary; the detail view becoming a view of nothing is not. So the sweep defers for the device whose detail view is open, and that view swaps **Connect** for an explanation and a **Back to Devices** button. `@Environment(\.dismiss)` pops a plain `NavigationLink` push, so this needed no `NavigationPath` refactor.
+- **Duplicate scan reporting is now conditional.** `allowDuplicates` is `true` only while something is released. With it `false` — the default — iOS consolidates repeat sightings into a single discovery event, so `lastSeenAt` would be stamped once and never move, and every released board would look stale within seconds regardless of reality.
+- iOS **ignores** `allowDuplicates` while backgrounded, freezing timestamps for the whole suspension, so returning to the foreground would have swept every released board at once. A `didBecomeActive` observer re-stamps them: the app has just started listening again and does not yet know anything.
+- **Staleness is model state, not a view computation.** Two attempts got this wrong before it worked: first computing it with `Date()` inside a view body, which nothing can observe — a quiet board changes nothing, so the body never re-evaluated; then owning the once-per-second sweep in the device list's `.task`, which `NavigationStack` cancels on push, stopping evaluation exactly while the detail view depending on it was open. The sweep now lives in `SophonHub`, running only while something is released.
+- **RSSI no longer flickers out of existence.** `127` is Core Bluetooth's *no reading available* sentinel, and the old code assigned `nil` on it, blanking a good value and taking the whole row with it. Invisible at one callback per board; at ~25 a second under duplicate reporting, plainly visible. Now ignored, per the same latching rule as `displayName` and `identity`.
+- **RSSI is smoothed** over the last 8 samples rather than showing the newest. Turning duplicates on exposed several-dB swing between consecutive advertisements; the mean is readable and is the better input for the `TX power − RSSI` estimate #230's TX power field exists to enable.
+- Found while testing this: RSSI is **never measured while connected** — `readRSSI()` is called nowhere, and a board stops advertising once taken, so the connected reading is frozen at whatever preceded the link. Filed as #237 rather than fixed here.
+
 ## 2026-08-29
 
 ### feat: connect/disconnect control per Sophon (#233)

@@ -29,7 +29,43 @@ final class SophonDevice: Identifiable {
     var displayName: String
 
     var state: State = .discovered
-    var rssi: Int?
+
+    /// Smoothed advertised signal strength in dBm, or nil if none has ever been
+    /// observed.
+    ///
+    /// A mean rather than the newest sample. RSSI swings several dB between
+    /// consecutive advertisements, and once `SophonHub` turns on duplicate
+    /// reporting (#235) those arrive tens of times a second, so the raw value is
+    /// unreadable. The mean is also the better input for a `TX power - RSSI`
+    /// distance estimate, which is what the field is ultimately for.
+    ///
+    /// **Frozen while connected.** A board stops advertising once taken, and the
+    /// app never calls `readRSSI()`, so this holds the last value seen before the
+    /// link came up rather than tracking it. See #237.
+    private(set) var rssi: Int?
+
+    /// Recent samples backing ``rssi``. Small on purpose: long enough to settle
+    /// the jitter, short enough to follow a board actually being moved.
+    private var rssiSamples: [Int] = []
+    private static let rssiWindow = 8
+
+    /// - Parameter sample: raw dBm from `didDiscover`.
+    ///
+    /// **127 means "no reading", not a reading of 127.** It is Core Bluetooth's
+    /// unavailable sentinel, and it must not blank a good value: with duplicate
+    /// reporting on, one sentinel among tens of samples a second was enough to
+    /// make the whole row flicker out of existence. Same latching rule as
+    /// `displayName` and `identity` -- a callback carrying nothing may not erase
+    /// what an earlier one carried.
+    func ingestRSSI(_ sample: Int) {
+        guard sample != 127 else { return }
+
+        rssiSamples.append(sample)
+        if rssiSamples.count > Self.rssiWindow { rssiSamples.removeFirst() }
+
+        let mean = Int((Double(rssiSamples.reduce(0, +)) / Double(rssiSamples.count)).rounded())
+        if mean != rssi { rssi = mean }
+    }
 
     /// The user has deliberately let this board go, so auto-connect must leave it
     /// alone until they say otherwise.
@@ -48,6 +84,58 @@ final class SophonDevice: Identifiable {
     /// Survives `resetLinkStats()` deliberately: it is a statement about the user,
     /// not about the session.
     var isReleasedByUser = false
+
+    /// When an advertisement from this board was last seen.
+    ///
+    /// Only meaningful while the scan is reporting duplicates, which `SophonHub`
+    /// turns on precisely when some device is released (#235). With duplicates
+    /// off — the normal case — iOS consolidates repeat sightings into a single
+    /// discovery event, so this would be stamped once and never move.
+    var lastSeenAt: Date?
+
+    /// How long a released board may go unheard before it is treated as gone.
+    ///
+    /// The board advertises at `BT_LE_ADV_CONN_FAST_1`, tens of times a second,
+    /// and duplicate reporting is on whenever anything is released — so a free
+    /// board produces hundreds of callbacks inside this window and total silence
+    /// is unambiguous. Long enough to absorb iOS scan scheduling and radio
+    /// contention; short enough that handing a board to another tablet does not
+    /// feel like a hang.
+    ///
+    /// Deliberately NOT `interruptionThreshold`, which is 5 s and tuned for a
+    /// ~52 Hz frame stream. Different signal, different scale.
+    static let releasedSilenceThreshold: TimeInterval = 15
+
+    /// A released board that has not been heard from inside the threshold.
+    ///
+    /// Means "not reclaimable right now" — another central has taken it, or it is
+    /// powered off, or out of range. The app cannot tell those apart, and does not
+    /// claim to.
+    ///
+    /// **Stored, not computed at render time.** It is a function of elapsed time,
+    /// and a view cannot observe the clock: once a board goes quiet nothing about
+    /// this object changes, so a body that called `Date()` itself would never be
+    /// re-evaluated and the UI would sit on the last answer forever. `SophonHub`'s
+    /// sweep re-evaluates this every second, and because it is `@Observable` the
+    /// views that read it redraw when it flips.
+    private(set) var isStaleReleased = false
+
+    /// Recomputes ``isStaleReleased``. Called by the sweep, not by a view.
+    func evaluateStaleness(asOf now: Date = Date()) {
+        let stale: Bool
+        if !isReleasedByUser || isHeld {
+            stale = false
+        } else if let lastSeenAt {
+            stale = now.timeIntervalSince(lastSeenAt) > Self.releasedSilenceThreshold
+        } else {
+            stale = true
+        }
+
+        // Only on change. Observation notifies on every assignment, equal or not,
+        // so writing this once a second for every device would redraw the whole
+        // list once a second for nothing.
+        if stale != isStaleReleased { isStaleReleased = stale }
+    }
 
     /// Whether the app is holding this board's single connection slot, or trying
     /// to. The connect/disconnect control is a function of exactly this.
@@ -192,12 +280,15 @@ final class SophonDevice: Identifiable {
         case stalled(silentFor: TimeInterval)
         case disconnected
         /// Disconnected because the user asked for it, and staying that way.
+        /// `silentFor` is how long since an advertisement was last heard, so a
+        /// released board that is still on the air can be told from one that has
+        /// been taken by someone else.
         ///
         /// Distinct from `disconnected` because the two mean opposite things to a
         /// reader: one is something going wrong, the other is the app doing as it
         /// was told. Reporting a deliberate release in red as a fault would be the
         /// same category of lie this type exists to avoid.
-        case released
+        case released(silentFor: TimeInterval)
     }
 
     /// Takes `now` explicitly so the caller controls when this is re-evaluated --
@@ -206,7 +297,9 @@ final class SophonDevice: Identifiable {
     func linkStatus(asOf now: Date = Date()) -> LinkStatus {
         // Checked before `state`, because a released board sits in `.disconnected`
         // and would otherwise be indistinguishable from one that dropped out.
-        if isReleasedByUser, !state.isConnected { return .released }
+        if isReleasedByUser, !state.isConnected {
+            return .released(silentFor: lastSeenAt.map { now.timeIntervalSince($0) } ?? .infinity)
+        }
 
         switch state {
         case .discovered: return .discovered
