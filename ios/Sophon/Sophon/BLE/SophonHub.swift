@@ -28,6 +28,7 @@ final class SophonHub: NSObject {
     private var byID: [UUID: SophonDevice] = [:]
     /// Held per device so stats can be re-read on demand without rediscovering.
     private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
+    private var linkParamsCharacteristics: [UUID: CBCharacteristic] = [:]
 
     /// Peripherals that accepted a connection but had no Sophon service behind
     /// it. Tracked so the disconnect they are about to get is not treated as a
@@ -171,6 +172,7 @@ final class SophonHub: NSObject {
         byID[device.id] = nil
         devices.removeAll { $0.id == device.id }
         statsCharacteristics[device.id] = nil
+        linkParamsCharacteristics[device.id] = nil
         withoutService.remove(device.id)
         log.info("forgot \(device.displayName, privacy: .public)")
         applyRadioState()
@@ -228,6 +230,12 @@ final class SophonHub: NSObject {
     /// Re-read the board's transmit counters. Cheap and on demand — deliberately
     /// not a subscription, so it costs no connection-event budget.
     func refreshStats(_ device: SophonDevice) {
+        // Link params ride the same poll. They change rarely, but "rarely" is not
+        // "never" -- iOS stretches the interval to save power -- and a value that
+        // is only ever read at connect is one nobody notices going stale (#224).
+        if let params = linkParamsCharacteristics[device.id] {
+            device.peripheral.readValue(for: params)
+        }
         guard let characteristic = statsCharacteristics[device.id] else { return }
         device.peripheral.readValue(for: characteristic)
     }
@@ -316,6 +324,7 @@ final class SophonHub: NSObject {
             device.endSession()
         }
         statsCharacteristics.removeAll()
+        linkParamsCharacteristics.removeAll()
     }
 
     /// Put the central back on the air after `suspend()`.
@@ -474,6 +483,7 @@ extension SophonHub: CBCentralManagerDelegate {
             device.endSession()
             self.log.info("disconnected \(device.displayName, privacy: .public)")
             self.statsCharacteristics[peripheral.identifier] = nil
+            self.linkParamsCharacteristics[peripheral.identifier] = nil
 
             // Do not re-arm a link that was dropped on purpose. Without this,
             // suspend()'s cancels each bounce straight back into a connect() and
@@ -546,9 +556,15 @@ extension SophonHub: CBPeripheralDelegate {
             // link -- and everything below is ordered behind it.
             self.byID[peripheral.identifier]?.beginSession()
 
+            // Explicitly filtered rather than passing nil, which is cheaper --
+            // but it means a new characteristic must be added HERE as well as to
+            // the switch in didDiscoverCharacteristicsFor. Adding only the handler
+            // is silent: the characteristic is never discovered, so the handler
+            // never runs and the UI simply shows nothing (#224).
             peripheral.discoverCharacteristics(
                 [SophonProtocol.motionCharacteristicUUID,
-                 SophonProtocol.statsCharacteristicUUID],
+                 SophonProtocol.statsCharacteristicUUID,
+                 SophonProtocol.linkParamsCharacteristicUUID],
                 for: sophon)
         }
     }
@@ -571,6 +587,12 @@ extension SophonHub: CBPeripheralDelegate {
                     // Read once at session start to establish the baseline; after
                     // that it is refreshed on demand from the detail view.
                     self.statsCharacteristics[peripheral.identifier] = characteristic
+                    peripheral.readValue(for: characteristic)
+                case SophonProtocol.linkParamsCharacteristicUUID:
+                    // Read once here, and again whenever stats are refreshed --
+                    // iOS revises the interval on its own schedule, so a value
+                    // read only at connect goes quietly stale (#224).
+                    self.linkParamsCharacteristics[peripheral.identifier] = characteristic
                     peripheral.readValue(for: characteristic)
                 default:
                     break
@@ -596,6 +618,20 @@ extension SophonHub: CBPeripheralDelegate {
             }
             Task { @MainActor in
                 self.byID[peripheral.identifier]?.ingest(stats)
+            }
+            return
+        }
+
+        if characteristic.uuid == SophonProtocol.linkParamsCharacteristicUUID {
+            let byteCount = data.count
+            guard let params = LinkParams(data) else {
+                Task { @MainActor in
+                    self.log.error("bad link params: \(byteCount) bytes, expected \(LinkParams.wireSize)")
+                }
+                return
+            }
+            Task { @MainActor in
+                self.byID[peripheral.identifier]?.linkParams = params
             }
             return
         }

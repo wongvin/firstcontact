@@ -21,6 +21,7 @@ following the Nordic UART convention.
 | Sophon Motion Service | `C6560001-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Motion Data characteristic (notify) | `C6560002-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | TX Stats characteristic (read) | `C6560003-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| Link Params characteristic (read) | `C6560004-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -33,6 +34,45 @@ The TX Stats characteristic is **read-only, and deliberately not a notify**. The
 counters move slowly and are diagnostics; a subscription would spend
 connection-event budget, which is the exact resource the counters exist to help
 measure. Instrumenting a scarce resource by consuming it defeats the point.
+
+The Link Params characteristic is read-only for the same reason, and exists for a
+sharper one: **Core Bluetooth exposes no API for connection parameters.** An iOS
+app cannot ask what interval, latency or supervision timeout it was granted. Only
+the peripheral can, via `bt_conn_get_info()`, so the values have to travel back
+over GATT to reach the side that needs them.
+
+## Link Params frame
+
+8 bytes, little-endian. Read from the live connection each time, never cached — a
+stale interval is exactly the kind of number that gets believed, and nobody on the
+central side can check it.
+
+| Offset | Size | Type | Field | Units |
+|---|---|---|---|---|
+| 0 | 4 | `u32` | `interval_us` | microseconds |
+| 4 | 2 | `u16` | `latency` | connection events the peripheral may skip |
+| 6 | 2 | `u16` | `timeout` | supervision timeout, **10 ms units** |
+
+`interval_us` rather than the 1.25 ms `interval` field: that one is `__deprecated`
+in Zephyr 4.4 and builds with a warning. The `le_param_updated` callback still
+hands back the old unit, so the firmware ignores its arguments and re-reads
+`bt_conn_get_info()` instead — no conversion to get wrong.
+
+8 bytes fits the 20-byte value budget at the default 23-byte ATT MTU, so this
+needs no MTU change and never fragments, the same constraint that shaped the
+motion and stats frames.
+
+### Why this is the number that matters
+
+Buffer refusals, frame gaps and stream latency are all governed by the interval
+iOS grants, and iOS revises it on its own schedule — notably stretching it to save
+power. During #209, a board streaming to a sleeping iPhone produced transmit
+refusals and frame loss, and the diagnosis detoured through buffer sizing before
+the cause turned out to be a stretched interval.
+
+The useful derived form is **events per second** (`1 / interval`), because that is
+what a sample rate has to fit through. 50 Hz of frames cannot pass through 25
+events/s, which is the arithmetic #248 is about.
 
 ## Frame
 
@@ -395,6 +435,7 @@ The simulator honours the parts of this document that matter — frame layout, t
 | `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
 | Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
 | Scan-response identity | device type, versions, TX power | **none of it — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
+| Link Params | reported from `bt_conn_get_info()` | **absent — the characteristic is not offered.** `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot see what it was granted any more than an iOS central can. The rows simply do not appear |
 | `t_ms` | since board boot | since simulator start |
 | Rate | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
 

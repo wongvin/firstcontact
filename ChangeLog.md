@@ -2,6 +2,16 @@
 
 ## 2026-08-31
 
+### feat: expose the granted connection parameters (#224)
+
+- New read-only Link Params characteristic (`C6560004-…`), 8 bytes: `interval_us` (u32), `latency` (u16), `timeout` (u16, 10 ms units). This exists because **Core Bluetooth exposes no API for connection parameters** — an iOS app cannot ask what interval it was granted, and only the peripheral can see it via `bt_conn_get_info()`, so the values have to travel back over GATT.
+- **First reading: interval 50.00 ms, latency 0, supervision timeout 420 ms** on the board → iPad link. Two things fall out immediately. The board must place **~2.71 notifications per connection event** to sustain ~54.3 Hz through 20 events/s — the figure `UPDATED-PLAN.md`'s capacity table assumes and never measured, and the one #211 rests on. And a dead board's link drops after 420 ms, nearly **12× sooner** than the 5 s stall window opens, which is why cutting power always gives `Disconnected`: argued during #242, now measured.
+- Read **from the live connection** on each GATT read rather than from a cache. The issue asked for capture-on-connect plus refresh-in-callback; reading through `conn` cannot go stale, and a stale interval is exactly the kind of number that gets believed, since the central cannot check it. Logged at connect and on every update regardless.
+- `le_param_updated`'s arguments are ignored — they carry the 1.25 ms unit that is `__deprecated` in Zephyr 4.4. Re-reading `bt_conn_get_info()` gives `interval_us` with no conversion to get wrong.
+- App reads it at discovery and refreshes it on the existing 2 s poll, not only at connect, because iOS revises the interval on its own schedule — notably stretching it to save power, which is what #209's frame loss turned out to be. Session-scoped, so `resetLinkStats()` clears it: unlike `identity`/`txPower`, these describe *this connection*.
+- `PROTOCOL.md` gains the UUID, the layout, why read rather than notify, and a simulator-divergence row: `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot report what it was granted any more than an iOS central can read it.
+- One bug worth recording: the rows did not appear on first deploy. `discoverCharacteristics` is **UUID-filtered**, and the new characteristic was added to the handler `switch` but not to the discovery list twenty lines above. Silent failure — never discovered, handler never runs, UI shows nothing, indistinguishable from a peripheral that does not offer it. Commented at the discovery site so the next one is added in both places.
+
 ### fix: Lost on air compared mismatched windows (#247)
 
 - `Lost on air` sawtoothed — climbing to about 20, collapsing to zero, repeating — reading exactly like intermittent air loss when the true value was zero. `lostOnAir` was `max(0, seqGaps - noBuffer)`, and `seqGaps` advances as frames arrive while `noBuffer` only refreshes on the 2 s stats poll. The two terms covered different windows, *connect → now* against *connect → last poll*, so the difference measured the poll interval rather than the link.

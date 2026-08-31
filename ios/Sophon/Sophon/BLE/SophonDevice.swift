@@ -162,6 +162,16 @@ final class SophonDevice: Identifiable {
     /// `beginSession()` to recover the value.
     var identity: SophonIdentity?
 
+    /// The connection parameters the peripheral reports iOS granted, or nil if the
+    /// characteristic has not been read yet — or the peripheral does not offer it,
+    /// which is every board on firmware older than #224 and every simulator.
+    ///
+    /// **Session-scoped**: cleared by `resetLinkStats()`, unlike `identity` and
+    /// `txPower`. These describe *this connection*, so carrying them across one
+    /// would be asserting an interval that a reconnect may well have changed —
+    /// the same lifetime question `attMTU` answers the same way.
+    var linkParams: LinkParams?
+
     /// Advertised TX power in dBm, from the standard AD type. Signed.
     var txPower: Int?
 
@@ -482,6 +492,7 @@ final class SophonDevice: Identifiable {
         lastFrame = nil
         lastFrameAt = nil
         attMTU = nil
+        linkParams = nil
         txStats = nil
         txStatsAtConnect = nil
         txStatsAt = nil

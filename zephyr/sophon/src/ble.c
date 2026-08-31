@@ -30,6 +30,8 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
 	BT_UUID_128_ENCODE(0xC6560002, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_STATS \
 	BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_LINK_PARAMS \
+	BT_UUID_128_ENCODE(0xC6560004, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
 static const struct bt_uuid_128 sophon_service_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
@@ -37,6 +39,8 @@ static const struct bt_uuid_128 sophon_motion_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_MOTION);
 static const struct bt_uuid_128 sophon_stats_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_STATS);
+static const struct bt_uuid_128 sophon_link_params_uuid =
+	BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -59,6 +63,42 @@ static void motion_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
  * very resource #211 exists to measure. Instrumenting a scarce resource by
  * consuming it defeats the point.
  */
+/*
+ * Read straight from the live connection rather than from a cached copy.
+ *
+ * A cache would need invalidating on every parameter update and on disconnect,
+ * and a stale interval is exactly the kind of number that gets believed -- the
+ * whole point of this characteristic is that nobody can check it from the other
+ * side. Reading through `conn` cannot go stale: a read only happens while
+ * connected, and the value is whatever the link is using at that moment.
+ */
+static ssize_t link_params_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+				void *buf, uint16_t len, uint16_t offset)
+{
+	struct bt_conn_info info;
+	struct sophon_link_params params;
+	uint8_t wire[SOPHON_LINK_PARAMS_SIZE];
+	int err;
+
+	err = bt_conn_get_info(conn, &info);
+	if (err) {
+		LOG_WRN("bt_conn_get_info failed (%d)", err);
+		return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+	}
+
+	if (info.type != BT_CONN_TYPE_LE) {
+		return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+	}
+
+	params.interval_us = info.le.interval_us;
+	params.latency = info.le.latency;
+	params.timeout = info.le.timeout;
+
+	sophon_link_params_pack(&params, wire);
+
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
+}
+
 static ssize_t stats_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			  void *buf, uint16_t len, uint16_t offset)
 {
@@ -84,6 +124,15 @@ BT_GATT_SERVICE_DEFINE(sophon_svc,
 			       BT_GATT_CHRC_READ,
 			       BT_GATT_PERM_READ,
 			       stats_read, NULL, NULL),
+	/*
+	 * Read, not notify. These change rarely, and a subscription would spend
+	 * the connection-event budget these values exist to explain -- the same
+	 * reasoning that made the stats characteristic a read (#224).
+	 */
+	BT_GATT_CHARACTERISTIC(&sophon_link_params_uuid.uuid,
+			       BT_GATT_CHRC_READ,
+			       BT_GATT_PERM_READ,
+			       link_params_read, NULL, NULL),
 );
 
 /*
@@ -194,6 +243,36 @@ static void adv_work_handler(struct k_work *work)
 
 static K_WORK_DEFINE(adv_work, adv_work_handler);
 
+/*
+ * Console is not a substitute for the characteristic -- the question gets asked
+ * with a phone in hand -- but it is the fastest read during bench bring-up, and
+ * it is the only record once the app has moved on.
+ */
+static void log_link_params(struct bt_conn *conn, const char *what)
+{
+	struct bt_conn_info info;
+	int err;
+
+	err = bt_conn_get_info(conn, &info);
+	if (err || info.type != BT_CONN_TYPE_LE) {
+		LOG_WRN("link params unavailable (%d)", err);
+		return;
+	}
+
+	/*
+	 * Printed in ms as well as microseconds because the interval is what gets
+	 * compared against the sample period by hand: 18.4 ms per frame against a
+	 * 30 ms interval is the shape of an explanation, 18400 us against 30000 us
+	 * is arithmetic homework. Timeout is in 10 ms units on the wire.
+	 */
+	LOG_INF("link params %s: interval %u us (%u.%02u ms), latency %u, timeout %u ms",
+		what,
+		info.le.interval_us,
+		info.le.interval_us / 1000U, (info.le.interval_us % 1000U) / 10U,
+		info.le.latency,
+		info.le.timeout * 10U);
+}
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
@@ -210,6 +289,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	 * is what explains why.
 	 */
 	LOG_INF("connected, ATT MTU %u", bt_gatt_get_mtu(conn));
+	log_link_params(conn, "granted");
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -227,9 +307,29 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	k_work_submit(&adv_work);
 }
 
+/*
+ * iOS revises the interval on its own schedule -- notably stretching it to save
+ * power, which is what #209's frame loss turned out to be -- so the value at
+ * connect is not the value in force a minute later.
+ *
+ * The callback's own `interval` argument is deliberately ignored: it carries the
+ * deprecated 1.25 ms unit, and re-reading through bt_conn_get_info() gets
+ * `interval_us` without a conversion to get wrong.
+ */
+static void le_param_updated(struct bt_conn *conn, uint16_t interval,
+			     uint16_t latency, uint16_t timeout)
+{
+	ARG_UNUSED(interval);
+	ARG_UNUSED(latency);
+	ARG_UNUSED(timeout);
+
+	log_link_params(conn, "updated");
+}
+
 BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.connected = connected,
 	.disconnected = disconnected,
+	.le_param_updated = le_param_updated,
 };
 
 bool sophon_ble_connected(void)
@@ -286,6 +386,14 @@ void sophon_stats_pack(const struct sophon_tx_stats *in, uint8_t out[SOPHON_STAT
 	sys_put_le32(in->no_conn, &out[4]);
 	sys_put_le32(in->no_mem,  &out[8]);
 	sys_put_le32(in->other,   &out[12]);
+}
+
+void sophon_link_params_pack(const struct sophon_link_params *in,
+			     uint8_t out[SOPHON_LINK_PARAMS_SIZE])
+{
+	sys_put_le32(in->interval_us, &out[0]);
+	sys_put_le16(in->latency,     &out[4]);
+	sys_put_le16(in->timeout,     &out[6]);
 }
 
 void sophon_ble_tx_stats(struct sophon_tx_stats *out)
