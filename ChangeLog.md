@@ -2,6 +2,14 @@
 
 ## 2026-08-31
 
+### fix: Lost on air compared mismatched windows (#247)
+
+- `Lost on air` sawtoothed — climbing to about 20, collapsing to zero, repeating — reading exactly like intermittent air loss when the true value was zero. `lostOnAir` was `max(0, seqGaps - noBuffer)`, and `seqGaps` advances as frames arrive while `noBuffer` only refreshes on the 2 s stats poll. The two terms covered different windows, *connect → now* against *connect → last poll*, so the difference measured the poll interval rather than the link.
+- The code had already argued itself out of this: the comment claimed the terms are *"event counts over the same window, not snapshots taken at different instants"*. Both are counts, so the earlier `sent - received` bug was avoided — but switching to counts removed the instantaneous-sampling problem and left the window mismatch untouched. Second version of this calculation to be wrong in the same way. `seqGaps` is now snapshotted in `ingest(_:)` beside the counters it is differenced against, so the figure moves once per poll: a statement about the last read rather than a live value.
+- **`Lost on link` renamed to `Gaps in sequence`.** That label caused the original report. A hole means a frame is *missing* and says nothing about where it went; on an iOS-to-iOS link essentially all of them never reached a link to be lost on. Attribution belongs to the transmit counters, which do it correctly.
+- The investigation's own premise was wrong and is recorded as such. I argued `noBuffer` was structurally blind on iOS because `updateValue` returning true means *queued*, not *sent*. Measurement disproved it: `received == sent`, `gaps == noBuffer`, `Last seq ≈ received + gaps` — the books balance and there is **no air loss**. Note the first two are independent cross-checks between central-observed and peripheral-reported counts, while the third is an identity, since `seqGaps` derives from seq discontinuities.
+- The same measurement contradicted a load-bearing claim: `updateValue` fails ~10×/s at 50 Hz, where the code says it "essentially never fails". Filed as #248 — the artificial drop control's rationale is void, and the real question is connection-event capacity, the one figure #211 leans on that has never been measured.
+
 ### fix: the stall explanation can now appear during a stall (#242)
 
 - `DeviceDetailView`'s State row was wrapped in a `TimelineView`; the footer explaining the stall, and the `Not responding.` text under the transmit counters, were not. All three read `linkStatus()` at body-evaluation time. During a stall **nothing observable on the device changes** — frames stop, the stats read goes unanswered — so those bodies were never re-evaluated and the text written for that exact situation could not render in it. The State row ticked over inside its own timeline while its own explanation stayed hidden.

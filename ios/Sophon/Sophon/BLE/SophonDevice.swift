@@ -212,6 +212,14 @@ final class SophonDevice: Identifiable {
     /// baseline is not subtracted from a window it never belonged to.
     private var interruptedFramesAtStatsBaseline: Int = 0
 
+    /// `seqGaps` as it stood when the most recent stats read landed.
+    ///
+    /// Exists so `lostOnAir` can subtract two counts covering the SAME window.
+    /// `seqGaps` advances as frames arrive; `noBuffer` only refreshes on the 2 s
+    /// poll, so differencing the live one against the stale one measures the poll
+    /// interval rather than the link (#247).
+    private var seqGapsAtStatsRead: Int = 0
+
     private var previousFrame: MotionFrame?
     /// Set when iOS reports the app left the foreground, cleared by the next
     /// frame that arrives. Any gap spanning it is an interruption regardless of
@@ -479,6 +487,7 @@ final class SophonDevice: Identifiable {
         txStatsAt = nil
         framesAtStatsBaseline = 0
         interruptedFramesAtStatsBaseline = 0
+        seqGapsAtStatsRead = 0
     }
 
     func ingest(_ stats: TxStats) {
@@ -500,6 +509,10 @@ final class SophonDevice: Identifiable {
         }
         txStats = stats
         txStatsAt = Date()
+
+        // Paired with the counters that just arrived, not read later. Both terms
+        // of lostOnAir then cover connect -> this read.
+        seqGapsAtStatsRead = seqGaps
     }
 
     /// Board-side counters scoped to **this connection**, which is the only form
@@ -518,21 +531,29 @@ final class SophonDevice: Identifiable {
     }
 
     /// Frames that were produced and never arrived, excluding the ones the
-    /// board dropped before they reached the air.
+    /// peripheral dropped before they reached the air.
     ///
-    /// Derived from two **event counts over the same window**, not from two
-    /// snapshots taken at different instants. `seqGaps` counts holes in the
-    /// sequence; `noBuffer` counts sends the board itself refused. Subtracting
-    /// leaves what was handed to the radio and lost.
+    /// **As of the last stats read, not as of now** -- which is the whole point.
+    /// `seqGaps` counts holes in the sequence; `noBuffer` counts sends the
+    /// peripheral itself refused. Subtracting leaves what was handed to the radio
+    /// and lost, but only if both counts cover the same window.
     ///
-    /// The earlier version computed `sent - received`, which cannot work:
-    /// those two are sampled on different clocks, so at read time the board has
-    /// usually just sent a frame the app has not decoded yet. Reading them a
-    /// poll apart only traded the resulting flicker for a permanent zero.
-    /// Counting events sidesteps the question entirely -- neither term is an
-    /// instantaneous reading.
+    /// Two earlier versions of this got it wrong in the same way. The first
+    /// computed `sent - received`, two values sampled on different clocks. The
+    /// second -- this one until #247 -- switched to event counts and claimed that
+    /// "sidesteps the question entirely", which was half right: counting events
+    /// removes the instantaneous-sampling problem but not the WINDOW MISMATCH.
+    /// `seqGaps` advanced as frames arrived while `noBuffer` sat up to a poll
+    /// behind, so the difference climbed for two seconds and collapsed when a
+    /// fresh read landed. Measured on an iOS-to-iOS link: a sawtooth to about 20
+    /// and back to zero, over and over, reading exactly like intermittent air
+    /// loss when the true value was zero.
+    ///
+    /// So `seqGaps` is snapshotted in `ingest(_:)` alongside the counters it will
+    /// be differenced against. The figure now moves once per poll rather than
+    /// continuously, which is honest: it is a statement about the last read.
     var lostOnAir: Int? {
         guard let tx = txThisSession else { return nil }
-        return max(0, seqGaps - Int(tx.noBuffer))
+        return max(0, seqGapsAtStatsRead - Int(tx.noBuffer))
     }
 }
