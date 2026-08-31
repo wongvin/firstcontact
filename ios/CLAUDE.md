@@ -84,6 +84,22 @@ issues the simulator misses (true `backdrop-filter` rendering, scroll inertia,
 real network conditions). But it's the cheapest, most reliable check for the
 whole class of bugs that compile fine yet render wrong.
 
+### Reviewing Swift changes
+
+The **`swift-reviewer`** agent (`.claude/agents/swift-reviewer.md`) checks the
+class of defect that neither a build nor a screenshot can catch: time-dependent
+state read in a view body, model upkeep owned by a view's lifecycle, actor
+isolation at Core Bluetooth boundaries, state-lifetime confusion in resets, and
+Core Bluetooth signals read as meaning more than they say.
+
+Its rules are not style preferences — each one is a defect that actually shipped
+or nearly shipped here, and is cited to the code that now does it correctly. Run
+it on any diff touching `ios/`, ideally before the issue moves to In review.
+
+It reports and does not edit. `.claude/agents/swift-reviewer-fixtures.md` holds
+the known-bad code it must still catch; re-run it against those whenever the
+agent changes, and check it does *not* flag the fixed versions.
+
 ### Deploying to a physical device
 
 The simulator can't drive gestures (long-press, swipe, context menus) or real
