@@ -97,7 +97,8 @@ private struct ViewerView: View {
                         onRefresh: { hub.refreshStats(device) },
                         onToggleConnection: {
                             if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
-                        }
+                        },
+                        onScreen: { hub.setDeviceOnScreen($0 ? device.id : nil) }
                     )
                 } label: {
                     DeviceRow(device: device)
@@ -110,11 +111,20 @@ private struct ViewerView: View {
                 .swipeActions(edge: .trailing) {
                     if device.isHeld {
                         Button("Release") { hub.release(device) }.tint(.orange)
-                    } else {
+                    } else if !device.isStaleReleased {
+                        // Offered only while the board is actually reachable.
+                        // connect() on iOS never times out, so on a board that has
+                        // gone quiet this would strand the device in .connecting
+                        // with nothing to show for it.
                         Button("Connect") { hub.reclaim(device) }.tint(.green)
                     }
                 }
             }
+            // The sweep that drives this lives in SophonHub, deliberately not in a
+            // .task here: a NavigationStack cancels this view's tasks as soon as a
+            // detail view is pushed, which is precisely when staleness still needs
+            // evaluating.
+            .animation(.default, value: hub.devices.count)
         }
     }
 }
@@ -216,6 +226,13 @@ private struct DeviceDetailView: View {
     let device: SophonDevice
     let onRefresh: () -> Void
     let onToggleConnection: () -> Void
+    let onScreen: (Bool) -> Void
+
+    /// Pops this view off the NavigationStack. Note this needs no `NavigationPath`
+    /// and no selection binding — `DismissAction` works on a plain
+    /// `NavigationLink` push, which is what keeps this free of the navigation
+    /// refactor #235 was written to avoid.
+    @Environment(\.dismiss) private var dismiss
 
     /// What the app knows it observed — not a claim about the peripheral. Worded
     /// so it does not read as a fault, because for every simulator it is
@@ -273,6 +290,11 @@ private struct DeviceDetailView: View {
         }
         .navigationTitle(device.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        // Tell the hub not to sweep this one while it is being looked at. The
+        // back chevron is what releases it, so the row disappears on return to
+        // the list rather than out from under the reader (#235).
+        .onAppear { onScreen(true) }
+        .onDisappear { onScreen(false) }
         // .task sits on the Group, not inside a branch, so the polling behaves
         // identically in both layouts — and is still cancelled automatically
         // when the view disappears.
@@ -324,9 +346,24 @@ private struct DeviceDetailView: View {
             // The visible control. The swipe action on the list row is the fast
             // path; this is the discoverable one, since a swipe affordance is
             // invisible until you try it.
-            Button(role: device.isHeld ? .destructive : nil, action: onToggleConnection) {
-                Text(device.isHeld ? "Release board" : "Connect")
+            //
+            // Withdrawn once a released board goes quiet: connect() on iOS never
+            // times out, so the button would sit there looking live while doing
+            // nothing at all. Saying why beats offering a control that lies.
+            if device.isStaleReleased {
+                // Takes the place of Connect once the board has gone quiet. The
+                // sweep is deferred while this view is on screen, so leaving is
+                // what actually retires the entry — this offers that as the
+                // action rather than leaving the reader to find the back chevron.
+                // The explanation sits in the section footer, where every other
+                // explanation in this view lives.
+                Button("Back to Devices") { dismiss() }
                     .frame(maxWidth: .infinity, alignment: .center)
+            } else {
+                Button(role: device.isHeld ? .destructive : nil, action: onToggleConnection) {
+                    Text(device.isHeld ? "Release board" : "Connect")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
         } header: {
             Text("Link")
@@ -335,7 +372,11 @@ private struct DeviceDetailView: View {
                 Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
             }
             if case .released = device.linkStatus() {
-                Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
+                if device.isStaleReleased {
+                    Text("Not reachable. Another device may have taken this board, or it is off or out of range — it stops advertising either way, so the app cannot tell which. It will be dropped from the list when you go back, and picked up again automatically if it returns.")
+                } else {
+                    Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
+                }
             }
             if device.identity == nil {
                 Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon never reports these — nor does a board running firmware older than #230.")
@@ -486,7 +527,12 @@ private extension SophonDevice.LinkStatus {
         // Says both halves, because both are true and only together are they
         // useful: the link is up, and no data is coming over it.
         case .stalled(let silent): "Connected · no data \(Int(silent))s"
-        case .released: "Released"
+        // Silence is worth saying out loud: a released board still on the air can
+        // be taken back, one that has gone quiet cannot.
+        case .released(let silent):
+            if silent <= SophonDevice.releasedSilenceThreshold { "Released" }
+            else if silent.isFinite { "Released · not seen \(Int(silent))s" }
+            else { "Released · not seen" }
         }
     }
 

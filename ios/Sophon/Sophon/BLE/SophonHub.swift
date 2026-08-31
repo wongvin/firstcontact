@@ -33,6 +33,28 @@ final class SophonHub: NSObject {
     /// it. Tracked so the disconnect they are about to get is not treated as a
     /// dropout worth re-arming against. See `didDiscoverServices`.
     private var withoutService: Set<UUID> = []
+
+    /// Which duplicate-reporting mode the running scan was started with, so
+    /// `applyRadioState()` can tell when it needs restarting rather than
+    /// assuming the option is fixed.
+    private var scanningWithDuplicates = false
+
+    /// The device whose detail view is on screen, if any. Removal is deferred for
+    /// it: taking away the screen someone is standing on is the one thing this
+    /// feature must not do (#235).
+    private var deviceOnScreen: UUID?
+
+    /// Drives ``forgetStaleReleased()``.
+    ///
+    /// Owned by the hub, NOT by a view. An earlier attempt hung this off the
+    /// device list's `.task`, which a NavigationStack cancels the moment a detail
+    /// view is pushed -- so staleness stopped being evaluated exactly while
+    /// someone was looking at the screen that depends on it, and the control
+    /// never changed. Staleness is model state and the model has to maintain it.
+    ///
+    /// Runs only while something is released, which is the only time the answer
+    /// can change.
+    private var sweepTask: Task<Void, Never>?
     private let log = Logger(subsystem: "com.vwong.Sophon", category: "ble")
 
     override init() {
@@ -57,6 +79,27 @@ final class SophonHub: NSObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.devices.forEach { $0.noteSuspended() }
+                }
+            }
+        }
+
+        // iOS IGNORES allowDuplicates while backgrounded, so lastSeenAt freezes
+        // for the whole suspension no matter how healthily a board is
+        // advertising. Returning to the foreground would then look like every
+        // released device had gone silent, and the sweep would forget all of them
+        // at once (#235).
+        //
+        // Re-stamping gives them a fresh window to prove themselves in, which is
+        // the honest reading: the app has just started listening again and does
+        // not yet know anything.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let now = Date()
+                for device in self.devices where device.isReleasedByUser {
+                    device.lastSeenAt = now
                 }
             }
         }
@@ -91,14 +134,78 @@ final class SophonHub: NSObject {
     /// re-arms the connection being torn down.
     func release(_ device: SophonDevice) {
         device.isReleasedByUser = true
+        // Start the clock now. Nothing has been heard since the release as far as
+        // this feature is concerned, and the board is about to stop being ours.
+        device.lastSeenAt = Date()
         central.cancelPeripheralConnection(device.peripheral)
+        applyRadioState()
+        applySweepState()
     }
 
     /// Take a released board back, or connect one that was never auto-connected.
     func reclaim(_ device: SophonDevice) {
         device.isReleasedByUser = false
         connect(device)
+        // Back to consolidated discovery if nothing else is released.
+        applyRadioState()
+        applySweepState()
     }
+
+    /// Drop a board the app can no longer see, so the list stops implying it is
+    /// there (#235).
+    ///
+    /// Every collection keyed by this peripheral goes together — leaving an entry
+    /// in any of them would resurrect a half-device on rediscovery. Forgetting
+    /// also discards `isReleasedByUser` along with the object, so when the board
+    /// advertises again it is discovered fresh and auto-connects with no special
+    /// case anywhere.
+    func forget(_ device: SophonDevice) {
+        byID[device.id] = nil
+        devices.removeAll { $0.id == device.id }
+        statsCharacteristics[device.id] = nil
+        withoutService.remove(device.id)
+        log.info("forgot \(device.displayName, privacy: .public)")
+        applyRadioState()
+        applySweepState()
+    }
+
+    /// Sweep released boards that have gone quiet.
+    ///
+    /// Skips the one whose detail view is open: a row vanishing from a list is
+    /// ordinary, but pulling the screen out from under someone is not.
+    /// Starts or stops the sweep to match whether anything is released.
+    private func applySweepState() {
+        let wantSweep = devices.contains { $0.isReleasedByUser }
+
+        guard wantSweep else {
+            sweepTask?.cancel()
+            sweepTask = nil
+            return
+        }
+        guard sweepTask == nil else { return }
+
+        sweepTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.forgetStaleReleased()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    func forgetStaleReleased(asOf now: Date = Date()) {
+        // Two passes on purpose. The first updates every device, including the one
+        // being looked at -- that is what lets its detail view redraw and swap
+        // Connect for an explanation. The second removes only the ones nobody is
+        // standing on.
+        for device in devices { device.evaluateStaleness(asOf: now) }
+
+        for device in devices where device.id != deviceOnScreen && device.isStaleReleased {
+            forget(device)
+        }
+    }
+
+    /// Called by the detail view so the sweep can leave its device alone.
+    func setDeviceOnScreen(_ id: UUID?) { deviceOnScreen = id }
 
     /// Re-read the board's transmit counters. Cheap and on demand — deliberately
     /// not a subscription, so it costs no connection-event budget.
@@ -117,17 +224,26 @@ final class SophonHub: NSObject {
     private func applyRadioState() {
         let wantScan = (managerState == .poweredOn) && !isSuspended
 
+        // Duplicate reporting costs a callback per advertisement -- tens per
+        // second per board -- so it is on ONLY while something is released and
+        // its liveness actually has to be watched (#235). With it off, iOS
+        // consolidates repeat sightings into one discovery event, which is why
+        // lastSeenAt cannot be trusted outside this window.
+        let wantDuplicates = devices.contains { $0.isReleasedByUser }
+
         if wantScan {
-            if radio != .ready {
+            if radio != .ready || scanningWithDuplicates != wantDuplicates {
                 // Filtered by service UUID, which is REQUIRED: an unfiltered scan
                 // returns nothing while the app is backgrounded. It also means the
                 // peripheral must keep the service UUID in the advertisement, not
                 // the scan response.
+                central.stopScan()
                 central.scanForPeripherals(
                     withServices: [SophonProtocol.serviceUUID],
-                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: wantDuplicates]
                 )
-                log.info("scanning for Sophon peripherals")
+                scanningWithDuplicates = wantDuplicates
+                log.info("scanning for Sophon peripherals (duplicates \(wantDuplicates, privacy: .public))")
             }
             radio = .ready
             return
@@ -245,8 +361,11 @@ extension SophonHub: CBCentralManagerDelegate {
             if let identity { device.identity = identity }
             if let txPower { device.txPower = txPower }
 
-            // 127 is Core Bluetooth's "not available" sentinel, not a real reading.
-            device.rssi = rssi == 127 ? nil : rssi
+            // Before the released-guard below, deliberately: this is the only
+            // evidence that a released board is still on the air and reclaimable.
+            device.lastSeenAt = Date()
+
+            device.ingestRSSI(rssi)
             peripheral.delegate = self
 
             // Auto-connect: with one board there is nothing to choose between,
