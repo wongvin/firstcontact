@@ -401,7 +401,12 @@ private struct DeviceDetailView: View {
     @ViewBuilder private var framesSection: some View {
         Section("Frames") {
             LabeledContent("Received", value: "\(device.framesReceived)")
-            LabeledContent("Lost on link", value: "\(device.seqGaps)")
+            // "Gaps in sequence", not "Lost on link": a hole means a frame is
+            // MISSING, and says nothing about where it went. Attribution happens
+            // in the transmit counters below, and on an iOS-to-iOS link
+            // essentially all of these turn out to be the peripheral refusing to
+            // send -- frames that never reached a link to be lost on (#247).
+            LabeledContent("Gaps in sequence", value: "\(device.seqGaps)")
             // Always shown, including at zero, for the same reason as the
             // interruption count below -- and because its absence was being read
             // as "not measured" rather than as "none". A row that only appears
