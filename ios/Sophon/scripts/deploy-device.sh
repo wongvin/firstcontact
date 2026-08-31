@@ -24,7 +24,7 @@
 #   - it does not kill a session in progress, so a device mid-measurement keeps
 #     running the old build until you restart it yourself;
 #   - install works on a LOCKED device, whereas launch is refused. Most of the
-#     "launch failed (is it unlocked?)" noise is this, and with --no-launch it
+#     "launch failed" noise on a locked device is this, and with --no-launch it
 #     stops being a warning about something you did not ask for.
 #
 # The cost is that nothing tells you the app is stale. Restart it by hand, or
@@ -105,7 +105,8 @@ done
 # and with --all the entire point is not to have to think about it.
 DEVICE_JSON="$(mktemp)"
 DEVICE_TABLE="$(mktemp)"
-trap 'rm -f "${DEVICE_JSON}" "${DEVICE_TABLE}"' EXIT
+LAUNCH_LOG="$(mktemp)"
+trap 'rm -f "${DEVICE_JSON}" "${DEVICE_TABLE}" "${LAUNCH_LOG}"' EXIT
 
 if ! xcrun devicectl list devices --json-output "${DEVICE_JSON}" >/dev/null 2>&1; then
   echo "error: could not enumerate devices (xcrun devicectl list devices failed)." >&2
@@ -212,9 +213,24 @@ while IFS="$(printf '\t')" read -r DEVICE_ID NAME TUNNEL; do
   # plain launch then just foregrounds that stale process -- so the build you
   # just deployed never actually runs. Silently testing the previous build is a
   # far worse failure than a launch error, because nothing looks wrong.
+  # tee rather than redirect: the output still streams as it did, and pipefail
+  # (set at the top) makes the pipeline carry devicectl's status rather than
+  # tee's, so a failure is still detected.
   if ! xcrun devicectl device process launch --terminate-existing \
-       --device "${DEVICE_ID}" "${BUNDLE_ID}"; then
-    echo "warning: launch failed on ${NAME} (is it unlocked?). The app is installed — open it from the home screen." >&2
+       --device "${DEVICE_ID}" "${BUNDLE_ID}" 2>&1 | tee "${LAUNCH_LOG}"; then
+    # devicectl reports several distinct causes through the same non-zero exit,
+    # and the wrong guess sends you to the wrong fix -- this used to blame a
+    # locked device for what was almost always an untrusted certificate (#239).
+    if grep -qE "not been explicitly trusted|invalid code signature|inadequate entitlements" "${LAUNCH_LOG}"; then
+      echo "warning: ${NAME} has not trusted this developer certificate, so the app cannot launch." >&2
+      echo "         Settings > General > VPN & Device Management > Developer App > Trust." >&2
+      echo "         Free-signing certificates are reissued about weekly, so expect this again." >&2
+    elif grep -qE "could not be, unlocked|FBSOpenApplicationErrorDomain error 7" "${LAUNCH_LOG}"; then
+      echo "warning: ${NAME} is locked, so launch was refused. Unlock and re-run, or open the app from the home screen." >&2
+    else
+      echo "warning: launch failed on ${NAME}. The app is installed -- open it from the home screen." >&2
+      echo "         devicectl's own output above says why." >&2
+    fi
   fi
 done < "${DEVICE_TABLE}"
 

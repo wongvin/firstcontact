@@ -125,8 +125,17 @@ Notes:
 - Free-signing provisioning expires ~7 days; just rebuild/redeploy when stale.
 - `devicectl` prints a benign `Error … Code=1002 "No provider was found."` line
   to stderr — install/launch still succeed; ignore it.
-- A **locked** device can refuse the launch (`Code=10002`) even though the
-  install succeeded — unlock and rerun, or open the app from the home screen.
+- Two different causes both surface as `Code=10002` with the install having
+  succeeded, and they need opposite fixes. The scripts distinguish them (#239):
+  - **Untrusted certificate** — `FBSOpenApplicationErrorDomain error 3`,
+    *"invalid code signature, inadequate entitlements or its profile has not
+    been explicitly trusted"*. Settings → General → VPN & Device Management →
+    Developer App → **Trust**. This is the common one: free-signing profiles
+    expire about weekly, and regenerating one issues a **new certificate** that
+    every device must trust again — not just on first install.
+  - **Locked device** — `FBSOpenApplicationErrorDomain error 7`, *"the device
+    was not, or could not be, unlocked"*. Unlock and rerun, or open the app from
+    the home screen.
 
 ### Surfacing screenshots in issue comments
 
