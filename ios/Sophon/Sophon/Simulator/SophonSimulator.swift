@@ -43,12 +43,78 @@ final class SophonSimulator {
         var sampleGapMeanMillis: Double?
         var sampleGapMinMillis: Double?
         var sampleGapMaxMillis: Double?
+        /// Depth of the simulator's own transmit queue, and frames it dropped --
+        /// a subset of noBuffer, kept separate here where the cause is
+        /// actionable (#255).
+        var queueDepth = 0
+        var localQueueDrops = 0
+        /// What the drain loop actually achieves, not what it requested.
+        var drainPeriodMeanMillis: Double?
+        var drainPeriodMinMillis: Double?
+        var drainPeriodMaxMillis: Double?
         var keepAliveAuthorized = false
         var motionAvailable = true
     }
 
     private(set) var display = Display()
     private(set) var isRunning = false
+
+    /// Frames waiting to be sent, oldest first.
+    ///
+    /// The firmware has had one of these all along (`TX_QUEUE_DEPTH 8` in
+    /// `main.c`); the simulator forwarded CoreMotion straight to the radio, and
+    /// #248 measured what that costs: CoreMotion delivers clumped — 0.2 to
+    /// 55.3 ms around a 20 ms mean — so bursts hit iOS's transmit queue and 8.80%
+    /// of frames were refused, on a link that sat idle for seconds at a time.
+    ///
+    /// **Depth matches the firmware's 8** so the two behave alike under
+    /// congestion. At ~50 Hz that is ~160 ms of slack, the same order as the
+    /// board's ~150 ms.
+    private var pendingFrames: [MotionFrame] = []
+    private static let txQueueDepth = 8
+
+    /// Interval between sends.
+    ///
+    /// **The queue alone would not have fixed this.** A literal copy of the
+    /// firmware drains in a `while` loop that empties the queue in one go
+    /// (`tx_work_handler`), so a burst would pass straight through unchanged.
+    /// The board can afford that because DRDY is hardware-timed and even; the
+    /// simulator's source is not, so the drain has to be *paced*.
+    ///
+    /// 18 ms was chosen as ~55 Hz against a ~50 Hz source. **That assumption was
+    /// wrong and is why the first attempt failed**: measured, the queue sat
+    /// pinned at 7-8 of 8 and every drop was local, meaning the loop was slower
+    /// than generation. `Task.sleep` under iOS scheduling does not deliver the
+    /// interval it is asked for, and the requested value was never checked
+    /// against the achieved one.
+    ///
+    /// The interval is kept, but the loop no longer depends on hitting it: see
+    /// `drainBudget`. The achieved period is now measured rather than assumed.
+    private static let drainInterval = Duration.milliseconds(18)
+
+    /// Frames a single tick may send.
+    ///
+    /// More than one, so the drain keeps up even when the timer runs slow: at an
+    /// achieved ~20 ms that is ~100 Hz against a ~50 Hz source, so the queue
+    /// empties and stays near zero. Small enough that catching up sends a pair,
+    /// not a clump -- CoreMotion's own bursts arrived 0.2 ms apart, which is what
+    /// this exists to smooth.
+    ///
+    /// With the queue near empty most ticks carry 0 or 1 frames anyway, so the
+    /// budget only applies while recovering.
+    private static let drainBudget = 2
+
+    private var drainTask: Task<Void, Never>?
+
+    /// Achieved period of the drain loop -- what `Task.sleep` actually delivers,
+    /// as opposed to what it was asked for. The first attempt at this fix failed
+    /// on exactly that difference.
+    private(set) var drainPeriodMeanMillis: Double?
+    private(set) var drainPeriodMinMillis: Double?
+    private(set) var drainPeriodMaxMillis: Double?
+    private var lastDrainAt: ContinuousClock.Instant?
+    private var drainPeriodTotalMillis: Double = 0
+    private var drainPeriodCount = 0
 
     // MARK: Bench controls
 
@@ -103,6 +169,18 @@ final class SophonSimulator {
         applyIdleTimer()
 
         display.name = name
+
+        // Owned by the model, like publishTask and for the same reason: a view's
+        // .task is cancelled when a NavigationStack pushes over it (#235), and
+        // this must keep running whatever is on screen.
+        drainTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.drainInterval)
+                guard let self, !Task.isCancelled else { return }
+                self.drainTick()
+            }
+        }
+
         publishTask = Task { [weak self] in
             // ~10 Hz. Fast enough that the numbers look live, slow enough that
             // the render is not competing with the sample loop.
@@ -122,6 +200,9 @@ final class SophonSimulator {
 
         publishTask?.cancel()
         publishTask = nil
+        drainTask?.cancel()
+        drainTask = nil
+        pendingFrames.removeAll()
         motion.stop()
         peripheral.stop()
         keepAlive.stop()
@@ -167,6 +248,7 @@ final class SophonSimulator {
     private(set) var sampleGapMinMillis: Double?
     private(set) var sampleGapMaxMillis: Double?
     private var lastSampleAt: ContinuousClock.Instant?
+    private var lastSampleTimestamp: TimeInterval?
     private var sampleGapTotalMillis: Double = 0
     private var sampleGapCount = 0
 
@@ -227,7 +309,45 @@ final class SophonSimulator {
             return
         }
 
-        if peripheral.notify(frame) { noteNotified(sample.timestamp) }
+        // Enqueue rather than send. seq has already advanced, so a drop here is
+        // a hole the receiver can see -- the same promise main.c makes when
+        // k_msgq_put fails, and the reason nothing is ever rewound.
+        guard pendingFrames.count < Self.txQueueDepth else {
+            peripheral.noteLocalQueueDrop()
+            return
+        }
+        pendingFrames.append(frame)
+        lastSampleTimestamp = sample.timestamp
+    }
+
+    /// Sends up to `drainBudget` queued frames, and records what the loop is
+    /// actually achieving.
+    private func drainTick() {
+        recordDrainPeriod()
+
+        for _ in 0 ..< Self.drainBudget {
+            guard !pendingFrames.isEmpty else { return }
+            let frame = pendingFrames.removeFirst()
+            if peripheral.notify(frame), let ts = lastSampleTimestamp {
+                noteNotified(ts)
+            }
+        }
+    }
+
+    private func recordDrainPeriod() {
+        let now = ContinuousClock.now
+        defer { lastDrainAt = now }
+        guard let last = lastDrainAt else { return }
+
+        let elapsed = (now - last).components
+        let period = Double(elapsed.seconds) * 1000
+            + Double(elapsed.attoseconds) / 1_000_000_000_000_000
+
+        drainPeriodTotalMillis += period
+        drainPeriodCount += 1
+        drainPeriodMeanMillis = drainPeriodTotalMillis / Double(drainPeriodCount)
+        drainPeriodMinMillis = min(drainPeriodMinMillis ?? period, period)
+        drainPeriodMaxMillis = max(drainPeriodMaxMillis ?? period, period)
     }
 
     private func noteNotified(_ timestamp: TimeInterval) {
@@ -262,6 +382,11 @@ final class SophonSimulator {
         display.readyGapMinMillis = peripheral.readyGapMinMillis
         display.readyGapMaxMillis = peripheral.readyGapMaxMillis
         display.acceptedPerCycleMean = peripheral.acceptedPerCycleMean
+        display.queueDepth = pendingFrames.count
+        display.localQueueDrops = peripheral.localQueueDrops
+        display.drainPeriodMeanMillis = drainPeriodMeanMillis
+        display.drainPeriodMinMillis = drainPeriodMinMillis
+        display.drainPeriodMaxMillis = drainPeriodMaxMillis
         display.sampleGapMeanMillis = sampleGapMeanMillis
         display.sampleGapMinMillis = sampleGapMinMillis
         display.sampleGapMaxMillis = sampleGapMaxMillis

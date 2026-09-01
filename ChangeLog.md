@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-09-01
+
+### feat: give the simulator a paced transmit queue (#255)
+
+- The simulator forwarded CoreMotion straight to `updateValue` with no buffer, and CoreMotion delivers **clumped** — 0.2 to 55.3 ms around a 20 ms mean (#248). Bursts overflowed iOS's transmit queue on a link that was otherwise idle for seconds at a time. It now queues 8 deep, matching the firmware's `TX_QUEUE_DEPTH`, and drains on a paced tick.
+- **Measured: loss fell from 8.80% to 5.27%.** Send queue depth went from pinned at 7–8 to 0–1, with zero drops of its own.
+- **A literal copy of the firmware would not have worked.** Its `tx_work_handler` drains in a `while` loop that empties the queue in one go, so a burst passes straight through. The board can afford that because DRDY is hardware-timed and even; a simulator's source is not, so the drain has to be paced rather than merely buffered.
+- **The first attempt at this failed, and the reason is now measured.** The tick asked for 18 ms expecting ~55 Hz against a ~50 Hz source; `Task.sleep` under iOS scheduling actually delivered **20.3 ms**, i.e. 49.3 Hz — *below* generation, so the queue could only fill. The loop now sends up to two frames per tick, so it no longer depends on hitting its requested interval, and the **achieved** period is reported alongside the requested one.
+- **A queue drop counts into `noBuffer`.** `lostOnAir` is `seqGaps − noBuffer`, so a drop counted nowhere would resurface as *air loss* and undo #247. The simulator's own screen keeps the two distinguishable where the cause is actionable, without asking the wire format to carry a distinction the central cannot act on. Noted in passing: the **firmware has this gap** — `k_msgq_put` failing in `main.c` logs and increments nothing — latent only because the board's sampling is even enough that its queue rarely fills.
+- `PROTOCOL.md` corrected where it was actively wrong, not merely stale: `no_mem` no longer claims iOS's queue is generous enough that refusals "essentially never occur"; Rate is split into **generated** and **delivered**, which are the same number on a board and are not on a simulator; and new rows cover sample arrival and the transmit queue.
+- New section: **a simulator is not a stand-in for the board when measuring loss.** #226's premise holds for wire format, UI and contract, and fails for anything measuring loss, gaps or attribution. Two known casualties are named — the old `no_mem` row, and #248 spending three hypotheses on the wrong mechanism.
+- **The residual 5.27% is recorded as not understood.** It is intermittent (drain gaps 41.8 ms to 8.8 s) and differs between iOS devices, pointing at scheduling rather than throughput. It was twice mistaken for a per-event capacity ceiling by reading an average without its distribution — a ceiling needs a saturated queue, and this one idles for seconds. Attributing it needs a view of the link itself, which no endpoint can give: Core Bluetooth reports *that* a frame was refused and never *why*. That is #251, #252 and #254.
+
 ## 2026-08-31
 
 ### feat: measure the simulator's scheduling cadence (#248)

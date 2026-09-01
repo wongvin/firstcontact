@@ -27,6 +27,9 @@ final class SophonPeripheral: NSObject {
     /// visibility only — see `notify(_:)` for why nothing is retried.
     private(set) var queueFullRecoveries = 0
 
+    /// Frames dropped by the simulator's own queue, a subset of `noBuffer`.
+    private(set) var localQueueDrops = 0
+
     /// Mean, shortest and longest gap between `peripheralManagerIsReady`
     /// callbacks, in milliseconds, or nil until two have been seen.
     ///
@@ -184,6 +187,27 @@ final class SophonPeripheral: NSObject {
             noBuffer &+= 1
         }
         return accepted
+    }
+
+    /// Counts a frame dropped by the simulator's own transmit queue before it
+    /// ever reached Core Bluetooth (#255).
+    ///
+    /// **Counted into `noBuffer`, deliberately.** From the central's side the
+    /// fact is identical to an iOS refusal: the peripheral did not send this
+    /// frame. `lostOnAir` is `seqGaps - noBuffer`, so a drop counted nowhere
+    /// would surface as *air loss* — undoing exactly what #247 repaired.
+    ///
+    /// `localQueueDrops` keeps the two distinguishable **here**, where the
+    /// distinction is actionable, without asking the wire format to carry a
+    /// difference the central cannot act on.
+    ///
+    /// Note the firmware has this gap and has not closed it: `k_msgq_put`
+    /// failing in `main.c` logs and increments nothing, so a board queue-full
+    /// drop also reads as air loss. Latent there only because the board's
+    /// sampling is even enough that the queue rarely fills.
+    func noteLocalQueueDrop() {
+        noBuffer &+= 1
+        localQueueDrops += 1
     }
 
     /// Counts an artificially dropped frame.

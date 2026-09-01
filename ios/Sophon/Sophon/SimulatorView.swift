@@ -99,10 +99,18 @@ struct SimulatorView: View {
             if display.queueFullRecoveries > 0 {
                 LabeledContent("Queue drained", value: "\(display.queueFullRecoveries)")
             }
+            LabeledContent("Send queue", value: "\(display.queueDepth) of 8")
+            if display.localQueueDrops > 0 {
+                // A subset of TX buffer full above, not an addition to it: from
+                // the central's side both mean the frame was not sent, and
+                // counting it anywhere else would make it read as air loss.
+                LabeledContent("…dropped by send queue", value: "\(display.localQueueDrops)")
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text("Transmit counters")
         } footer: {
-            Text("The same four counters a board exposes, readable by the viewer over the stats characteristic. A refused frame is dropped rather than retried, and seq is never rewound — so the hole stays visible.")
+            Text("The same four counters a board exposes, readable by the viewer over the stats characteristic. A refused frame is dropped rather than retried, and seq is never rewound — so the hole stays visible.\n\nSend queue is this app's own buffer, matching the firmware's depth of 8. CoreMotion delivers in clumps, so frames are queued and paced out rather than fired at the radio as they arrive (#255). A drop here counts into TX buffer full, because from the viewer's side the frame simply was not sent — counting it anywhere else would make it read as loss on the air.")
         }
 
         Section {
@@ -125,6 +133,14 @@ struct SimulatorView: View {
             } else {
                 Text("Nothing yet — the queue has not filled twice.")
                     .foregroundStyle(.secondary)
+            }
+            if let mean = display.drainPeriodMeanMillis {
+                LabeledContent("Send loop period",
+                               value: String(format: "%.1f ms", mean))
+                if let lo = display.drainPeriodMinMillis, let hi = display.drainPeriodMaxMillis {
+                    LabeledContent("Loop range",
+                                   value: String(format: "%.1f – %.1f ms", lo, hi))
+                }
             }
             if let mean = display.sampleGapMeanMillis {
                 LabeledContent("CoreMotion arrival",
