@@ -432,12 +432,43 @@ The simulator honours the parts of this document that matter — frame layout, t
 | ATT MTU | 23, negotiated down | **~515 measured** iOS-to-iOS; Core Bluetooth exposes no control |
 | Connections | 1 (`CONFIG_BT_MAX_CONN=1`), and **invisible while taken** | several, simultaneously; iOS has no equivalent limit |
 | `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
-| `no_mem` | real buffer exhaustion | essentially never occurs; iOS's queue is generous, so it is produced on demand by a drop control instead |
+| `no_mem` | real buffer exhaustion | **real, and frequent — measured at 8.80% of frames before #255 and 5.27% after.** The earlier claim that iOS's queue is generous enough that this "essentially never occurs" was wrong; the bench drop control was built on it and is not needed to exercise this path |
 | Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
 | Scan-response identity | device type, versions, TX power | **none of it — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
 | Link Params | reported from `bt_conn_get_info()` | **absent — the characteristic is not offered.** `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot see what it was granted any more than an iOS central can. The rows simply do not appear |
 | `t_ms` | since board boot | since simulator start |
-| Rate | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
+| Rate, generated | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
+| Rate, delivered | ~54.3 — refusals are near zero | **~47.4 measured.** Generation and delivery are the same number on the board and are *not* on a simulator, which is why they are now separate rows |
+| Sample arrival | hardware DRDY, even | **clumped: 0.2 – 55.3 ms around a 20 ms mean.** The average is exactly right for 50 Hz and says nothing about the distribution |
+| Transmit queue | 8-deep `k_msgq`, drained on the system work queue | 8-deep, **paced** at one to two frames per ~20 ms tick (#255). Depth matches deliberately. The pacing does not: the firmware's drain empties the queue in one `while` loop, which is safe only because DRDY is even |
+
+### A simulator is not a stand-in for the board when measuring loss
+
+#226's premise is that app work can proceed without a board. That holds for the
+wire format, the UI and the protocol contract. It does **not** hold for anything
+measuring loss, gaps or attribution.
+
+The board loses essentially nothing. A simulator lost **8.80%** of generated
+frames before #255 and **5.27%** after — not on the air, but refused by iOS before
+transmission. The mechanism was measured rather than guessed: CoreMotion delivers
+clumped, and until #255 the simulator forwarded those clumps straight to
+`updateValue` with no buffer, so bursts overflowed a queue the link could
+otherwise have kept up with.
+
+Any figure gathered against a simulator therefore carries an artefact the board
+does not have. Two known casualties: the earlier `no_mem` row in the table above,
+and the framing of #248, which spent three hypotheses on the wrong mechanism.
+
+**The residual 5.27% is not understood.** It is intermittent — gaps between queue
+drains range from 41.8 ms to 8.8 s — and it differs between iOS devices, which
+points at scheduling rather than link throughput. It was twice mistaken for a
+per-event capacity ceiling by reading an average without checking its
+distribution; a ceiling requires a saturated queue, and this queue is idle for
+seconds at a time. Do not repeat that inference.
+
+Attributing it needs a view of the link itself, which no endpoint can provide:
+Core Bluetooth reports *that* a frame was refused and never *why*. That is what
+#251, #252 and #254 exist for.
 
 The connections row has a consequence worth stating outright, because it looks like
 a fault the first time it happens. **A connected board stops advertising**, and a
