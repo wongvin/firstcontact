@@ -434,13 +434,53 @@ The simulator honours the parts of this document that matter — frame layout, t
 | `no_conn` | ~0 | ~0, same reason: nothing is sent unsubscribed |
 | `no_mem` | real buffer exhaustion | **real, and frequent — measured at 8.80% of frames before #255 and 5.27% after.** The earlier claim that iOS's queue is generous enough that this "essentially never occurs" was wrong; the bench drop control was built on it and is not needed to exercise this path |
 | Axes | the board's frame and sign convention | Apple's device frame — **the two will not agree in sign or axis order** |
-| Scan-response identity | device type, versions, TX power | **none of it — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
+| Manufacturer data | device type, hw and fw versions | **absent — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
+| TX power | ours, from `CONFIG_BT_CTLR_TX_PWR_DBM` | **present, and iOS's own — measured at 12 dBm.** Not manufacturer data: it is the standard AD type `0x0A`, which iOS emits without being asked. The viewer labels it *device radio*, because the value is real but is the phone's, and `TX power − RSSI` therefore means something different than it does for a board (#246) |
 | Link Params | reported from `bt_conn_get_info()` | **absent — the characteristic is not offered.** `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot see what it was granted any more than an iOS central can. The rows simply do not appear |
 | `t_ms` | since board boot | since simulator start |
 | Rate, generated | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
 | Rate, delivered | ~54.3 — refusals are near zero | **~47.4 measured.** Generation and delivery are the same number on the board and are *not* on a simulator, which is why they are now separate rows |
 | Sample arrival | hardware DRDY, even | **clumped: 0.2 – 55.3 ms around a 20 ms mean.** The average is exactly right for 50 Hz and says nothing about the distribution |
 | Transmit queue | 8-deep `k_msgq`, drained on the system work queue | 8-deep, **paced** at one to two frames per ~20 ms tick (#255). Depth matches deliberately. The pacing does not: the firmware's drain empties the queue in one `while` loop, which is safe only because DRDY is even |
+
+### What a simulator can and cannot put on the air
+
+Worth stating precisely, because conflating two different limits produced a wrong
+claim in this document. **What this app can set** and **what reaches the air** are
+not the same set.
+
+`CBPeripheralManager.startAdvertising` accepts only `CBAdvertisementDataLocalNameKey`
+and `CBAdvertisementDataServiceUUIDsKey`. Everything the Sophon protocol adds — the
+company ID, device type, hardware and firmware versions — travels as Manufacturer
+Specific Data, which is why none of it can come from a simulator.
+
+**TX power is not in that group.** It is the standard AD type `0x0A`, and iOS emits
+one on its own account, measured at 12 dBm. So a simulator does advertise a TX
+power; it is simply the phone's radio rather than a Sophon's. The viewer labels it
+*device radio*, distinguishing it by the absence of manufacturer data beside it —
+since #230, a board reporting one always reports the other.
+
+The earlier version of the table said a simulator advertises "none of it",
+including TX power. That was wrong, and it was contradicted by the app's own
+screen: the viewer displayed a TX power for a simulator while a footer directly
+beneath denied it was possible.
+
+Measured on iOS 26, `advertisementData` also carries three **undocumented** keys —
+`kCBAdvDataTimestamp`, `kCBAdvDataRxPrimaryPHY`, `kCBAdvDataRxSecondaryPHY` — on
+every peripheral, board included. They are **reception metadata**, not AD types:
+when iOS saw the packet and which PHY it arrived on, nothing the peripheral sent.
+Mistaking iOS's own additions for the peripheral's output is precisely the error
+that produced #246, so they are named here rather than left to be rediscovered.
+
+Notably **absent**: any key saying whether a callback carried the advertisement or
+the scan response. Core Bluetooth genuinely does merge those, which is what the
+single-structure design above depends on.
+
+**This is still a floor, not a picture.** Everything above comes from the keys iOS
+chose to parse and surface through `advertisementData`. The raw AD structures have
+never been observed — nRF Connect and `bleak` are both CoreBluetooth-backed and
+show the same parsed view. Seeing the bytes needs an observer outside the platform
+(#252).
 
 ### A simulator is not a stand-in for the board when measuring loss
 

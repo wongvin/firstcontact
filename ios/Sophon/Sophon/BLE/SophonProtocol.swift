@@ -50,6 +50,40 @@ nonisolated enum SophonProtocol {
 
     /// Mirrors `SOPHON_DEVICE_TYPE`. Display-only — see `SophonIdentity`.
     static let knownDeviceType: UInt16 = 0x0001
+
+    /// Advertisement keys this app reads or knowingly ignores.
+    ///
+    /// Anything outside this set is something iOS surfaced that nobody here has
+    /// looked at. #246 exists because exactly that happened: iOS adds a TX Power
+    /// AD type of its own, `PROTOCOL.md` asserted it could not, and no code was
+    /// watching for the difference.
+    static let expectedAdvertisementKeys: Set<String> = [
+        CBAdvertisementDataLocalNameKey,
+        CBAdvertisementDataServiceUUIDsKey,
+        CBAdvertisementDataManufacturerDataKey,
+        CBAdvertisementDataTxPowerLevelKey,
+        CBAdvertisementDataIsConnectable,
+        CBAdvertisementDataServiceDataKey,
+        CBAdvertisementDataOverflowServiceUUIDsKey,
+        CBAdvertisementDataSolicitedServiceUUIDsKey,
+
+        // Undocumented, and present on every peripheral — observed on iOS 26
+        // alongside the documented keys above. These are **reception metadata**,
+        // not AD types: when iOS saw the packet, and which PHY it arrived on.
+        // Nothing the peripheral sent.
+        //
+        // Listed as string literals because there are no public constants for
+        // them. Nothing reads their values; they are here so the diagnostic row
+        // stays quiet, since a warning that is always lit is one nobody reads —
+        // which would defeat the guard #246 added it for.
+        //
+        // Notably absent: any key indicating whether a callback carried the
+        // advertisement or the scan response. Core Bluetooth still merges those,
+        // which is what #230's single-structure design depends on.
+        "kCBAdvDataTimestamp",
+        "kCBAdvDataRxPrimaryPHY",
+        "kCBAdvDataRxSecondaryPHY",
+    ]
 }
 
 /// What a Sophon says about itself before you connect.

@@ -374,6 +374,17 @@ extension SophonHub: CBCentralManagerDelegate {
         // Signed dBm. Reading this as unsigned would render -8 as 248.
         let txPower = (advertisementData[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
 
+        // Every key iOS surfaced, logged once per peripheral (#246).
+        //
+        // The app reads three keys and had assumed the rest were absent. That
+        // assumption was wrong for TX power -- iOS adds a standard AD type of its
+        // own, which `PROTOCOL.md` claimed could not happen -- so the honest move
+        // is to look rather than guess again. This is what iOS chose to parse and
+        // surface, which is a floor on what is really on the air, not a picture
+        // of it: seeing the actual AD structures needs an observer (#252).
+        let keys = advertisementData.keys.sorted().joined(separator: ", ")
+        let keySet = Set(advertisementData.keys)
+
         Task { @MainActor in
             let device: SophonDevice
             if let known = self.byID[peripheral.identifier] {
@@ -390,12 +401,15 @@ extension SophonHub: CBCentralManagerDelegate {
                 self.byID[peripheral.identifier] = device
                 self.devices.append(device)
                 self.log.info("discovered \(device.displayName, privacy: .public)")
+                self.log.info("advertisement keys: \(keys, privacy: .public)")
             }
 
             // Latch both, for the same reason the name is latched above: a
             // callback that carried no scan response must not blank a good value.
             // Feeding the update path only would miss the common case, where the
             // create above is the only callback we ever get for a device.
+            device.advertisementKeys.formUnion(keySet)
+
             if let identity { device.identity = identity }
             if let txPower { device.txPower = txPower }
 

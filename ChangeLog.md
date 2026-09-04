@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-04
+
+### fix: a simulator does advertise TX power (#246)
+
+- `PROTOCOL.md` claimed an iOS peripheral advertises **"none of it"** — device type, versions *and* TX power. Two thirds right. TX power is **not** manufacturer data: it is the standard AD type `0x0A`, and iOS emits one on its own account, measured at **12 dBm**. The app's own screen contradicted the document, showing a real TX power for a simulator above a footer denying it was possible.
+- The underlying error was conflating **what this app can set** with **what reaches the air**. `startAdvertising` accepts only LocalName and ServiceUUIDs, so everything the Sophon protocol adds — carried as Manufacturer Specific Data — is genuinely absent. TX power is not in that group and never was. The divergence table now has one row for each, and a new section states the distinction outright.
+- The viewer labels an iOS-supplied value **`12 dBm · device radio`**. Since #230 a board reporting a TX power always reports manufacturer data too, so `identity == nil` with a TX power present means an iOS peripheral. The value is real but is the phone's radio, and `TX power − RSSI` therefore means something different for each.
+- **Corrected the record on #230**, where verification step 6 — *"all three read `Not reported`"* — was marked as passing on a claim false for one of its three fields.
+- New standing guard: an orange **Other advertising data** row appears whenever iOS surfaces an advertisement key the app does not account for. #246 existed because exactly that went unnoticed for a whole issue.
+- Running it immediately found three: `kCBAdvDataTimestamp`, `kCBAdvDataRxPrimaryPHY`, `kCBAdvDataRxSecondaryPHY`. Undocumented, present on **every** peripheral including the board, and **reception metadata rather than AD types** — when iOS saw the packet and on which PHY, nothing the peripheral sent. Added to the expected set so the guard stays quiet, because a warning that is always lit is one nobody reads.
+- Also **absent**, and worth recording: any key indicating whether a callback carried the advertisement or the scan response. Core Bluetooth really does merge them, which is the assumption #230's single-structure design rests on — now checked rather than assumed.
+
 ## 2026-09-01
 
 ### feat: give the simulator a paced transmit queue (#255)

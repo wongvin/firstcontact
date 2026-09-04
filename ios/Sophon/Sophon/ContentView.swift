@@ -348,7 +348,29 @@ private struct DeviceDetailView: View {
             LabeledContent("Hardware", value: device.identity.map { "rev \($0.hardwareVersion)" }
                 ?? Self.notReported)
             LabeledContent("Firmware", value: device.identity?.firmwareVersion ?? Self.notReported)
-            LabeledContent("TX power", value: device.txPower.map { "\($0) dBm" } ?? Self.notReported)
+            // A TX power with no identity beside it is the PHONE's radio, not a
+            // Sophon's: iOS adds a standard TX Power AD type of its own, while
+            // manufacturer data is the part it genuinely cannot advertise. Since
+            // #230, a board that reports one always reports the other too, so
+            // identity == nil with a TX power present means an iOS peripheral
+            // (#246). Worth labelling, because the number is real but is not the
+            // board's, and TX power - RSSI means something different for each.
+            LabeledContent("TX power", value: device.txPower.map {
+                device.identity == nil ? "\($0) dBm · device radio" : "\($0) dBm"
+            } ?? Self.notReported)
+
+            // Only when iOS surfaced something nobody here has accounted for.
+            // Silent in the normal case, which is the point: #246 happened
+            // because an unexpected AD type went unnoticed for a whole issue.
+            if !device.advertisementKeys.subtracting(SophonProtocol.expectedAdvertisementKeys).isEmpty {
+                let extra = device.advertisementKeys
+                    .subtracting(SophonProtocol.expectedAdvertisementKeys)
+                    .map { $0.replacingOccurrences(of: "CBAdvertisementData", with: "") }
+                    .sorted()
+                    .joined(separator: ", ")
+                LabeledContent("Other advertising data", value: extra)
+                    .foregroundStyle(.orange)
+            }
 
             // Only when unrecognised. Surfacing a version the app already knows
             // would be noise on every screen, every session.
@@ -407,7 +429,7 @@ private struct DeviceDetailView: View {
                 }
             }
             if device.identity == nil {
-                Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon never reports these — nor does a board running firmware older than #230.")
+                Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon reports no hardware or firmware version — nor does a board running firmware older than #230. TX power is different: it is a standard advertising field that iOS fills in itself, so a value there is the phone's own radio rather than a Sophon's.")
             }
         }
     }
