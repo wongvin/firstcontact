@@ -407,9 +407,15 @@ private extension SophonPeripheral {
         // response, and there is no API to influence that.
         //
         // In particular there is NO way to advertise manufacturer data from an
-        // iOS peripheral, so a simulated Sophon can never carry the device type,
-        // versions or TX power that the board advertises (#230) — the viewer
-        // shows "Not reported" for all of them, permanently and correctly.
+        // iOS peripheral, so a simulated Sophon can never carry the device type
+        // or the hardware and firmware versions the board advertises (#230).
+        //
+        // TX power is NOT in that group, and an earlier version of this comment
+        // said it was. It is a standard AD type, and iOS emits one on its own
+        // account — measured at 12 dBm — so the viewer shows a real TX power for
+        // a simulator. It is the phone's radio, not a Sophon's, which is why the
+        // viewer labels it (#246). What is unsettable from here is not the same
+        // set as what is absent from the air.
         // Do not try to "fix" this by adding CBAdvertisementDataManufacturerDataKey:
         // it is not a supported key and iOS silently ignores it.
         peripheral.startAdvertising([

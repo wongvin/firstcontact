@@ -172,6 +172,14 @@ final class SophonDevice: Identifiable {
     /// the same lifetime question `attMTU` answers the same way.
     var linkParams: LinkParams?
 
+    /// Every advertisement key seen from this peripheral, accumulated.
+    ///
+    /// A union rather than the latest packet's, because iOS splits advertisement
+    /// and scan response across callbacks and a single one is not the whole
+    /// picture. Surfaced only when it contains something unexpected — see
+    /// `SophonProtocol.expectedAdvertisementKeys` (#246).
+    var advertisementKeys: Set<String> = []
+
     /// Advertised TX power in dBm, from the standard AD type. Signed.
     var txPower: Int?
 
