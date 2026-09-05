@@ -91,7 +91,19 @@ final class SophonDevice: Identifiable {
     /// turns on precisely when some device is released (#235). With duplicates
     /// off — the normal case — iOS consolidates repeat sightings into a single
     /// discovery event, so this would be stamped once and never move.
-    var lastSeenAt: Date?
+    /// **Not observable, deliberately (#261).** A fresh `Date` is written on every
+    /// advertisement, and while anything is released duplicate reporting makes
+    /// that tens of times a second — so an observable write here invalidated the
+    /// device's row and its open detail view at advertisement rate, in exactly the
+    /// hand-off scenario duplicates exist for. No equality guard can help, since
+    /// the value genuinely differs each time.
+    ///
+    /// Nothing needs the notification. The sweep reads this from the model on its
+    /// own 1 s tick, and the only view path is `linkStatus(asOf:)`, which is
+    /// always called inside a `TimelineView` that re-evaluates every second and
+    /// reads the current value regardless. The state change that views care about
+    /// is published through `isStaleReleased`, which the sweep sets.
+    @ObservationIgnored var lastSeenAt: Date?
 
     /// How long a released board may go unheard before it is treated as gone.
     ///

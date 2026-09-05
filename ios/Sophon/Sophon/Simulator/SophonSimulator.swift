@@ -368,30 +368,48 @@ final class SophonSimulator {
 
     // MARK: - Publishing
 
+    /// Rebuilds `display` and assigns it **only when it differs**.
+    ///
+    /// Previously each of the 23 fields was written unconditionally at 10 Hz, and
+    /// every write is an Observation access, so `SimulatorView` was invalidated
+    /// ten times a second whether or not anything moved — on the main thread this
+    /// file's own header says must not be competed with (#261).
+    ///
+    /// `Display` was already declared `Equatable` and the conformance was never
+    /// used. This is what it was for.
+    ///
+    /// **Scope, honestly:** while streaming this changes nothing, because
+    /// `lastFrame` updates every sample and so differs at every 10 Hz tick — and
+    /// there a redraw is the intended behaviour, since the view shows live motion
+    /// values. The saving is the idle case: no subscriber, nothing moving, which
+    /// previously still cost ten invalidations a second.
     private func publish() {
-        display.radio = peripheral.radio
-        display.isAdvertising = peripheral.isAdvertising
-        display.subscribers = peripheral.subscriberCount
-        display.maximumUpdateLength = peripheral.maximumUpdateLength
-        display.sensorRateHz = motion.measuredRateHz
-        display.notifyRateHz = notifyRateHz
-        display.lastFrame = lastFrame
-        display.stats = peripheral.counters
-        display.queueFullRecoveries = peripheral.queueFullRecoveries
-        display.readyGapMeanMillis = peripheral.readyGapMeanMillis
-        display.readyGapMinMillis = peripheral.readyGapMinMillis
-        display.readyGapMaxMillis = peripheral.readyGapMaxMillis
-        display.acceptedPerCycleMean = peripheral.acceptedPerCycleMean
-        display.queueDepth = pendingFrames.count
-        display.localQueueDrops = peripheral.localQueueDrops
-        display.drainPeriodMeanMillis = drainPeriodMeanMillis
-        display.drainPeriodMinMillis = drainPeriodMinMillis
-        display.drainPeriodMaxMillis = drainPeriodMaxMillis
-        display.sampleGapMeanMillis = sampleGapMeanMillis
-        display.sampleGapMinMillis = sampleGapMinMillis
-        display.sampleGapMaxMillis = sampleGapMaxMillis
-        display.keepAliveAuthorized = keepAlive.isAuthorized
-        display.motionAvailable = motion.isAvailable
+        var next = display
+        next.radio = peripheral.radio
+        next.isAdvertising = peripheral.isAdvertising
+        next.subscribers = peripheral.subscriberCount
+        next.maximumUpdateLength = peripheral.maximumUpdateLength
+        next.sensorRateHz = motion.measuredRateHz
+        next.notifyRateHz = notifyRateHz
+        next.lastFrame = lastFrame
+        next.stats = peripheral.counters
+        next.queueFullRecoveries = peripheral.queueFullRecoveries
+        next.readyGapMeanMillis = peripheral.readyGapMeanMillis
+        next.readyGapMinMillis = peripheral.readyGapMinMillis
+        next.readyGapMaxMillis = peripheral.readyGapMaxMillis
+        next.acceptedPerCycleMean = peripheral.acceptedPerCycleMean
+        next.queueDepth = pendingFrames.count
+        next.localQueueDrops = peripheral.localQueueDrops
+        next.drainPeriodMeanMillis = drainPeriodMeanMillis
+        next.drainPeriodMinMillis = drainPeriodMinMillis
+        next.drainPeriodMaxMillis = drainPeriodMaxMillis
+        next.sampleGapMeanMillis = sampleGapMeanMillis
+        next.sampleGapMinMillis = sampleGapMinMillis
+        next.sampleGapMaxMillis = sampleGapMaxMillis
+        next.keepAliveAuthorized = keepAlive.isAuthorized
+        next.motionAvailable = motion.isAvailable
+
+        if next != display { display = next }
     }
 
     private func applyIdleTimer() {
