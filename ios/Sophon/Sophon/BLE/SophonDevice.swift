@@ -169,9 +169,9 @@ final class SophonDevice: Identifiable {
     /// it, least of all whether to connect.
     ///
     /// Deliberately absent from `resetLinkStats()`: its lifetime is the
-    /// advertisement, not the session. `attMTU` below records what happens when
-    /// that distinction is missed, and there the reset at least had
-    /// `beginSession()` to recover the value.
+    /// advertisement, not the session. `beginSession()` records what happens when
+    /// that distinction is missed: `attMTU` was cleared by the reset and silently
+    /// dropped its row until it was re-established there.
     var identity: SophonIdentity?
 
     /// The connection parameters the peripheral reports iOS granted, or nil if the
@@ -199,8 +199,16 @@ final class SophonDevice: Identifiable {
     // are what turn "does it still work with 4 boards?" into an observation
     // instead of a guess (#211).
     var framesReceived: Int = 0
-    /// Frames the board sent, on a live stream, that never arrived. Excludes
-    /// anything missed while this app was not listening — see `interruptions`.
+    /// Holes in the peripheral's sequence numbering, on a live stream.
+    ///
+    /// **A gap says a frame is missing and nothing about where it went** — which
+    /// is why the row is labelled "Gaps in sequence" rather than "Lost on link"
+    /// (#247). Attribution happens in `lostOnAir`, which subtracts the frames the
+    /// peripheral itself refused to send; on an iOS-to-iOS link essentially all
+    /// of these turn out to be refusals, so nothing was lost on any link.
+    ///
+    /// Excludes anything missed while this app was not listening — see
+    /// `interruptions`.
     var seqGaps: Int = 0
     /// Times the stream resumed after a hole too large to be loss. Surfaced
     /// separately rather than silently discarded: "gaps 0, interruptions 3"
@@ -210,9 +218,6 @@ final class SophonDevice: Identifiable {
     /// Frames unaccounted for across those interruptions. Not losses, but not
     /// nothing either — this is the data the app did not see.
     var framesDuringInterruptions: Int = 0
-    /// Times the board restarted mid-connection. Detected exactly rather than
-    /// guessed: the frame's `t_ms` is board uptime, so a value lower than the
-    /// previous one can only mean it rebooted.
     /// Times the peripheral restarted **without the link dropping**, detected
     /// from `t_ms` running backwards.
     ///
@@ -224,7 +229,13 @@ final class SophonDevice: Identifiable {
     var lastFrame: MotionFrame?
     var lastFrameAt: Date?
 
-    /// Negotiated on connect. Expect 23 — logged rather than assumed, on both sides.
+    /// Negotiated on connect, logged rather than assumed on both sides.
+    ///
+    /// Expect **23 from a board**, which does not negotiate up. An iOS peripheral
+    /// is another matter: measured at **~515** iOS-to-iOS, which `PROTOCOL.md`
+    /// calls the figure mattering most to #211. A large value here is not a fault
+    /// — an earlier version of this line said only "expect 23", which made the
+    /// docs look wrong rather than the assumption.
     var attMTU: Int?
 
     /// The board's own transmit counters, read over the stats characteristic.
@@ -264,7 +275,7 @@ final class SophonDevice: Identifiable {
     /// `t_ms` advanced in proportion to wall time either way. No ratio separates
     /// them — only the size of the hole.
     ///
-    /// 5 s is chosen against the rate that matters. At #209's 50 Hz it is 250
+    /// 5 s is chosen against the rate that matters. At the board's ~54 Hz it is ~270
     /// frames, which is unambiguously an interruption rather than the
     /// scheduling jitter #211 exists to measure. At the skeleton's 1 Hz it is
     /// only 5 frames, so a genuine five-second dropout on a live link is
@@ -423,10 +434,7 @@ final class SophonDevice: Identifiable {
         wasSuspended = true
     }
 
-    /// Counters describe one connection, so they reset when a new one starts —
-    /// otherwise a gap is counted across a disconnect, where a sequence jump is
-    /// expected rather than a dropped frame.
-    /// The board rebooted underneath a link that never dropped.
+    /// The peripheral rebooted underneath a link that never dropped.
     ///
     /// Everything session-scoped is cleared, because the board's own figures just
     /// went back to zero: its `seq`, its uptime and its transmit counters all
@@ -494,6 +502,19 @@ final class SophonDevice: Identifiable {
         hasSession = false
     }
 
+    /// Clears everything scoped to **one session**, leaving advertisement-scoped
+    /// state alone.
+    ///
+    /// Called from `beginSession()`, **not** from `didConnect`. A connection is
+    /// not a session: #228 established that a link can come up to a peripheral
+    /// that is not running Sophon at all, so the counters start only once a
+    /// Sophon service has been confirmed. An earlier version of this comment said
+    /// they reset "when a new connection starts", which undoes that distinction.
+    ///
+    /// `identity` and `txPower` are deliberately absent — their lifetime is the
+    /// advertisement, and nothing re-delivers one on demand (#230). `attMTU` is
+    /// cleared here and immediately re-established by `beginSession()`, because
+    /// the connection is older than the session.
     func resetLinkStats() {
         connectedAt = Date()
         framesReceived = 0

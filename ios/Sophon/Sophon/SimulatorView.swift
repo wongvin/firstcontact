@@ -171,7 +171,7 @@ struct SimulatorView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Reboot resets seq, uptime and the counters without dropping the link — the only way to exercise the viewer's board-restart detection, since switching modes disconnects and clears it first.")
-                Text("Dropping frames reproduces the firmware's out-of-buffers path, which iOS is too generous to produce on its own. It can only fake \"taken but never sent\"; genuine loss on the air cannot be synthesised from this side.")
+                Text("Dropping frames reproduces the firmware's out-of-buffers path with a known count. iOS refuses frames of its own accord too — measured at 5.27% — so this is for controlled experiments rather than to produce something otherwise unreachable. It can only fake \"taken but never sent\"; genuine loss on the air cannot be synthesised from this side.")
                 if !display.motionAvailable {
                     Text("No motion hardware here, so frames carry zeroed axes at 1 Hz — the same fallback a board uses when its IMU will not start.")
                 }

@@ -120,11 +120,15 @@ final class SophonSimulator {
 
     /// Percentage of frames to drop before they reach the radio.
     ///
-    /// Not a toy. iOS's transmit queue is generous enough that `updateValue`
-    /// essentially never fails at this size and rate, so `noBuffer` would sit at
-    /// zero forever and the viewer's attribution would remain untested. This
-    /// reproduces the firmware's -ENOMEM path on demand, and makes
-    /// `seqGaps == noBuffer` checkable against a known truth for the first time.
+    /// Reproduces the firmware's `-ENOMEM` path on demand, making
+    /// `seqGaps == noBuffer` checkable against a known drop count.
+    ///
+    /// **Its original justification is void.** This was built believing iOS's
+    /// queue never fills at this size and rate, so that `noBuffer` would sit at
+    /// zero and attribution would go untested. Measured (#248), refusals run at
+    /// 8.80% before #255 and 5.27% after — see the section on loss in
+    /// `PROTOCOL.md`. A *known* drop count is still more useful than an
+    /// uncontrolled one, which is why this stays.
     ///
     /// It can only fake "taken but never sent". Genuine air loss — sent and lost
     /// — cannot be synthesised from this side.

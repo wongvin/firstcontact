@@ -8,8 +8,10 @@ import os
 /// Counterpart to `zephyr/sophon/src/ble.c`, and reuses the frozen UUIDs from
 /// `SophonProtocol` so the two cannot describe different services.
 ///
-/// Delegate callbacks use `MainActor.assumeIsolated` rather than `Task { @MainActor }`,
-/// which is the opposite of `SophonHub`'s style. That is forced, not preferred:
+/// Delegate callbacks use `MainActor.assumeIsolated` rather than `Task { @MainActor }`.
+/// `SophonHub` mixes the two, using `assumeIsolated` wherever a non-`Sendable`
+/// Core Bluetooth type is involved and `Task` elsewhere. Here it is forced rather
+/// than preferred:
 /// `CBATTRequest` is not `Sendable`, so a read request cannot cross an isolation
 /// boundary without an unsafe escape. The manager is created with `queue: .main`,
 /// so the assumption holds — and `assumeIsolated` traps loudly if that ever
@@ -136,8 +138,15 @@ final class SophonPeripheral: NSObject {
         log.info("peripheral stopped")
     }
 
-    /// Zeroes the counters without touching the link, standing in for a board
-    /// power-cycle that stays inside the supervision timeout.
+    /// Zeroes the counters without touching the link, standing in for an
+    /// application-level restart.
+    ///
+    /// **Not** a board power-cycle: that loses the SoC's connection state
+    /// entirely, so the link drops and the board returns through a normal
+    /// reconnect. #224 later measured the supervision timeout at 420 ms against a
+    /// 5 s stall window, closing the question. This is the one thing that
+    /// restarts a peripheral *underneath* a live link, which is why it is the
+    /// only way to exercise `noteBoardRestart()`.
     func resetCounters() {
         sent = 0
         noConn = 0
@@ -215,10 +224,16 @@ final class SophonPeripheral: NSObject {
 
     /// Counts an artificially dropped frame.
     ///
-    /// The bench control that produces these exists because iOS's transmit queue
-    /// is generous enough that `updateValue` essentially never fails at 18 bytes
-    /// and 52 Hz. Left alone, `noBuffer` would read zero forever and the viewer's
-    /// attribution logic would stay as untested as it has always been.
+    /// **The premise this was built on turned out to be false.** It existed
+    /// because iOS's queue was believed generous enough that `updateValue`
+    /// essentially never fails, leaving `noBuffer` at zero forever and the
+    /// viewer's attribution untested. Measured (#248): it fails constantly —
+    /// 8.80% of frames before #255 and 5.27% after — so that path is exercised by
+    /// ordinary use and needs no synthetic help.
+    ///
+    /// Kept as a bench control for *deliberate* experiments, where a known drop
+    /// count is more useful than whatever the link happens to be doing. It still
+    /// cannot fake genuine air loss, only "taken but never sent".
     func noteArtificialDrop() {
         noBuffer &+= 1
     }
@@ -295,7 +310,8 @@ extension SophonPeripheral: CBPeripheralManagerDelegate {
             // It would also decouple noBuffer from observed gaps, destroying the
             // one-to-one attribution that makes a gap explicable at all.
             //
-            // Nothing is lost by waiting: the next sample is under 20 ms away,
+            // Nothing is lost by waiting: the next sample averages ~20 ms away
+            // (measured 0.2-55.3 ms, clumped -- see #248),
             // and the board behaves identically — it keeps calling
             // bt_gatt_notify() every sample and lets the failures fall where
             // they may.

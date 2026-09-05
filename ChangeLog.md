@@ -2,6 +2,18 @@
 
 ## 2026-09-05
 
+### docs: comments now match what the code does (#260)
+
+- This codebase treats long comments as the record of *why* code is shaped as it is, which makes drift expensive: a stale comment is a false claim in the only place the reasoning is written down. Eight cases where a reader would have been actively misled, most of them written during the very corrections they contradicted.
+- **The retracted "iOS is too generous" claim, in three places** — two doc comments and a **user-visible footer**. `PROTOCOL.md` recorded refusals at 8.80% before #255 and 5.27% after; one of the comments sat ~55 lines below a measurement saying the opposite in the same file. The drop control is now described as a *known* drop count for controlled experiments, since its stated justification — that `noBuffer` would otherwise read zero forever — is void.
+- **`LinkParams` was wearing `SophonIdentity`'s doc comment.** A missing blank line folded them, so Quick Help said `LinkParams` is parsed from manufacturer data and is display-only — every clause false — while `SophonIdentity` had none. Caused by #224 inserting the new type against the identity declaration as an anchor.
+- **Two properties carried stacked contradictory blocks.** `restartsWithoutDisconnect` still led with #214's pre-correction text, the exact claim the block beneath it exists to withdraw. `noteBoardRestart()` carried `resetLinkStats()`'s doc while `resetLinkStats()` had none — and that text was wrong anyway: it does **not** run "when a new connection starts", it runs from `beginSession()` once a Sophon service is confirmed, which is the whole point of #228.
+- **`seqGaps` was given `lostOnAir`'s definition** — "frames the board sent that never arrived" — which is the confusion #247 renamed the row to remove.
+- **`attMTU`'s "Expect 23"** is true only for a board; iOS-to-iOS measures ~515, and the old wording made the docs look wrong rather than the assumption.
+- **`resetCounters()`** no longer claims to stand in for a power cycle inside the supervision timeout, which #224 measured at 420 ms against a 5 s stall window.
+- Four citations that no longer resolved: a `reboot()` method this type does not have, "the next sample is under 20 ms away" against a measured 0.2–55.3 ms spread, "#209's 50 Hz" when #209 is 52 nominal / ~54.3 measured, and a claim that `SophonHub` uses the opposite isolation style when it now mixes both for the same reason.
+- Comment-only apart from that one footer string, confirmed by diffing non-comment lines.
+
 ### fix: simulator state now clears on reset (#259)
 
 - Three pieces of state added by #248/#255 were never wired into the reset paths that were supposed to clear them, and two put visibly wrong numbers on screen.
