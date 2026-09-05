@@ -86,15 +86,6 @@ nonisolated enum SophonProtocol {
     ]
 }
 
-/// What a Sophon says about itself before you connect.
-///
-/// Parsed from `CBAdvertisementDataManufacturerDataKey`. Mirrors
-/// `struct sophon_mfg_data` in `zephyr/sophon/src/version.h`; any change there
-/// needs the same change here.
-///
-/// Every field is **display-only**. Nothing branches on them — in particular,
-/// connection policy must not, because an iOS peripheral cannot advertise
-/// manufacturer data at all, so the simulator never has any of this.
 /// The connection parameters the peripheral reports iOS granted.
 ///
 /// Mirrors `struct sophon_link_params` in `zephyr/sophon/src/ble.h`; any change
@@ -152,6 +143,15 @@ nonisolated struct LinkParams: Equatable, Sendable {
     }
 }
 
+/// What a Sophon says about itself before you connect.
+///
+/// Parsed from `CBAdvertisementDataManufacturerDataKey`. Mirrors
+/// `struct sophon_mfg_data` in `zephyr/sophon/src/version.h`; any change there
+/// needs the same change here.
+///
+/// Every field is **display-only**. Nothing branches on them — in particular,
+/// connection policy must not, because an iOS peripheral cannot advertise
+/// manufacturer data at all, so the simulator never has any of this.
 nonisolated struct SophonIdentity: Equatable, Sendable {
     /// Minimum, not exact. Trailing bytes are ignored so that appending a field
     /// firmware-side does not turn into a parse failure here.
