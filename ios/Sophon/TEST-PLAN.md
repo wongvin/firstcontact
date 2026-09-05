@@ -182,3 +182,152 @@ is something a naive guard would break.
 
 - **Battery impact.** Plausible but unmeasured, and not separable from the radio's own cost at duplicate-scan rate.
 - **Whether duplicate scanning itself is too expensive.** That is #235's design, not this issue; #261 only concerns what the app does per callback.
+
+## 3. RSSI while connected (issue #237)
+
+Before this change `device.rssi` was written in exactly one place — `didDiscover`.
+A Sophon board is `CONFIG_BT_MAX_CONN=1` and stops advertising the moment it is
+taken, so for the whole of a connected session the row held the last value
+captured *before* the link came up. It looked like a rock-steady signal. It was a
+number that had stopped being measured.
+
+The fix polls `readRSSI()` on the existing 2 s stats poll, feeds it through the
+same `ingestRSSI` smoothing path as advertised samples, bounds that path's window
+by **age as well as sample count**, and labels a reading with its age once it
+stops being refreshed.
+
+### 3a. Why the window had to become age-bounded
+
+Worth understanding before running anything, because two cases below fail
+harmlessly-looking if this is missed.
+
+The two sources arrive three orders of magnitude apart: tens of samples per second
+from advertisements with duplicate reporting on (#235), one per second while
+connected. A fixed 8-sample window therefore spans **0.3 s** in the first case and
+**8 s** in the second. Sixteen seconds cannot follow a tablet being carried away
+from a board, which is the one check #237 exists to make possible — so a mean that
+looked correct would have failed the acceptance test.
+
+The age bound is `rssiWindowSpan = 4 s`, the count bound `rssiWindow = 8`, and the
+display threshold `rssiStaleAfter = 5 s`. The display threshold is deliberately
+the larger: at a 1 s poll several consecutive reads must go missing before the
+label changes, so one late callback cannot flicker it.
+
+A second rule works with it, and 3.7 is what proves it: a connected reading is
+credited to the **last packet the app can prove arrived** (`lastFrameAt`), not to
+the moment the reply landed. HCI `Read_RSSI` returns the strength of the
+controller's last received packet and cannot say how long ago that was, while
+`peripheral.state` stays `.connected` for the whole supervision window after a
+board dies. Stamping the reply time would therefore have left this row looking
+freshly measured for minutes on a dead link — #237's own defect rebuilt in a new
+place, with *frozen and looks live* swapped for *refreshed by asking and looks
+live*. Readings that describe a packet older than the window are dropped, which
+is what lets the age climb.
+
+**The fix holds either way; 3.7 only says which mechanism held.** If iOS answers
+`readRSSI()` on a dead link with an error or the `127` sentinel, the existing
+guards drop it and the age climbs regardless of crediting. If it answers from the
+controller's cache — the case the crediting rule exists for — the stale timestamp
+is what makes the age climb. The row is honest under both, so 3.7 is a diagnostic
+rather than a gate.
+
+**That window is only reachable on an iOS-to-iOS link.** A board's supervision
+timeout is 420 ms (#224), so a dead board leaves `.connected` before the 5 s
+staleness threshold can be crossed — `Disconnected` is the correct answer there,
+and the poll stops on its own. iOS chooses a far longer timeout for its own
+links, which is where `.stalled` was first reproduced and where 3.7 has to run.
+
+The age bound also settles the disconnect question with no disconnect hook.
+Samples describing the old link expire on their own, so a reconnect — possibly
+from somewhere else entirely — starts its mean from its own first reading rather
+than blending into the previous one. Case 3.9 is what proves that, and it is the
+case that silently passes for the wrong reason if you reconnect too slowly to tell
+the difference.
+
+### 3b. The value now tracks — the check that was impossible before
+
+| ID | Steps | Expected |
+|---|---|---|
+| 3.1 | Connect a board, open its detail view, leave it still, and read the RSSI row over 30 s. | A value in dBm, **no age suffix**, moving by a few dB. Before this change it would not have moved at all. |
+| 3.2 | With the detail view open, carry the tablet steadily away from the board to the far end of the room, then back. | The value falls as you go and recovers as you return, updating about once a second. This is #237's acceptance test. |
+| 3.3 | Note the value at rest, then put a hand or body between tablet and board. | Falls by several dB within a few seconds. A crude but decisive check that the number comes from the radio and not from memory. |
+| 3.4 | Compare the reading against `TX power` in the same section, on a board flashed with #230. | `TX power − RSSI` is a plausible path loss for the distance — tens of dB, not near zero and not hundreds. The estimate #230 added TX power *for* is only as good as this row. |
+
+### 3c. A remembered reading must not look like a measured one
+
+Requirement 4 — and the requirement it had to be reconciled with.
+
+The issue asked for polling to stop "when nothing is on screen, as the stats poll
+already does". That rule does **not** carry across, and an earlier build that
+applied it literally shipped a real defect: RSSI is displayed in the device list
+*as well as* the detail view, so a poll living in the detail view's `.task` left a
+connected board's list row ageing forever with nothing that could ever clear the
+suffix — #237's own complaint moved one screen over. **Found in review on
+2026-09-05, after the first build.**
+
+The poll is therefore hub-owned and bounded by the *role* rather than by a view:
+it runs between `resume()` and `suspend()`, so simulator mode polls nothing and a
+backgrounded app is suspended by iOS. That is defensible only because `readRSSI`
+costs no air traffic — see §3e, which measures the claim. The stats poll stays
+view-gated because it is a genuine ATT round trip whose results only the detail
+view shows.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 3.5 | Connect a board, open the detail view until RSSI is live, then navigate back to the list and watch its row for 30 s. | Stays **fresh** — value moves, no age suffix, not dimmed. *This is the case that regressed.* An age suffix appearing here means the poll has been re-attached to a view's lifecycle. |
+| 3.6 | From 3.5, move the tablet while watching the **list** row only. | The value follows. The list is a first-class consumer of RSSI, not a stale mirror of the detail view. |
+| 3.6a | Switch to simulator mode, then back to viewer. | Polling stops and restarts with the role. On return, a reconnected board's reading goes live again within a second or two rather than staying suffixed. |
+| 3.7 | **iOS-to-iOS link, and the peer must go silent *without* a clean disconnect.** Connect the viewer to a simulator peripheral, open the detail view, then carry the peripheral device out of range — far enough, or into a lift/fridge/metal enclosure. Watch **both** the State row and the RSSI row. | State reaches `Stalled` at 5 s and RSSI gains its age suffix at the same moment. *If RSSI stays fresh while State says `Stalled`, the evidence-crediting in `ingestConnectedRSSI` is not working.* **Do not background or swipe away the simulator app** — see 3.7b. **Do not turn Bluetooth off on the peer** — that sends a clean teardown, so the viewer goes straight to `Disconnected` and the window never opens. |
+| 3.7b | Same as 3.7 but background or swipe away the simulator app. | State stays **`Connected`**, never `Stalled`. *Measured 2026-09-05.* Not a defect and not a usable method: `BackgroundKeepAlive` holds a CoreLocation session precisely so a backgrounded simulator keeps sampling and notifying, because a push-driven peripheral gets no BLE event to wake it. Frames really are still arriving, so a fresh RSSI here is correct. Recorded because this was the first method tried and it looks like it should work. |
+| 3.7a | Same as 3.7 but with a **board**: power it off with the detail view open. | State goes to **`Disconnected`**, not `Stalled`, and RSSI gains its age suffix. *Measured 2026-09-05.* This does **not** test the crediting rule: a board's supervision timeout is 420 ms (#224), so `peripheral.state` leaves `.connected` almost immediately, the poll's guard closes, and `rssiAt` freezes regardless of how readings are credited. The result is identical on fixed and unfixed code. Recorded because the case looks decisive and is not — an earlier draft of this plan asked for `Stalled` here, which a board cannot produce. |
+| 3.8 | Disconnect a board but leave it advertising and released, so duplicate reporting is on. Watch RSSI in the list. | Stays fresh with no suffix — advertisements are feeding it at tens per second. |
+
+| 3.7c | From 3.7, keep watching for a further 60 s without touching anything. | The age keeps climbing and the value never refreshes itself. A reading that starts ageing and then silently resets to fresh means a stale-crediting sample was accepted rather than dropped. |
+
+### 3d. Across a disconnect
+
+| ID | Steps | Expected |
+|---|---|---|
+| 3.9 | Note the RSSI at close range. Disconnect, carry the tablet far away, wait **more than 4 s**, then reconnect and read the first value that appears. | The new reading reflects the new distance immediately — it does not start near the old close-range value and drift down. The old samples have aged out of the window. *If it drifts, the age bound is not being applied and only the count bound is in force.* |
+| 3.10 | Repeat 3.9 but reconnect in **under 4 s** without moving. | Value is continuous, no visible jump. Ageing out must not mean discarding a still-valid mean. |
+| 3.11 | Forget a released board (#235), then let it be rediscovered. | RSSI starts from the new device object's own first sample. Nothing carries over — a forgotten device is a new `SophonDevice`. |
+
+### 3e. Cost — does polling spend connection-event budget?
+
+The code comment justifying the 1 s cadence claims `readRSSI` is **not** an ATT
+round trip: the Bluetooth spec's `Read_RSSI` is a local controller command
+(Core v6.0 Vol 4 Part E §7.5.4) reporting the strength of packets the peripheral
+is already sending. That claim is load-bearing — it is the reason the interval was
+chosen for usefulness rather than for thrift — so it should be checked rather than
+believed.
+
+**A null result at the shipped 1 s cadence proves nothing.** One read per second
+against 20 connection events per second is far below the noise in the refusal
+rate. The test needs a stress build.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 3.12 | Baseline: connected board, detail view open, 60 s. Record frames/s, `noBuffer`, and refusal %. | The figures `PROTOCOL.md` records — ~20 events/s, refusals near 5.27% post-#255. |
+| 3.13 | Stress build: change the sleep in `SophonHub.startRSSIPolling()` from 1 s to 100 ms. Repeat 3.12. | **If the claim holds:** frames/s, `noBuffer` and refusal % are unchanged within noise, despite 10 reads/s. **If it does not:** refusals rise measurably and the 1 s cadence needs justifying on cost after all. Record the numbers either way — this is the case that can falsify the comment. |
+| 3.14 | On the stress build, confirm the RSSI row still behaves — no flicker, no missing values. | 10 reads/s against a 4 s window is 40 samples capped to 8, i.e. a 0.8 s mean. Should be smooth. |
+| 3.14a | On the stress build, open and close the detail view repeatedly while watching the list row. | No stall, no duplicate polling artefacts. One owner drives the poll; the detail view no longer reads RSSI at all. |
+| 3.15 | Revert the stress build before shipping. | The RSSI poll back to 1 s. Stated explicitly because a fast poll left in place would quietly change every other measurement in this file. |
+
+### 3f. Regression — the advertised path must be untouched
+
+| ID | Steps | Expected |
+|---|---|---|
+| 3.16 | Watch a released, advertising board's RSSI in the list for 30 s (duplicate reporting on). | Smooth and readable, as before #237. The 8-sample count bound still governs here; the age bound never binds at tens of samples a second. |
+| 3.17 | Confirm the `127` sentinel is still dropped: watch a board at the edge of range in the list. | The row never shows a positive value and never vanishes mid-session. This is #235's latching rule, which `didReadRSSI` also relies on rather than re-implementing. |
+| 3.18 | Connect to the **simulator** peripheral and open its detail view. | RSSI populates and tracks — an iOS peripheral cannot advertise manufacturer data, but it is a normal BLE connection, so `readRSSI` works exactly as for a board. |
+| 3.19 | Check the detail view's row order and separators: State, RSSI, ATT MTU, Interval… | Each on its own List row with normal separators. RSSI has its **own** `TimelineView`; sharing the State row's would render both inside one cell, which no compile catches. |
+| 3.20 | Leave the app in the detail view for several minutes on a healthy link. | No growth in body-evaluation rate versus the #261 baseline. `rssiAt` and `rssiSamples` are `@ObservationIgnored`, so per-sample writes must not drive redraws. |
+| 3.21 | Find or force a device whose `rssi` is still nil — a board first seen at the very edge of range, so every sample so far was the `127` sentinel — and open its detail view. | **No blank row** between State and ATT MTU. The nil check sits outside the `TimelineView` for this reason: a `TimelineView` is always one row, so a nil reading inside one renders an `EmptyView` in a real List cell with separators around it. Hard to force; inspect the code path if it cannot be reproduced. |
+| 3.22 | Leave a connected board's detail view, then return to the list after a minute, ten minutes, and over an hour. | The age reads `52s ago`, then `10m ago`, then `over an hour ago` — it coarsens rather than printing `3612s ago`. |
+
+### 3g. Not covered
+
+- **Absolute accuracy.** Nothing here calibrates dBm against a reference. The tests check that the number *responds*, not that it is correct — no equipment on hand can establish the latter.
+- **Whether 1 s is the right cadence.** 3.13 can show the cost is negligible, which would mean a faster poll is *affordable*; it cannot show it is *useful*. Choosing a different interval would need a reason from the UI side.
+- **A disconnected, unreleased board's reading looking stale.** With duplicate reporting off, iOS consolidates repeat sightings, so such a device may legitimately carry a large age. That is honest rather than wrong, but it may read as noisy in a long list. Judgement call deferred until it is seen on real hardware.
+- **RSSI as distance.** `TX power − RSSI` is a path-loss estimate, not metres, and #230's range measurements already showed the model off by roughly 10×.

@@ -188,10 +188,15 @@ private struct DeviceRow: View {
                     .foregroundStyle(status.isWarning ? .orange : .secondary)
             }
             Spacer()
-            if let rssi = device.rssi {
-                Text("\(rssi) dBm")
+            // Carries its age once it stops being refreshed. The poll behind it is
+            // hub-owned rather than this view's, precisely so this row keeps
+            // updating: an earlier build ran it from the detail view's task, and a
+            // connected board's row here then aged forever with nothing left that
+            // could clear the suffix (#237).
+            if let reading = device.rssiReading(asOf: now) {
+                Text(reading.label)
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(reading.isStale ? .tertiary : .secondary)
             }
         }
     }
@@ -320,9 +325,31 @@ private struct DeviceDetailView: View {
                 LabeledContent("State", value: status.label)
                     .foregroundStyle(status.isWarning ? .orange : .primary)
             }
-            if let rssi = device.rssi {
-                LabeledContent("RSSI", value: "\(rssi) dBm")
+
+            // Its OWN timeline rather than sharing the one above, even though both
+            // want the same 1 s clock. A TimelineView is a single view, so two
+            // rows inside one would render stacked in a single List cell with no
+            // separator -- a layout break no compile could catch.
+            //
+            // It needs a clock at all because the age is a function of elapsed
+            // time, and no data arrives to invalidate it in the case that matters:
+            // a link that has gone quiet produces nothing to redraw on.
+            //
+            // The nil check is OUTSIDE the timeline, not inside it. A TimelineView
+            // is always one row, so a nil reading inside one renders an EmptyView
+            // in a real List cell -- a blank line with separators between State and
+            // ATT MTU. Hoisting it means zero rows, which is what the old `if let`
+            // did. The sibling timelines further down carry the same note for the
+            // opposite reason: they are one row either way.
+            if device.rssi != nil {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    if let reading = device.rssiReading(asOf: context.date) {
+                        LabeledContent("RSSI", value: reading.label)
+                            .foregroundStyle(reading.isStale ? .secondary : .primary)
+                    }
+                }
             }
+
             if let mtu = device.attMTU {
                 LabeledContent("ATT MTU", value: "~\(mtu)")
             }
