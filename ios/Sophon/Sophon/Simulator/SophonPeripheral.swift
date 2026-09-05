@@ -63,7 +63,9 @@ final class SophonPeripheral: NSObject {
     private var acceptedInCyclesTotal = 0
     private var acceptedCycles = 0
 
-    /// Cumulative since this simulator started, never reset except by `reboot()`.
+    /// Cumulative since this simulator started, cleared only by `resetCounters()`
+    /// — which `SophonSimulator.reboot()` calls, and which `start()` reaches
+    /// through `reboot()`, so a mode round-trip clears them too.
     /// Kept out of observation because they move at the sample rate.
     @ObservationIgnored private var sent: UInt32 = 0
     @ObservationIgnored private var noConn: UInt32 = 0
@@ -152,6 +154,7 @@ final class SophonPeripheral: NSObject {
         acceptedCycles = 0
         other = 0
         queueFullRecoveries = 0
+        localQueueDrops = 0
     }
 
     // MARK: - Transmit

@@ -2,6 +2,17 @@
 
 ## 2026-09-05
 
+### fix: simulator state now clears on reset (#259)
+
+- Three pieces of state added by #248/#255 were never wired into the reset paths that were supposed to clear them, and two put visibly wrong numbers on screen.
+- **`localQueueDrops` joins `resetCounters()`.** It was incremented but never cleared by anything, so after a Reboot — or any mode round-trip, since `start()` calls `reboot()` — the screen showed `TX buffer full: 0` above `…dropped by send queue: 34`, a subset larger than its superset. Its non-zero value also gates the row's visibility, so one dropped frame lit an orange warning for the rest of the app's life.
+- **The cadence clocks and accumulators now clear in `reboot()`.** `ContinuousClock` runs while the simulator is stopped, so the first tick after a restart differenced against a pre-stop instant: a 60-second absence recorded a 60-second "period" and permanently poisoned the mean — the figure the section's own footer tells the reader to judge by. The peripheral side already did this for `lastReadyAt`; only the two added later were missed.
+- `reboot()` also clears `pendingFrames`, which was not in the issue. A real board loses its queue, and it keeps the Scheduling cadence section resetting as a unit rather than half-clearing.
+- **Two dead fields removed.** `framesAtStatsBaseline` and `interruptedFramesAtStatsBaseline` were assigned and reset but never read once #247 replaced the `sent - received` comparison. Their comment still promised a guarantee no code implemented.
+- Verified on hardware: the mode round-trip no longer poisons the ranges (§1 cases 1.4, 1.5), counters zero after a reboot (1.8), the viewer registers a restart rather than a spike in gaps (1.10, 1.10b), and advertisement-scoped `identity`/`txPower` survive a session reset while `attMTU` and link params correctly re-establish (1.11).
+- **Cases 1.1–1.3 were not run.** The `localQueueDrops` reset is confirmed by inspection only: the send queue no longer fills, so the counter stays 0 and there is nothing to watch reset. That is the same condition that let the bug ship — nothing exercises the path — and forcing it needs the stress build described in `TEST-PLAN.md` § 1a.
+- Testing corrected three wrong expectations in the plan itself, all written from reading code rather than running it: a range bound of 17–25 ms that would have failed a healthy build (measured baseline reaches ~55 ms); a case that expected "Nothing yet" from rows not gated by it, and which could not distinguish *reset then repopulated in 40 ms* from *never reset*; and an inverted expectation that the viewer's counters survive a peripheral restart, when `noteBoardRestart()` deliberately zeroes them. Cases now judge resets by **range width** and magnitudes **by order**.
+
 ### perf: stop redrawing the device list at advertisement rate (#261)
 
 - While anything is released, duplicate scan reporting delivers `didDiscover` at the advertiser's rate — ~16–33/s for a board at `BT_LE_ADV_CONN_FAST_1`. Two writes there were unconditional, so a device's row **and** its open detail view were invalidated at that rate, in exactly the #235 hand-off scenario duplicates exist for.
