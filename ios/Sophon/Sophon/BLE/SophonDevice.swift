@@ -235,13 +235,6 @@ final class SophonDevice: Identifiable {
     /// session rather than a total that is mostly historical.
     var txStatsAtConnect: TxStats?
     var txStatsAt: Date?
-    /// framesReceived at the instant the stats baseline was taken, so both
-    /// sides of the comparison start from the same moment.
-    private var framesAtStatsBaseline: Int = 0
-    /// Same idea for interruption frames, so a hole that predates the
-    /// baseline is not subtracted from a window it never belonged to.
-    private var interruptedFramesAtStatsBaseline: Int = 0
-
     /// `seqGaps` as it stood when the most recent stats read landed.
     ///
     /// Exists so `lostOnAir` can subtract two counts covering the SAME window.
@@ -516,8 +509,6 @@ final class SophonDevice: Identifiable {
         txStats = nil
         txStatsAtConnect = nil
         txStatsAt = nil
-        framesAtStatsBaseline = 0
-        interruptedFramesAtStatsBaseline = 0
         seqGapsAtStatsRead = 0
     }
 
@@ -526,17 +517,8 @@ final class SophonDevice: Identifiable {
         // report what happened during this session. The board's totals survive
         // reconnects; this app's counters do not, and comparing the two without
         // a baseline would be misleading.
-        //
-        // framesReceived is snapshotted at the same instant. That read lands a
-        // second or two after connect — after service and characteristic
-        // discovery — and any frames arriving in that window are already inside
-        // the board's baseline while still counted by this app. Without pinning
-        // both to the same moment, the session figures drift apart by exactly
-        // the number of frames that slipped through the gap.
         if txStatsAtConnect == nil {
             txStatsAtConnect = stats
-            framesAtStatsBaseline = framesReceived
-            interruptedFramesAtStatsBaseline = framesDuringInterruptions
         }
         txStats = stats
         txStatsAt = Date()

@@ -228,6 +228,33 @@ final class SophonSimulator {
         notifyWindowStart = nil
         notifyWindowCount = 0
         notifyRateHz = nil
+
+        // The cadence measurements reset with everything else. ContinuousClock
+        // keeps running while the simulator is stopped, so without this the first
+        // tick after a restart differences against an instant from before it --
+        // a mode round-trip 60 s long recorded a 60-second "period" and
+        // permanently poisoned the mean the UI tells the reader to judge by
+        // (#259). The peripheral side already did this for lastReadyAt; only
+        // these two were missed.
+        lastDrainAt = nil
+        drainPeriodTotalMillis = 0
+        drainPeriodCount = 0
+        drainPeriodMeanMillis = nil
+        drainPeriodMinMillis = nil
+        drainPeriodMaxMillis = nil
+
+        lastSampleAt = nil
+        sampleGapTotalMillis = 0
+        sampleGapCount = 0
+        sampleGapMeanMillis = nil
+        sampleGapMinMillis = nil
+        sampleGapMaxMillis = nil
+
+        // A real board loses whatever it had queued. Also keeps the Scheduling
+        // cadence section coherent: every part of it now clears together, rather
+        // than half reading "Nothing yet" beside half reading stale figures.
+        pendingFrames.removeAll()
+
         peripheral.resetCounters()
         log.info("simulated board rebooted")
     }

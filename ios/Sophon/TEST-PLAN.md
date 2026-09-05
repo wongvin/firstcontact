@@ -61,12 +61,34 @@ such rather than marked passed.
 
 ### 1c. Cadence clock reset
 
+**Presence of values proves nothing.** `Send loop period` and `CoreMotion arrival`
+repopulate within about two ticks — roughly 40 ms — so they are back before anyone
+can look, whether or not the reset happened. Only the **Drain interval** block
+shows "Nothing yet", because it needs two queue-full events and those are rare.
+
+So judge a reset by **range width**: a freshly reset min/max spans a few ms and
+widens over the following minute, whereas an un-reset one shows its accumulated
+bounds straight away. An earlier draft of case 1.7 expected the whole section to
+read "Nothing yet", which is both wrong and untestable — it could not distinguish
+"reset and repopulated" from "never reset".
+
+**Judge magnitudes by order, not by a tight bound.** Measured baseline on
+iOS: both ranges reach **~55 ms** in normal operation — `Task.sleep` does not
+deliver the interval it is asked for, and Core Motion arrives clumped. A 55 ms
+upper bound is healthy, not a failure.
+
+The defect's signature is **~60000 ms**, three orders of magnitude away, so it
+cannot be confused with ordinary jitter. An earlier draft of this section called
+for a "tight range" and a verbal walkthrough put that at 17–25 ms, which would
+have failed a perfectly good build.
+
 | ID | Steps | Expected |
 |---|---|---|
-| 1.4 | Run Simulator mode with an iPad connected until **Send loop period** shows a stable mean near 20 ms and a tight range. Note both. Switch to Viewer, wait **60 s**, switch back to Simulator. Watch the first few seconds. | Mean stays near 20 ms; range stays tight. *Before the fix the first tick measures against a 60-second-old instant: range jumps to roughly 17.9 – 60018.2 ms and the mean is permanently poisoned.* |
-| 1.5 | Repeat 1.4 watching **CoreMotion arrival** and **Arrival range**. | Mean near 20 ms, range roughly 0.2 – 55 ms. *Before the fix the range gains a ~60000 ms outlier on the first sample.* |
+| 1.4 | Run Simulator mode with an iPad connected until **Send loop period** shows a stable mean near 20 ms. Note it and the range. Switch to Viewer, wait **60 s**, switch back to Simulator. Watch the first few seconds. | Mean stays near 20 ms and the range stays in **tens of ms**. *Before the fix the first tick differences against a 60-second-old instant: the range gains a **~60000 ms** outlier and the mean is permanently poisoned.* |
+| 1.5 | Repeat 1.4 watching **CoreMotion arrival** and **Arrival range**. | Mean near 20 ms, range in tens of ms. *Before the fix the range gains the same ~60000 ms outlier on the first sample.* |
 | 1.6 | Repeat 1.4 using **Reboot the simulated board** instead of a mode switch. | Same expectations. Reboot and mode-switch must agree. |
-| 1.7 | With cadence figures established, tap **Reboot** and read the whole Scheduling cadence section immediately. | The section is coherent — either all of it reset or all of it retained. *Before the fix `readyGap*` clears via `resetCounters()` while `drainPeriod*` and `sampleGap*` keep pre-reboot values, so half reads "Nothing yet" and half reads stale.* |
+| 1.7 | Run until **Arrival range** has widened to roughly `0.2 – 55 ms`. Tap **Reboot**, then read **Loop range** and **Arrival range** within a second or two. | Both ranges are **narrow** — a few ms wide, e.g. `19.8 – 21.2 ms` — and widen again over the next minute. *Before the fix they show the old wide bounds immediately, because min/max were never cleared.* |
+| 1.7b | Immediately after the same reboot, look at the **Drain interval** block specifically. | Reads "Nothing yet — the queue has not filled twice", until two queue-full events occur. Unlike the two rows above, this one is gated on `readyGap*` and was already reset correctly; it is here as a control. |
 
 ### 1d. Regression — resets that already worked must keep working
 
@@ -77,7 +99,8 @@ already correct.
 |---|---|---|
 | 1.8 | Run until Sent, TX buffer full and No subscriber are non-zero. Tap **Reboot**. | All three read 0. |
 | 1.9 | After a reboot, check **Drain interval** / **Range** in Scheduling cadence. | Reads "Nothing yet — the queue has not filled twice." `lastReadyAt` was already nil'd correctly and must remain so. |
-| 1.10 | On the **iPad**, note Frames received and Gaps in sequence. Reboot the simulator. | The viewer's own counters are unaffected by a peripheral-side reboot until the link drops; `seq` restarting is reported as a restart, not as loss. Cross-check against §"What `seq` means" in `PROTOCOL.md`. |
+| 1.10 | On the **iPad**, note Frames received, Gaps in sequence and Restarts without disconnect. Reboot the simulator. | Frames received and Gaps in sequence **reset to 0**, and **Restarts without disconnect increments**. That is `noteBoardRestart()` doing its job: the link never dropped, so the peripheral restarted underneath it and counters spanning two boots would be meaningless. `attMTU` survives, because the *connection* did. Transmit counters read `Reading…` until the next poll rebuilds the baseline. |
+| 1.10b | During the same reboot, watch **Gaps in sequence** specifically. | It must **not spike**. `seq` jumping from tens of thousands back to 0 read as loss is the failure this detector exists to prevent — a large gap here means the restart went undetected. |
 | 1.11 | With the board (not the simulator), connect, note ATT MTU and Interval, then release and reconnect. | Session-scoped values re-establish; `identity` and `txPower` — advertisement-scoped — are **not** cleared. This is the distinction #230/#235 drew and #259 must not blur. |
 
 ### 1e. Dead baseline fields — inspection
