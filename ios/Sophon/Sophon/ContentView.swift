@@ -314,6 +314,37 @@ private struct DeviceDetailView: View {
     // Sections are defined once and composed by both layouts. Two divergent
     // copies of the same content would drift the moment one was edited.
 
+    /// One link-parameter row, with its own timeline.
+    ///
+    /// Every branch renders exactly one `LabeledContent`, so the row is a single
+    /// List cell in all three states and the layout does not move as a read
+    /// completes -- which was the visible complaint in #263: the rows vanished
+    /// for a second or two on reconnect and came back.
+    @ViewBuilder private func linkParamRow(
+        _ label: String,
+        value: @escaping (LinkParams) -> String
+    ) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            switch device.linkParamsReading(asOf: context.date) {
+            case .values(let params):
+                LabeledContent(label, value: value(params))
+            case .reading:
+                LabeledContent(label, value: "Reading…")
+                    .foregroundStyle(.secondary)
+            case .notResponding:
+                LabeledContent(label, value: "Not responding")
+                    .foregroundStyle(.orange)
+            case .offline:
+                // Same words as the transmit counters use for the same state, so
+                // two sections of one screen do not invent separate vocabulary
+                // for "there is no link" -- which is the inconsistency #263 is
+                // about in the first place.
+                LabeledContent(label, value: "Available while connected")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     @ViewBuilder private var linkSection: some View {
         Section {
             // Timeline for the same reason as the list row: staleness changes with
@@ -335,19 +366,15 @@ private struct DeviceDetailView: View {
             // time, and no data arrives to invalidate it in the case that matters:
             // a link that has gone quiet produces nothing to redraw on.
             //
-            // The nil check is OUTSIDE the timeline, not inside it. A TimelineView
-            // is always one row, so a nil reading inside one renders an EmptyView
-            // in a real List cell -- a blank line with separators between State and
-            // ATT MTU. Hoisting it means zero rows, which is what the old `if let`
-            // did. The sibling timelines further down carry the same note for the
-            // opposite reason: they are one row either way.
-            if device.rssi != nil {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    if let reading = device.rssiReading(asOf: context.date) {
-                        LabeledContent("RSSI", value: reading.label)
-                            .foregroundStyle(reading.isStale ? .secondary : .primary)
-                    }
-                }
+            // Unconditional, like Hardware / Firmware / TX power below and unlike
+            // the `if let` this used to be (#263). Never having had a reading is
+            // itself the answer, and a row that vanishes cannot say it. It also
+            // makes this one row either way, which is what a TimelineView has to
+            // be: nil inside one would render an EmptyView in a real List cell.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let reading = device.rssiReading(asOf: context.date)
+                LabeledContent("RSSI", value: reading?.label ?? Self.notReported)
+                    .foregroundStyle(reading?.isStale == false ? .primary : .secondary)
             }
 
             if let mtu = device.attMTU {
@@ -359,16 +386,27 @@ private struct DeviceDetailView: View {
             // it (#224). Shown with events/second because that is the form worth
             // comparing against a sample rate: 50 Hz of frames cannot fit through
             // 25 events/s, which is the arithmetic #248 is about.
-            if let params = device.linkParams {
-                LabeledContent("Interval",
-                               value: params.eventsPerSecond.map {
-                                   String(format: "%.2f ms · %.0f/s", params.intervalMillis, $0)
-                               } ?? String(format: "%.2f ms", params.intervalMillis))
-                LabeledContent("Peripheral latency", value: "\(params.latency)")
-                LabeledContent("Supervision timeout", value: "\(params.timeoutMillis) ms")
+
+            // The gate is a plain observable check, outside any TimelineView, and
+            // each row carries its own timeline. Both halves matter: a
+            // TimelineView is always exactly one List row, so a branch rendering
+            // nothing inside one leaves a blank cell, and three rows inside one
+            // would stack into a single cell with no separators.
+            //
+            // A clock is needed at all because an unanswered read changes nothing
+            // observable -- the same reason the counters section below carries
+            // one (#242).
+            if device.showsLinkParams {
+                linkParamRow("Interval") { params in
+                    params.eventsPerSecond.map {
+                        String(format: "%.2f ms · %.0f/s", params.intervalMillis, $0)
+                    } ?? String(format: "%.2f ms", params.intervalMillis)
+                }
+                linkParamRow("Peripheral latency") { "\($0.latency)" }
+                linkParamRow("Supervision timeout") { "\($0.timeoutMillis) ms" }
             }
 
-            // Shown unconditionally, unlike RSSI and ATT MTU above: absence is
+            // Shown unconditionally, like RSSI above and unlike ATT MTU: absence is
             // itself the answer here — this peripheral does not advertise who it
             // is — and a row that vanishes cannot say that. Same argument the
             // frames section already makes for showing zero.
@@ -454,6 +492,13 @@ private struct DeviceDetailView: View {
                 } else {
                     Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
                 }
+            }
+            // Said once, in prose, rather than as three rows repeating a
+            // sentinel. The issue allows either; a footnote is what the rest of
+            // this section already uses to explain an absence, and three rows
+            // saying "never" would be louder than the fact deserves.
+            if device.offersLinkParams == false {
+                Text("No interval, latency or supervision timeout is shown because this peripheral has no link-parameters characteristic to read them from. That is every simulated Sophon — Core Bluetooth exposes no API for connection parameters on either side, so an iOS peripheral cannot report what it was granted — and every board running firmware older than #224. Normal, not a fault.")
             }
             if device.identity == nil {
                 Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon reports no hardware or firmware version — nor does a board running firmware older than #230. TX power is different: it is a standard advertising field that iOS fills in itself, so a value there is the phone's own radio rather than a Sophon's.")

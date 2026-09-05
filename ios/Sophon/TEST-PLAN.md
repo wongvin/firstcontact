@@ -331,3 +331,108 @@ rate. The test needs a stress build.
 - **Whether 1 s is the right cadence.** 3.13 can show the cost is negligible, which would mean a faster poll is *affordable*; it cannot show it is *useful*. Choosing a different interval would need a reason from the UI side.
 - **A disconnected, unreleased board's reading looking stale.** With duplicate reporting off, iOS consolidates repeat sightings, so such a device may legitimately carry a large age. That is honest rather than wrong, but it may read as noisy in a long list. Judgement call deferred until it is seen on real hardware.
 - **RSSI as distance.** `TX power − RSSI` is a path-loss estimate, not metres, and #230's range measurements already showed the model off by roughly 10×.
+
+## 4. Saying "not yet known" (issue #263)
+
+The Interval, Peripheral latency and Supervision timeout rows vanished for a
+second or two on reconnect, then came back. `resetLinkStats()` clears
+`linkParams`, and unlike ATT MTU beside it — restored synchronously in
+`beginSession()` from `maximumWriteValueLength` — they can only return once a
+GATT read completes. The gap is real and honest. It just said nothing.
+
+They were the only values on that screen whose absence was silent: #230 gave
+Hardware / Firmware / TX power a `Not reported` sentinel, and #242 gave the
+transmit counters `Reading…` and `Not responding.`
+
+### 4a. The three states, and why there are three
+
+`offersLinkParams` is a **tri-state**, and the reason is the second requirement:
+*not yet known* and *never going to answer* must not look alike.
+
+| `offersLinkParams` | Meaning | Rows |
+|---|---|---|
+| `nil` | characteristic discovery has not returned | **absent** |
+| `true` | the peripheral has the characteristic | `Reading…`, then values |
+| `false` | it does not, and will not grow one | **absent** |
+
+`false` is every simulator and every board flashed before #224. Absent — not
+`Reading…` — because they are not reading; they are never going to answer. The
+issue permits absence explicitly here rather than a sentinel.
+
+**`nil` is absent too, and an earlier build got this wrong.** It admitted `nil`
+on the reasoning that waiting is what is happening. But `nil` means characteristic
+discovery has not returned, so every simulator connect inserted three `Reading…`
+rows and removed them one round trip later — #263's own complaint inverted. The
+word was not even accurate: no read had been issued yet. Gating on a positive
+answer also matches the requirement literally — *while connected with the
+characteristic discovered but no value yet*. **Found in review, 2026-09-05.**
+
+`offersLinkParams` is therefore **latched across `resetLinkStats()`**, not cleared
+by it. It describes the peripheral's GATT database, which is stable across a
+reconnect, and latching is what keeps the rows on screen through the reset instead
+of flashing out and back — the same rule that latches `displayName` and `identity`
+against a callback carrying nothing. The trade is a stale answer if a board is
+reflashed across #224 within one app run; it costs one round trip, and a stale
+`false` hides rows rather than showing wrong ones.
+
+### 4a-ii. What `Not responding` is measured from
+
+The first implementation inferred it from `linkStatus` being `.stalled` — which is
+a statement about the **motion notify stream**, not about this read. The two are
+independent, and the failure modes that stop a read returning leave the frame
+stream perfectly healthy:
+
+- an ATT error on the link-params handle (Read Not Permitted, Insufficient
+  Authentication) while motion streams at 50 Hz;
+- a payload that is not exactly 8 bytes, which `LinkParams.init?` rejects —
+  one firmware revision away, since unlike `SophonIdentity` it does *not*
+  tolerate trailing bytes.
+
+Both produce a permanent `Reading…` under the old condition — the exact case the
+state was added for. It is now measured from `linkParamsRequestedAt`, set once per
+session when the read is issued, against the same 5 s threshold. ATT read errors
+are also logged rather than silently discarded.
+
+### 4b. The gap is legible
+
+| ID | Steps | Expected |
+|---|---|---|
+| 4.1 | Connect a board flashed with #224 and open the detail view during the connect. | Interval / latency / timeout appear as `Reading…` and then fill with values. They must **never** be absent while connected, and the rows must not move. |
+| 4.2 | Release the board and reconnect with the detail view open — the original repro, `TEST-PLAN` case 1.11. | Same: `Reading…` → values. *Before this change they disappeared for a second or two.* |
+| 4.3 | Watch the row heights across 4.2. | Nothing below the link section jumps. Each row is a single List cell in every state, so the section's height is constant. |
+| 4.4 | Confirm ATT MTU still behaves through the same reconnect. | Present throughout, never `Reading…` — it is restored synchronously and has no round trip to wait for. Untouched by this change. |
+| 4.5 | Confirm `identity` and `TX power` still survive the reconnect. | Unchanged and never cleared. They are advertisement-scoped, not session-scoped. |
+
+### 4c. Never going to answer
+
+| ID | Steps | Expected |
+|---|---|---|
+| 4.6 | Connect to a **simulator** peripheral and open its detail view. | The three rows are **absent**, and stay absent. They must not sit at `Reading…`: an iOS peripheral has no Link Params characteristic, and Core Bluetooth exposes no API that could give it one. |
+| 4.6d | From 4.6, read the **section footer**. | A line explains why the three rows are missing: no link-parameters characteristic to read them from, which is every simulated Sophon and every pre-#224 board, and is normal rather than a fault. The issue permits absence *or* saying so once; with a board on screen showing three rows and a simulator showing none, silence was the wrong half of that choice. *Reported from use 2026-09-05.* |
+| 4.6a | Repeat 4.6 watching closely **during the connect**, with the detail view already on screen — reconnect after a dropout, or return from simulator mode. | The rows never appear at all. *This is the case that regressed:* three `Reading…` rows inserting and being removed one round trip later. Watch for a flash, not a steady state. |
+| 4.6b | Connect a real board, disconnect it, and watch the section while it is `Disconnected` or `Released`. | The three rows **stay in place** and read `Available while connected` — the same words the transmit counters use for the same state. They must neither vanish (a row that disappears cannot explain itself — this issue's own argument) nor keep asserting the previous connection's interval under a State row saying the link is gone. *An interim build hid them; reported from use 2026-09-05.* |
+| 4.6c | From 4.6b, reconnect. | `Available while connected` → `Reading…` → values, with the rows never leaving the screen and nothing below them jumping. |
+| 4.7 | If a board running pre-#224 firmware is available, connect and check. | Same as 4.6 — absent. If none is to hand, this is covered by 4.6 sharing the code path. |
+| 4.8 | From 4.6, switch to viewer mode with a real board and back. | Rows appear for the board and are absent for the simulator, with no leakage either way. |
+
+### 4d. A read that never returns
+
+| ID | Steps | Expected |
+|---|---|---|
+| 4.9 | Force a link that comes up, enumerates the characteristic, and then goes quiet before answering — carry the board out of range immediately after connecting. | Rows read **`Not responding`** in orange after 5 s, not `Reading…`. Hard to time; if it cannot be produced, say so rather than recording a pass. |
+| 4.9a | The reachable version: build a board whose link-params handle returns an ATT error or a payload that is not 8 bytes, while motion keeps streaming. | Rows reach `Not responding` after 5 s **while the State row still reads `Connected`** and frames keep counting. This is the case the first implementation got wrong — it would have said `Reading…` forever, because it measured the frame stream rather than the read. Needs a modified firmware build; skip and say so if not doing one. |
+| 4.10 | From a healthy connected board, watch the three rows for 60 s. | They hold their values and do **not** flicker between values and `Reading…`. The rows re-evaluate on a 1 s timeline, so a state that depends on anything unstable would be visible immediately. |
+
+### 4e. RSSI — the third requirement
+
+| ID | Steps | Expected |
+|---|---|---|
+| 4.11 | Open the detail view for any device. | The RSSI row is **always present**. Never having had a reading is itself the answer, and it now reads `Not reported` rather than vanishing — matching Hardware / Firmware / TX power below it. |
+| 4.12 | Confirm the device **list** row still omits RSSI when there is none. | Still omitted there, deliberately. The list row is an `HStack`, not a List cell, so it carries no blank-row hazard, and a trailing `Not reported` in a compact row is noise rather than information. Only the detail view was in scope. |
+| 4.13 | Re-run §3 cases 3.1, 3.5 and 3.9 against this build. | Unchanged. The RSSI row's content is the same; only its presence when nil differs. |
+
+### 4f. Not covered
+
+- **Whether `Reading…` is ever visible at all on a fast link.** The window is one GATT read. It may complete before the first frame is drawn, in which case 4.1 shows values immediately — which is a pass, not a failure. The requirement is that the rows never *vanish*, not that the transient is observed.
+- **A peripheral that offers the characteristic and returns a malformed value.** `LinkParams.init?` rejects anything that is not exactly 8 bytes, so the row would stay at `Reading…`. Not reachable without a modified firmware, and #231 is where wire-contract misparsing belongs.
+- **Discovery failing outright** (`didDiscoverCharacteristicsFor` with a non-nil error). `offersLinkParams` stays `nil`, and nothing re-issues discovery, so the rows stay **absent** for the life of that connection. That is the safe direction — hiding rows rather than claiming to be reading something nobody asked for — but it is reasoned through, not tested.

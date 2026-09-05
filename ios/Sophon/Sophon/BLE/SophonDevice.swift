@@ -154,6 +154,77 @@ final class SophonDevice: Identifiable {
         if mean != rssi { rssi = mean }
     }
 
+    /// Whether the three link-parameter rows belong on screen at all.
+    ///
+    /// Deliberately **not** time-dependent, so it can gate from outside a
+    /// `TimelineView`. A `TimelineView` is always exactly one List row, so a
+    /// branch that renders nothing has to sit outside one or it becomes a blank
+    /// cell with separators (#237).
+    ///
+    /// Gated on a **positive** answer, not on "not yet known". An earlier version
+    /// admitted `nil` here, reasoning that waiting is what is happening -- but
+    /// `nil` means characteristic discovery has not returned, so every simulator
+    /// and every pre-#224 board inserted three `Reading…` rows and removed them
+    /// again one round trip later. That is #263's own complaint inverted, and
+    /// `Reading…` was not even true in that window: no read had been issued yet.
+    /// It also matches the requirement literally -- *while connected with the
+    /// characteristic discovered but no value yet*.
+    ///
+    /// **Not gated on the link being up.** Whether this peripheral *has* the
+    /// characteristic is a fact about the peripheral, so once enumerated the rows
+    /// keep their place and say what is going on -- `Available while connected`
+    /// while there is no link, matching the transmit counters directly below.
+    ///
+    /// An earlier build hid them on disconnect, to stop the previous session's
+    /// numbers sitting under a `Released` state row asserting an interval for a
+    /// link that no longer exists. That problem is real -- nothing clears
+    /// `linkParams` on disconnect, deliberately, since that persistence is what
+    /// keeps the rows from vanishing across `beginSession()`'s reset -- but
+    /// hiding the rows is the wrong half to fix. It is #263's own complaint: a
+    /// row that disappears cannot explain itself. The stale values are suppressed
+    /// by ``linkParamsReading(asOf:)`` returning `offline` instead.
+    var showsLinkParams: Bool {
+        offersLinkParams == true || linkParams != nil
+    }
+
+    /// What those rows should read, once ``showsLinkParams`` says they belong.
+    enum LinkParamsReading: Equatable {
+        case values(LinkParams)
+        case reading
+        /// The read never came back and the link has gone quiet.
+        case notResponding
+        /// No link to have parameters for. Says so rather than showing the last
+        /// connection's figures, which iOS is free to have changed since (#224).
+        case offline
+    }
+
+    /// - Note: `notResponding` exists for the reason the transmit counters give
+    ///   for theirs (#242): *a read that never returns is an answer, and
+    ///   presenting it as an ongoing wait is the same omission as a green dot
+    ///   with no data behind it.*
+    ///
+    ///   Measured from ``linkParamsRequestedAt`` -- the read itself -- and not
+    ///   from `linkStatus`, which describes the motion stream and can be
+    ///   perfectly healthy while this particular read fails every time.
+    func linkParamsReading(asOf now: Date) -> LinkParamsReading {
+        // Checked before the values, so a disconnect cannot leave the previous
+        // session's interval on screen looking current.
+        guard state.isConnected, hasSession else { return .offline }
+        if let linkParams { return .values(linkParams) }
+        guard let since = linkParamsRequestedAt,
+              now.timeIntervalSince(since) > Self.interruptionThreshold else {
+            return .reading
+        }
+        return .notResponding
+    }
+
+    /// Records that a Link Params read has been issued. Idempotent within a
+    /// session, so a repeated poll cannot keep pushing the timeout out.
+    func noteLinkParamsRequested() {
+        guard linkParamsRequestedAt == nil else { return }
+        linkParamsRequestedAt = Date()
+    }
+
     /// How long ago the packet behind ``rssi`` arrived, or nil if there is none.
     func rssiAge(asOf now: Date) -> TimeInterval? {
         rssiAt.map { now.timeIntervalSince($0) }
@@ -318,6 +389,36 @@ final class SophonDevice: Identifiable {
     /// would be asserting an interval that a reconnect may well have changed —
     /// the same lifetime question `attMTU` answers the same way.
     var linkParams: LinkParams?
+
+    /// Whether this peripheral offers the Link Params characteristic (#224), or
+    /// nil while characteristic discovery is still outstanding.
+    ///
+    /// **Three states, not two**, because "not yet known" and "never going to
+    /// answer" need different words on screen. A simulator and any board older
+    /// than #224 have no such characteristic and will not grow one; a board that
+    /// has it is a second or two away from answering. Collapsing those into one
+    /// absent row is what #263 is about.
+    ///
+    /// **Latched, not session-scoped** -- see `resetLinkStats()`. It describes the
+    /// peripheral's GATT database rather than one connection, and clearing it on
+    /// reset made the rows flash in and out on every simulator connect.
+    var offersLinkParams: Bool?
+
+    /// When the first Link Params read of this session was issued, or nil if
+    /// none has been.
+    ///
+    /// This is what makes ``LinkParamsReading/notResponding`` mean what its label
+    /// says. An earlier version inferred it from ``linkStatus`` being `.stalled`,
+    /// which is a statement about the **motion notify stream** and is independent
+    /// of whether this read came back: a board that returns an ATT error for this
+    /// handle, or a payload that is not exactly 8 bytes, keeps streaming frames
+    /// at 50 Hz while never answering -- so the rows would have said `Reading…`
+    /// forever, which is the precise case the state was added for.
+    ///
+    /// Set once per session, not per poll. `refreshStats` re-issues the read
+    /// every 2 s while the detail view is open, and refreshing this on each one
+    /// would mean the timeout could never expire.
+    private(set) var linkParamsRequestedAt: Date?
 
     /// Every advertisement key seen from this peripheral, accumulated.
     ///
@@ -662,6 +763,17 @@ final class SophonDevice: Identifiable {
         lastFrameAt = nil
         attMTU = nil
         linkParams = nil
+        linkParamsRequestedAt = nil
+        // offersLinkParams is deliberately NOT cleared here. It describes the
+        // peripheral's GATT database, which is stable across a reconnect, and
+        // latching it is what keeps the three rows on screen through this very
+        // reset instead of flashing out and back -- the same rule that latches
+        // displayName and identity against a callback carrying nothing.
+        //
+        // The trade is a stale answer if a board is reflashed across #224 within
+        // one app run. It costs one round trip: every connection re-enumerates
+        // characteristics and overwrites this, and a stale `false` hides rows
+        // rather than showing wrong ones.
         txStats = nil
         txStatsAtConnect = nil
         txStatsAt = nil
