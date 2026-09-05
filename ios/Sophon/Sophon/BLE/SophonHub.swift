@@ -56,6 +56,7 @@ final class SophonHub: NSObject {
     /// Runs only while something is released, which is the only time the answer
     /// can change.
     private var sweepTask: Task<Void, Never>?
+    private var rssiTask: Task<Void, Never>?
     private let log = Logger(subsystem: "com.vwong.Sophon", category: "ble")
 
     override init() {
@@ -227,6 +228,54 @@ final class SophonHub: NSObject {
     /// Called by the detail view so the sweep can leave its device alone.
     func setDeviceOnScreen(_ id: UUID?) { deviceOnScreen = id }
 
+    /// Poll every connected peripheral's RSSI.
+    ///
+    /// **Hub-owned, not driven by a view's `.task`** — the same lesson as the
+    /// sweep (#235), for a sharper reason. A `NavigationStack` cancels the device
+    /// list's tasks the moment a detail view is pushed, and RSSI is shown in
+    /// **both** places. A poll living in either view therefore leaves the other
+    /// displaying a number nobody is refreshing, which is #237's own complaint
+    /// moved one screen over: the list showed a connected board's reading ageing
+    /// forever, with nothing left that could ever clear the suffix.
+    ///
+    /// This is the one place where the stats poll's rule does not carry across.
+    /// `refreshStats` is view-gated because it is a genuine ATT round trip whose
+    /// results only the detail view shows. `readRSSI` is neither: the Bluetooth
+    /// spec's Read_RSSI is a local controller command (Core v6.0 Vol 4 Part E
+    /// §7.5.4) reporting the strength of packets the peripheral is already
+    /// sending, so it buys no air traffic and spends no connection-event budget.
+    /// That claim is load-bearing and measured rather than assumed — TEST-PLAN
+    /// §3e case 3.13 runs it at 100 ms, where a per-read air cost would show in
+    /// the refusal rate against 20 events/s.
+    ///
+    /// So the cadence answers to usefulness alone: 1 s is fast enough to watch a
+    /// value follow a tablet being carried away, and gives the 4 s smoothing
+    /// window four samples to work with.
+    ///
+    /// Still bounded by the *role* rather than by a view — it runs only between
+    /// `resume()` and `suspend()`, so simulator mode polls nothing, and a
+    /// backgrounded app is suspended by iOS.
+    private func pollRSSI() {
+        for device in devices where device.peripheral.state == .connected {
+            device.peripheral.readRSSI()
+        }
+    }
+
+    private func startRSSIPolling() {
+        guard rssiTask == nil else { return }
+        rssiTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                self?.pollRSSI()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func stopRSSIPolling() {
+        rssiTask?.cancel()
+        rssiTask = nil
+    }
+
     /// Re-read the board's transmit counters. Cheap and on demand — deliberately
     /// not a subscription, so it costs no connection-event budget.
     func refreshStats(_ device: SophonDevice) {
@@ -249,6 +298,13 @@ final class SophonHub: NSObject {
     /// when a second condition is bolted into the state callback.
     private func applyRadioState() {
         let wantScan = (managerState == .poweredOn) && !isSuspended
+
+        // RSSI polling is decided here too, for the reason this function exists:
+        // it is governed by the same two inputs as the scan, which change from
+        // unrelated callbacks. resume() cannot serve as the hook -- it guards on
+        // `isSuspended` and returns early at startup, when nothing was ever
+        // suspended.
+        if wantScan { startRSSIPolling() } else { stopRSSIPolling() }
         let wasScanning = (radio == .ready)
 
         // Duplicate reporting costs a callback per advertisement -- tens per
@@ -622,6 +678,26 @@ extension SophonHub: CBPeripheralDelegate {
                     break
                 }
             }
+        }
+    }
+
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didReadRSSI RSSI: NSNumber,
+        error: Error?
+    ) {
+        // assumeIsolated, not Task { @MainActor }: CBPeripheral is not Sendable,
+        // so looking the device up by `peripheral.identifier` inside a Task would
+        // carry the reference across an isolation boundary.
+        MainActor.assumeIsolated {
+            guard error == nil, let device = self.byID[peripheral.identifier] else { return }
+            // The connected entry point, not the advertised one. Both share the
+            // smoothing path and the 127 "no reading" sentinel guard, but they
+            // differ in what the sample's timestamp may claim: a reply to
+            // readRSSI() proves only that the CONTROLLER has a cached value, not
+            // that anything arrived recently, so the device credits it to the
+            // last packet it can prove received (#237).
+            device.ingestConnectedRSSI(RSSI.intValue)
         }
     }
 

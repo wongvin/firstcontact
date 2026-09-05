@@ -30,8 +30,7 @@ final class SophonDevice: Identifiable {
 
     var state: State = .discovered
 
-    /// Smoothed advertised signal strength in dBm, or nil if none has ever been
-    /// observed.
+    /// Smoothed signal strength in dBm, or nil if none has ever been observed.
     ///
     /// A mean rather than the newest sample. RSSI swings several dB between
     /// consecutive advertisements, and once `SophonHub` turns on duplicate
@@ -39,17 +38,57 @@ final class SophonDevice: Identifiable {
     /// unreadable. The mean is also the better input for a `TX power - RSSI`
     /// distance estimate, which is what the field is ultimately for.
     ///
-    /// **Frozen while connected.** A board stops advertising once taken, and the
-    /// app never calls `readRSSI()`, so this holds the last value seen before the
-    /// link came up rather than tracking it. See #237.
+    /// Fed from two sources, and it cannot tell them apart -- deliberately.
+    /// Advertisements carry one via `didDiscover`; a connected board is polled
+    /// with `readRSSI()` (#237), because a Sophon is `CONFIG_BT_MAX_CONN=1` and
+    /// stops advertising the moment it is taken. Both are the central's own
+    /// receive strength for the same radio, so one smoothing path is right.
+    ///
+    /// What it does NOT say is how recently it was measured. Ask ``rssiReading(asOf:)``
+    /// for that: polling runs only while the viewer role is on air, and a link can
+    /// go quiet while still reading as connected.
     private(set) var rssi: Int?
 
-    /// Recent samples backing ``rssi``. Small on purpose: long enough to settle
-    /// the jitter, short enough to follow a board actually being moved.
-    private var rssiSamples: [Int] = []
-    private static let rssiWindow = 8
+    /// When the newest sample backing ``rssi`` arrived, or nil if none has.
+    ///
+    /// `@ObservationIgnored` for the reason ``lastSeenAt`` is: it is rewritten on
+    /// every sample, which with duplicate reporting on is tens of times a second,
+    /// and no view should redraw on that. Both readers sit inside a
+    /// `TimelineView`, which re-reads on its own clock whether or not the value
+    /// is observable (#261).
+    @ObservationIgnored private(set) var rssiAt: Date?
 
-    /// - Parameter sample: raw dBm from `didDiscover`.
+    /// Recent samples backing ``rssi``, newest last.
+    ///
+    /// Bounded by **age as well as count**, which the count alone could not do
+    /// once #237 added the connected source. The two arrive three orders of
+    /// magnitude apart -- tens per second from advertisements, one per second while
+    /// connected -- so a fixed 8-sample window spans 0.3 s in one case and 8 s in
+    /// the other. Eight seconds cannot follow a tablet being walked away from a
+    /// board, which is the check #237 exists to make possible.
+    ///
+    /// Ageing out also settles what happens across a disconnect, with no
+    /// disconnect hook: samples describing the old link expire on their own, so a
+    /// reconnect from somewhere else starts its mean from its own first reading
+    /// instead of blending into the old one.
+    @ObservationIgnored private var rssiSamples: [(value: Int, at: Date)] = []
+    private static let rssiWindow = 8
+    private static let rssiWindowSpan: TimeInterval = 4
+
+    /// Beyond this, a reading describes the past rather than the present.
+    ///
+    /// Longer than ``rssiWindowSpan`` on purpose: at the 1 s poll several
+    /// consecutive reads have to go missing -- or the link has to have gone quiet
+    /// -- before the UI says so, so a late callback cannot flicker the label.
+    ///
+    /// Deliberately the same 5 s as ``interruptionThreshold``, and now measured
+    /// from the same evidence: since ``ingestConnectedRSSI`` credits a reading to
+    /// `lastFrameAt`, this row and the State row go stale together on a link that
+    /// dies, rather than contradicting each other for the whole supervision
+    /// window.
+    static let rssiStaleAfter: TimeInterval = 5
+
+    /// A reading from an advertisement, via `didDiscover`.
     ///
     /// **127 means "no reading", not a reading of 127.** It is Core Bluetooth's
     /// unavailable sentinel, and it must not blank a good value: with duplicate
@@ -57,15 +96,111 @@ final class SophonDevice: Identifiable {
     /// make the whole row flicker out of existence. Same latching rule as
     /// `displayName` and `identity` -- a callback carrying nothing may not erase
     /// what an earlier one carried.
+    ///
+    /// The callback *is* the reception here, so the sample is credited to now.
     func ingestRSSI(_ sample: Int) {
+        ingestRSSI(sample, measuredAt: Date())
+    }
+
+    /// A reading from `readRSSI()` over an established link (#237).
+    ///
+    /// Credited to the last packet this app can **prove** arrived, not to the
+    /// moment the reply landed -- which is the difference between reporting a
+    /// measurement and reporting that we asked for one.
+    ///
+    /// HCI `Read_RSSI` returns the strength of the controller's *last received
+    /// packet*. The controller keeps that value and has no way to add "and that
+    /// was a minute ago". Meanwhile `peripheral.state` stays `.connected` for the
+    /// whole supervision window after a board dies. So stamping the reply time
+    /// would leave the RSSI row looking freshly measured for the entire dead
+    /// window, while the State row two lines above it read `Stalled` -- two rows
+    /// in one section giving opposite accounts of the same peripheral, and #237's
+    /// own defect rebuilt in a new place. Frozen-and-looks-live was the bug; the
+    /// fix must not be refreshed-by-asking-and-looks-live.
+    ///
+    /// `lastFrameAt` is a *conservative* floor. The controller also measures empty
+    /// PDUs that never reach this app, so a real reading may be fresher than this
+    /// claims -- but on a healthy link frames arrive at tens per second, so the
+    /// gap is negligible, and being late is the safe direction.
+    func ingestConnectedRSSI(_ sample: Int) {
+        ingestRSSI(sample, measuredAt: lastFrameAt ?? connectedAt ?? Date())
+    }
+
+    /// - Parameters:
+    ///   - sample: raw dBm.
+    ///   - measuredAt: when the packet this reading describes actually arrived.
+    private func ingestRSSI(_ sample: Int, measuredAt: Date) {
         guard sample != 127 else { return }
 
-        rssiSamples.append(sample)
-        if rssiSamples.count > Self.rssiWindow { rssiSamples.removeFirst() }
+        let now = Date()
 
-        let mean = Int((Double(rssiSamples.reduce(0, +)) / Double(rssiSamples.count)).rounded())
+        // A reading describing a packet older than the window is not news. Drop
+        // it rather than admit it: on a dead link this is what stops `rssiAt`
+        // advancing, so the age climbs and the row admits it stopped measuring.
+        //
+        // It also keeps the window non-empty. The freshly appended sample always
+        // survives the prune below, so the mean never divides by zero -- which
+        // would produce NaN and trap on the conversion to Int.
+        guard now.timeIntervalSince(measuredAt) <= Self.rssiWindowSpan else { return }
+
+        rssiSamples.append((sample, measuredAt))
+        rssiSamples.removeAll { now.timeIntervalSince($0.at) > Self.rssiWindowSpan }
+        if rssiSamples.count > Self.rssiWindow {
+            rssiSamples.removeFirst(rssiSamples.count - Self.rssiWindow)
+        }
+        rssiAt = measuredAt
+
+        let mean = Int((Double(rssiSamples.reduce(0) { $0 + $1.value }) / Double(rssiSamples.count)).rounded())
         if mean != rssi { rssi = mean }
     }
+
+    /// How long ago the packet behind ``rssi`` arrived, or nil if there is none.
+    func rssiAge(asOf now: Date) -> TimeInterval? {
+        rssiAt.map { now.timeIntervalSince($0) }
+    }
+
+    /// The RSSI row's text and whether it describes the past.
+    ///
+    /// **One function returning both, deliberately.** A separate label and
+    /// staleness flag can disagree -- and the disagreement they produce is an
+    /// ageless, confident-looking number in stale styling, which is the precise
+    /// thing #237 exists to prevent. Two functions sharing an invariant are only
+    /// as safe as the next edit; one function cannot drift from itself.
+    ///
+    /// A remembered value must not read like a measured one -- the same argument
+    /// that produced `Not reported` in #230 and `Released` in #233. Before #237
+    /// this row sat perfectly still for the whole of a connected session, and
+    /// looked more trustworthy for it.
+    func rssiReading(asOf now: Date) -> RSSIReading? {
+        guard let rssi else { return nil }
+
+        // No timestamp at all is treated as stale, not as fresh: an unaged
+        // reading is an unverified one.
+        guard let age = rssiAge(asOf: now) else {
+            return RSSIReading(label: "\(rssi) dBm", isStale: true)
+        }
+        guard age > Self.rssiStaleAfter else {
+            return RSSIReading(label: "\(rssi) dBm", isStale: false)
+        }
+        return RSSIReading(label: "\(rssi) dBm · \(Self.ageText(age)) ago", isStale: true)
+    }
+
+    struct RSSIReading: Equatable {
+        let label: String
+        let isStale: Bool
+    }
+
+    /// Coarsens with age. `3612s ago` is a worse answer than `over an hour ago`
+    /// in a caption someone glances at, and the extra precision is not real
+    /// information at that scale.
+    private static func ageText(_ age: TimeInterval) -> String {
+        switch age {
+        case ..<60: return "\(Int(age.rounded()))s"
+        case ..<3600: return "\(Int(age / 60))m"
+        default: return "over an hour"
+        }
+    }
+
 
     /// The user has deliberately let this board go, so auto-connect must leave it
     /// alone until they say otherwise.
