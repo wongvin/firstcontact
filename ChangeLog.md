@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-05
+
+### perf: stop redrawing the device list at advertisement rate (#261)
+
+- While anything is released, duplicate scan reporting delivers `didDiscover` at the advertiser's rate — ~16–33/s for a board at `BT_LE_ADV_CONN_FAST_1`. Two writes there were unconditional, so a device's row **and** its open detail view were invalidated at that rate, in exactly the #235 hand-off scenario duplicates exist for.
+- **`lastSeenAt` is now `@ObservationIgnored`.** No equality guard was possible — a fresh `Date` genuinely differs every write. Nothing needed the notification: the sweep reads it from the model on its own 1 s tick, and the only view path is `linkStatus(asOf:)`, always called inside a `TimelineView` that re-reads every second regardless. The state change views care about is published through `isStaleReleased`.
+- **`advertisementKeys` is guarded with `isSubset`.** It still accumulates, so #246's unaccounted-key row still fires; it just stops notifying once the set has settled, which it does after a packet or two.
+- **`linkParams` guarded on `!=`**, and **`publish()` is change-driven**, which finally gives `Display: Equatable` the purpose it was declared for and never had.
+- **The `publish()` change does nothing while streaming**, and the comment says so: `lastFrame` is part of `Display` and updates every sample, so the guard never short-circuits at the 10 Hz tick — and there a redraw is correct, since the view shows live motion. The saving is the idle case only.
+- Verified on hardware, `TEST-PLAN.md` § 2d cases 2.9–2.14: a released board still advertising does not go stale, `Released · not seen Ns` still counts up once per second, a quiet board is still forgotten within the threshold and auto-reconnects, and the unaccounted-key row still behaves. 2.13 is the one that matters — a frozen counter there would have meant `@ObservationIgnored` was wrong.
+- **The benefit is unmeasured.** § 2a of the plan says to measure the redraw rate first and close as won't-fix if it is imperceptible; I implemented first and did not. The changes are defensible on consistency grounds — they match the guards already in `evaluateStaleness` and `ingestRSSI` — but "faster" is not claimed, because nothing was counted.
+
+### docs: test plan for the Sophon app
+
+- New `ios/Sophon/TEST-PLAN.md`, following `webapp/TEST-PLAN.md`'s conventions. § 1 covers #259, § 2 covers #261. Every case states the pre-fix behaviour as well as the expected one, so a case that passes before the fix is visibly worthless.
+- § 1a records that #259's main defect is **currently unreachable**: `localQueueDrops` only increments when the send queue hits 8, and #255's paced drain keeps it at 0–1. That is why the reset was missed — nothing exercises the path — so the section ranks four ways to force the precondition rather than pretending the case can be run as-is.
+- § 2a states that #261 may correctly end in "do not fix" if the measured cost is imperceptible.
+- No `---` rules: one placed directly after a bullet list silently broke VS Code's markdown preview, which is where this file is read. Headings separate the sections instead.
+
 ## 2026-09-04
 
 ### fix: a simulator does advertise TX power (#246)

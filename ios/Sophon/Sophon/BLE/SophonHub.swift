@@ -408,7 +408,17 @@ extension SophonHub: CBCentralManagerDelegate {
             // callback that carried no scan response must not blank a good value.
             // Feeding the update path only would miss the common case, where the
             // create above is the only callback we ever get for a device.
-            device.advertisementKeys.formUnion(keySet)
+            // Guarded, not unconditional: `formUnion` is a mutating access, so
+            // Observation notifies whether or not the set changed -- and after the
+            // first packet or two it never changes again, while duplicate
+            // reporting keeps calling this tens of times a second (#261). Same
+            // shape as the guards in evaluateStaleness and ingestRSSI.
+            //
+            // Still accumulates, so a genuinely new key still lights the
+            // diagnostic row #246 added.
+            if !keySet.isSubset(of: device.advertisementKeys) {
+                device.advertisementKeys.formUnion(keySet)
+            }
 
             if let identity { device.identity = identity }
             if let txPower { device.txPower = txPower }
@@ -645,7 +655,10 @@ extension SophonHub: CBPeripheralDelegate {
                 return
             }
             Task { @MainActor in
-                self.byID[peripheral.identifier]?.linkParams = params
+                // Read every 2 s; the value changes very rarely.
+                if let device = self.byID[peripheral.identifier], device.linkParams != params {
+                    device.linkParams = params
+                }
             }
             return
         }
