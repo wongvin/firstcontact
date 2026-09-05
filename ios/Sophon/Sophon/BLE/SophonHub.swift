@@ -659,6 +659,20 @@ extension SophonHub: CBPeripheralDelegate {
         // isolation boundary with a reference type that must not cross it.
         MainActor.assumeIsolated {
             guard error == nil, let characteristics = service.characteristics else { return }
+
+            // Recorded whether or not it is there. Absence is an answer -- a
+            // simulator and any board older than #224 have no Link Params
+            // characteristic -- and the detail view needs it to tell "never going
+            // to answer" from "has not answered yet" (#263).
+            let device = self.byID[peripheral.identifier]
+            let offers = characteristics.contains {
+                $0.uuid == SophonProtocol.linkParamsCharacteristicUUID
+            }
+            // Guarded like every other latch here: a repeat didDiscoverServices
+            // re-enumerates and would otherwise notify every observer with an
+            // identical value (#261).
+            if device?.offersLinkParams != offers { device?.offersLinkParams = offers }
+
             for characteristic in characteristics {
                 switch characteristic.uuid {
                 case SophonProtocol.motionCharacteristicUUID:
@@ -673,6 +687,7 @@ extension SophonHub: CBPeripheralDelegate {
                     // iOS revises the interval on its own schedule, so a value
                     // read only at connect goes quietly stale (#224).
                     self.linkParamsCharacteristics[peripheral.identifier] = characteristic
+                    self.byID[peripheral.identifier]?.noteLinkParamsRequested()
                     peripheral.readValue(for: characteristic)
                 default:
                     break
@@ -706,7 +721,20 @@ extension SophonHub: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard error == nil, let data = characteristic.value else { return }
+        // Logged rather than silently dropped. An ATT error here is a definite
+        // answer -- the read is not still in flight -- and swallowing it left the
+        // link-params rows with nothing to distinguish "failed" from "waiting"
+        // (#263). The display's own timeout covers the UI; this is so the reason
+        // is recoverable from the log rather than invisible.
+        if let error {
+            let uuid = characteristic.uuid.uuidString
+            let reason = error.localizedDescription
+            Task { @MainActor in
+                self.log.error("read failed on \(uuid, privacy: .public): \(reason, privacy: .public)")
+            }
+            return
+        }
+        guard let data = characteristic.value else { return }
 
         if characteristic.uuid == SophonProtocol.statsCharacteristicUUID {
             let byteCount = data.count
