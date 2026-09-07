@@ -32,7 +32,14 @@ fi
 
 echo
 echo "uf2 runner failed -- falling back to a manual copy." >&2
-echo "If this is the board-id mismatch, record the real id in README.md." >&2
+# On the Sense Plus this is EXPECTED and permanent, not a one-off to chase:
+# board.cmake passes --board-id=Seeed_XIAO_nRF52840_Sense while the bootloader
+# reports nRF52840-SeeedXiaoSense-v1. Both ids are recorded in README.md. The
+# message used to say "record the real id in README.md", which printed on every
+# single flash and so read as an unresolved TODO long after it was resolved.
+echo "Expected on the Sense Plus: board.cmake's --board-id does not match what" >&2
+echo "the bootloader reports. Both ids are recorded in README.md; the copy below" >&2
+echo "is the working path, not a workaround for something still to be fixed." >&2
 echo >&2
 
 # Any mounted volume with INFO_UF2.TXT is a UF2 bootloader.

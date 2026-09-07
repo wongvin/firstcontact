@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-07
+
+### fix: stop asking to record an already-recorded board-id
+
+- `zephyr/sophon/scripts/flash.sh` printed *"If this is the board-id mismatch, record the real id in README.md"* whenever the uf2 runner failed. On the Sense Plus that mismatch is **permanent** — `board.cmake` passes `--board-id=Seeed_XIAO_nRF52840_Sense` while the bootloader reports `nRF52840-SeeedXiaoSense-v1` — so the line printed on every single flash and read as an unresolved TODO long after both ids were written into `README.md`.
+- It now says the mismatch is expected, points at the README rather than asking for the value, and states plainly that the copy fallback is the working path rather than a workaround for something still outstanding.
+- Message text only; no change to what the script does.
+
 ## 2026-09-05
 
 ### fix: say "not yet known" instead of showing nothing (#263)
