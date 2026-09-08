@@ -22,6 +22,7 @@ following the Nordic UART convention.
 | Motion Data characteristic (notify) | `C6560002-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | TX Stats characteristic (read) | `C6560003-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Link Params characteristic (read) | `C6560004-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| Battery characteristic (read) | `C6560005-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -223,6 +224,112 @@ the system work queue, so a peripheral that transmits from its own sampling
 thread will hang there instead of returning `-ENOMEM` — and this counter will
 read a reassuring zero while the stream is dead. Sophon transmits from the
 sysqueue for exactly this reason; see the queue comment in `src/main.c`.
+
+## Battery frame
+
+**4 bytes, little-endian**, read from the Battery characteristic.
+
+| Offset | Size | Type | Field | Meaning |
+|---|---|---|---|---|
+| 0 | 2 | `u16` | `mv` | terminal millivolts, or **0 meaning no reading** |
+| 2 | 2 | `u16` | `age_s` | seconds since the board took that reading, saturating |
+
+`mv == 0` is a sentinel, not a measurement. A connected pack cannot sit at 0 mV,
+so it unambiguously means *this board has no reading* — a divider that failed to
+initialise, or a board with no pack whose reading never succeeded. Parsers must
+reject it rather than display `0.000 V`.
+
+Parsers should require a **minimum** of 4 bytes and tolerate more, the way the
+scan-response structure does. An exact-length check turns a future appended
+field into a permanent parse failure, which is the shape of defect #263 had to
+correct.
+
+### Voltage only — no percentage, no capacity
+
+This is a deliberate refusal, recorded so it is not "improved" later.
+
+**There is no fuel gauge on the board.** The XIAO nRF52840 carries a **BQ25101
+charger**, which regulates charging and does not count charge in or out of the
+pack. Nothing on the board integrates current, so remaining capacity is not a
+quantity the hardware can report.
+
+Deriving it from voltage would be modelling, not measuring, and three separate
+effects make that model poor here:
+
+- **The curve is flat where it matters.** A LiPo sits between roughly 3.7 V and
+  3.9 V for the bulk of its usable discharge, so one voltage maps to a wide band
+  of remaining charge.
+- **Load sags the terminal voltage.** A 52 Hz IMU and an active radio draw in
+  bursts. Sampling during transmit biases the reading low, and that is exactly
+  when a connected Sophon would be asked.
+- **The curve is not fixed.** It shifts with temperature and with cell age, so
+  even a calibrated mapping decays.
+
+A percentage would therefore be a confident-looking number with an uncertainty
+nobody can see — the failure #228, #230, #237 and #263 each exist to correct.
+Voltage is what the hardware measures, so voltage is what the protocol carries.
+
+Zephyr's own framing agrees: other boards in its tree reach a battery figure
+through `zephyr,fuel-gauge-composite` fed from an ADC voltage divider, i.e. a
+*composite estimate* built on top of a divider rather than a reading from one.
+
+### Why the age is on the wire
+
+The board samples on its own 60 s timer into a cache, and the GATT read returns
+that cache. A read therefore proves that a central asked — nothing more.
+
+Without the age, a central would timestamp the reply and present a value that
+might be a minute old, or much older if sampling had failed since, as freshly
+measured. That is precisely the defect #237 had to correct in the RSSI row,
+where `readRSSI()` returned the controller's cached value and the reply time was
+being credited as the measurement time.
+
+A consumer's true age is **the sum of both terms**: `age_s` from the board, plus
+however long ago the read completed. Neither alone is the answer — the first
+ignores a poll that has stopped, the second credits the board's cache with a
+freshness it never claimed.
+
+### Sampling
+
+Eight conversions spaced 10 ms apart, averaged. Spread rather than taken back to
+back: a burst of conversions inside a few milliseconds all land in one radio
+window and inherit whatever it was doing, while 10 ms spacing spans at least one
+50 ms connection interval and straddles both the transmit bursts and the quiet
+between them.
+
+A failed reading leaves the previous value in place but does **not** refresh its
+timestamp, so it ages visibly rather than looking freshly measured. Blanking
+would discard a good reading over one bad conversion; refreshing the timestamp
+would assert a measurement that never happened.
+
+### The hardware path
+
+Summarised here only as far as the protocol needs; the full account — netlist,
+component values, the enable pin's hazard, the charger, and how the schematic was
+read — is in [HARDWARE.md](HARDWARE.md).
+
+    VBAT ──[ R16 1M 1% ]──┬──[ R17 499k 1% ]── P0.14_READ_BAT
+                          │
+                    P0.31_AIN7_BAT
+
+P0.14 sinks to enable and is **held low permanently**: it is the divider's low
+leg, so releasing it lets AIN7 rise toward the ADC pin's 3.6 V absolute maximum.
+Declared in `app.overlay`, because the board files declare none of it.
+
+**R17 is unconfirmed.** Seeed's wiki archive holds a rev v1.0 schematic with
+510 kΩ while the KiCad source for v1.1 says 499 kΩ — a 1.46% difference in the
+ratio, about 60 mV at a full pack. Configured for 499 kΩ; `TEST-PLAN.md` §5b has
+the meter check that settles it.
+
+### Accuracy, and not over-reporting it
+
+1% on each resistor bounds the ratio error at roughly **±1.35%** worst case —
+about ±55 mV at a full pack — before the SAADC's own gain and reference error.
+The reading is good to a few tens of millivolts, not to the millivolt.
+
+The wire format carries millivolts because that is the natural unit for a `u16`
+covering 0–4.2 V, **not** because the measurement is accurate to 1 mV. Consumers
+should present it to about two decimal places in volts and no further.
 
 ## Rates
 
@@ -437,6 +544,7 @@ The simulator honours the parts of this document that matter — frame layout, t
 | Manufacturer data | device type, hw and fw versions | **absent — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
 | TX power | ours, from `CONFIG_BT_CTLR_TX_PWR_DBM` | **present, and iOS's own — measured at 12 dBm.** Not manufacturer data: it is the standard AD type `0x0A`, which iOS emits without being asked. The viewer labels it *device radio*, because the value is real but is the phone's, and `TX power − RSSI` therefore means something different than it does for a board (#246) |
 | Link Params | reported from `bt_conn_get_info()` | **absent — the characteristic is not offered.** `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot see what it was granted any more than an iOS central can. The rows simply do not appear |
+| Battery | terminal millivolts from the on-module divider, plus the reading's age | **absent — reports the `mv == 0` sentinel.** An iOS peripheral has no battery divider, and `UIDevice.batteryLevel` would be the *phone's* charge, a different quantity wearing the same label. The row reads `Not reported` |
 | `t_ms` | since board boot | since simulator start |
 | Rate, generated | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
 | Rate, delivered | ~54.3 — refusals are near zero | **~47.4 measured.** Generation and delivery are the same number on the board and are *not* on a simulator, which is why they are now separate rows |

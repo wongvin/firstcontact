@@ -18,6 +18,7 @@
 
 #include <sophon_build_time.h>
 
+#include "battery.h"
 #include "ble.h"
 #include "frame.h"
 #include "imu.h"
@@ -310,6 +311,19 @@ int main(void)
 	 * sensor did not come up -- and the zero-axis fallback is what makes the
 	 * difference visible from the phone rather than looking like a dead link.
 	 */
+	/*
+	 * Before the IMU so a board with no sensor still reports its pack, and
+	 * non-fatal for the same reason: a missing divider is worth surviving,
+	 * and the app renders it as Not reported rather than as a fault (#268).
+	 *
+	 * The first reading is logged by battery.c itself, not here. Sampling is
+	 * queued work that sleeps between conversions, so reading it on the line
+	 * after init returns the not-yet-sampled sentinel and logs a confident
+	 * `battery 0 mV` -- which is exactly the "reports what it has not
+	 * measured" failure this feature is about. Caught on hardware.
+	 */
+	(void)sophon_battery_init();
+
 	err = sophon_imu_init(imu_sample);
 	if (err) {
 		LOG_WRN("no IMU (%d); falling back to %d ms zero-filled frames",

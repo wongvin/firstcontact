@@ -1,0 +1,119 @@
+/*
+ * Battery voltage sensing on the XIAO nRF52840 (#268).
+ *
+ * The board files define nothing for this -- no divider node, no named enable
+ * pin -- and `&adc` is enabled with no channel children, so both halves below
+ * have to come from the application.
+ *
+ * `app.overlay` rather than `boards/xiao_ble_nrf52840_sense.overlay` because
+ * the divider is on the XIAO nRF52840 module itself, shared by the Sense and
+ * the plain variant, and README.md documents building for
+ * SOPHON_BOARD=xiao_ble/nrf52840.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	vbatt: vbatt {
+		compatible = "voltage-divider";
+		io-channels = <&adc 7>;
+
+		/*
+		 * R16 = 1M 1% upper (from VBAT), R17 = 499k 1% lower (to P0.14).
+		 *
+		 * From the KiCad SOURCE, not from a PDF export -- and the difference
+		 * mattered. Seeed publishes two zips: the wiki's
+		 * Seeed_Studio_XIAO_nRF52840_Plus_SCH_PCB_v1.1.zip contains a PDF of
+		 * board rev **v1.0**, where R17 is 510k, while
+		 * Seeed_Studio_XIAO_nRF52840_Plus.zip carries the .kicad_sch for
+		 * **v1.1** with R17 = 499k. The wiki zip is NAMED v1.1 and holds the
+		 * v1.0 schematic, which is how the wrong value got in here first.
+		 *
+		 * 510k vs 499k is a 1.46% change in the ratio -- about 60 mV at a
+		 * full pack. Exactly the class of error that produces a completely
+		 * plausible reading, which is why this is taken from the design
+		 * source rather than an export or from recollection.
+		 *
+		 * Netlist-confirmed, not read off a picture:
+		 *   VBAT (U2.A1 OUT, BAT0, C30) - R16.1
+		 *   R16.2 = R17.1 = P0.31_AIN7_BAT (U1.A8)
+		 *   R17.2 = P0.14_~{READ_BAT} (U1.AC9)
+		 *
+		 * `output-ohms` is the LOWER leg and `full-ohms` the whole path.
+		 * Swapping them scales every reading by a constant.
+		 *
+		 * 1% on each bounds the ratio error at about +/-1.35%, roughly
+		 * +/-55 mV at a full pack, before the SAADC's own gain and reference
+		 * error. Do not present this to more precision than that.
+		 *
+		 * UNRESOLVED: which revision this board is. A meter across the pack
+		 * settles it -- the two configurations differ by ~60 mV, well inside
+		 * what any meter resolves. See TEST-PLAN section 5.
+		 */
+		output-ohms = <499000>;
+		full-ohms = <(1000000 + 499000)>;
+
+		/*
+		 * NO power-gpios, deliberately -- P0.14 is held low permanently and
+		 * battery.c owns it. Handing it to the driver means the driver
+		 * RELEASES it between samples, and on this board there is no safe
+		 * released state.
+		 *
+		 * Seeed's own FAQ: "When P0.14 is set HIGH, the battery voltage
+		 * reading path is disabled and P0.31 may reach the input voltage
+		 * limit of 3.6V, posing a risk of damaging the P0.31 pin."
+		 *
+		 * The arithmetic agrees. P0.14 is the divider's LOW leg, so with it
+		 * driven high AIN7 sits at 3.3 + (Vbat - 3.3) * 499/1499, which at a
+		 * full 4.2 V pack is exactly 3.60 V -- the absolute maximum. Leaving
+		 * the pin high-impedance is worse: nothing holds the node down, so
+		 * R16 pulls it to the full pack voltage and the ESD clamp conducts.
+		 *
+		 * Holding it low keeps AIN7 at ~1.4 V, which is the only state that
+		 * is unconditionally safe. The cost is the divider drawing ~2.8 uA
+		 * continuously -- about 25 mAh a year, against a 200 mAh pack whose
+		 * own self-discharge is several times that. Worth paying.
+		 *
+		 * Recorded because the enable pin LOOKS like a power-saving control
+		 * and inviting it to save power is what creates the hazard.
+		 */
+
+	};
+
+	/*
+	 * The enable pin as a plain GPIO the application drives, deliberately not
+	 * as the divider's `power-gpios`. See the note above.
+	 */
+	vbatt_enable: vbatt-enable {
+		compatible = "sophon,vbatt-enable";
+		gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&adc {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/*
+	 * AIN7 = P0.31, fixed silicon mapping. Note AIN6 is P0.30, which the
+	 * board uses for LED1 -- the neighbouring channel is already spoken
+	 * for, so AIN7 is not merely free but the correct choice.
+	 *
+	 * Gain 1/4 against the internal 0.6 V reference gives a 2.4 V full
+	 * scale. A 4.2 V pack through this divider presents
+	 * 4.2 * 510/1510 = 1.42 V, so there is headroom without wasting range:
+	 * gain 1/2 (1.2 V FS) would clip, and 1/6 (3.6 V FS) would throw away
+	 * a third of the resolution.
+	 */
+	channel@7 {
+		reg = <7>;
+		zephyr,gain = "ADC_GAIN_1_4";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,vref-mv = <600>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+		zephyr,input-positive = <NRF_SAADC_AIN7>;
+	};
+};

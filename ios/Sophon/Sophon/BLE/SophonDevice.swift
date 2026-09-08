@@ -88,6 +88,48 @@ final class SophonDevice: Identifiable {
     /// window.
     static let rssiStaleAfter: TimeInterval = 5
 
+    /// What to call the battery row, which depends on what the reading can
+    /// honestly be claimed to be.
+    ///
+    /// With USB absent the board is running off the pack, so the number IS the
+    /// battery. With USB present the charger holds VBAT and no measurement at
+    /// that node can say whether a pack is even fitted -- so the row says what
+    /// it actually read, the VBAT net, rather than asserting a battery.
+    ///
+    /// The label carries this rather than the value, because it is the *claim*
+    /// that changes, not the measurement. One row either way.
+    /// `VBAT net` is the fallback, not `Battery`, and the asymmetry is the point.
+    /// "This is the voltage on VBAT" is true in every case; "this is the battery"
+    /// is a stronger claim, justified only by VBUS being absent. An unknown
+    /// source -- firmware predating the flags byte -- gets the weaker statement.
+    var batteryRowLabel: String {
+        battery?.usbPowered == false ? "Battery" : "VBAT net"
+    }
+
+    /// What the row reads when there is no value: distinguishes a read that has
+    /// not come back from a peripheral that will never answer (#263).
+    var batteryPlaceholder: String {
+        guard state.isConnected, hasSession, offersBattery != false else {
+            return "Not reported"
+        }
+        return "Reading…"
+    }
+
+    /// Beyond this, a battery reading describes the past.
+    ///
+    /// Far longer than ``rssiStaleAfter`` because the quantities differ: RSSI is
+    /// polled every second and moves as you walk, while the pack is sampled by
+    /// the board every 60 s and read by the app every 60 s. Both terms of the
+    /// age can therefore reach a minute, putting the nominal worst case at 120 s.
+    ///
+    /// 240 s, not 180 s, because the firmware deliberately latches the last good
+    /// reading when a conversion fails and does NOT refresh its timestamp -- a
+    /// state it treats as normal. One failed sequence puts the board-side age at
+    /// up to 120 s and the total at 180 s, landing exactly on the old threshold,
+    /// so a single bad conversion would have flipped a healthy board into stale
+    /// styling. The margin the rationale claimed did not exist.
+    static let batteryStaleAfter: TimeInterval = 240
+
     /// A reading from an advertisement, via `didDiscover`.
     ///
     /// **127 means "no reading", not a reading of 127.** It is Core Bluetooth's
@@ -225,6 +267,66 @@ final class SophonDevice: Identifiable {
         linkParamsRequestedAt = Date()
     }
 
+    /// Records a battery reading and when it arrived.
+    func ingestBattery(_ reading: BatteryReading) {
+        // Guarded on the fields that carry information. NOT on the whole value:
+        // `ageSeconds` is the board's cache age, driven by a 60 s firmware timer
+        // free-running against the app's 60 s poll, so it lands somewhere in
+        // 0...60 on every read and an `!=` over the whole struct would fire every
+        // time -- a guard that reads as protection while providing none (#261).
+        if battery?.millivolts != reading.millivolts
+            || battery?.usbPowered != reading.usbPowered {
+            battery = reading
+        }
+        // Stamped unconditionally: arrival time is real news even when the
+        // voltage has not moved, and batteryAt is @ObservationIgnored so it
+        // costs no invalidation.
+        batteryAt = Date()
+    }
+
+    /// Total age of the battery reading: how old it was when the board sent it,
+    /// plus how long ago this app received it.
+    ///
+    /// Both terms are needed. Reporting only the board's figure would ignore a
+    /// poll that has stopped; reporting only the arrival time would credit the
+    /// board's cache with a freshness it never claimed -- the #237 error exactly.
+    func batteryAge(asOf now: Date) -> TimeInterval? {
+        guard let battery, let batteryAt else { return nil }
+        return TimeInterval(battery.ageSeconds) + now.timeIntervalSince(batteryAt)
+    }
+
+    /// The battery row's text and whether it describes the past.
+    ///
+    /// One function returning both, for the reason ``rssiReading(asOf:)`` gives:
+    /// a separate label and staleness flag can disagree, and the state they
+    /// disagree in is a confident-looking number in stale styling.
+    ///
+    /// Voltage alone while fresh. The user asked for voltage and nothing else,
+    /// and an age appears only once the reading stops being refreshed -- which is
+    /// not an extra reading, it is the difference between reporting a
+    /// measurement and reporting that one was once taken.
+    ///
+    /// See ``batteryRowLabel`` for why the row is not always called "Battery".
+    func batteryReading(asOf now: Date) -> RSSIReading? {
+        guard let battery else { return nil }
+
+        let label = String(format: "%.2f V", battery.volts)
+
+        // A live link is required before this may read as current, exactly as
+        // linkParamsReading checks before returning values. Without it, releasing
+        // a board left three rows of one section disagreeing: State said
+        // `Released`, the link-parameter rows said `Available while connected`,
+        // and this one kept a confident unqualified voltage for another 180 s.
+        let live = state.isConnected && hasSession
+        let age = batteryAge(asOf: now)
+
+        if live, let age, age <= Self.batteryStaleAfter {
+            return RSSIReading(label: label, isStale: false)
+        }
+        let suffix = age.map { " · \(Self.ageText($0)) ago" } ?? ""
+        return RSSIReading(label: label + suffix, isStale: true)
+    }
+
     /// How long ago the packet behind ``rssi`` arrived, or nil if there is none.
     func rssiAge(asOf now: Date) -> TimeInterval? {
         rssiAt.map { now.timeIntervalSince($0) }
@@ -264,7 +366,7 @@ final class SophonDevice: Identifiable {
     /// Coarsens with age. `3612s ago` is a worse answer than `over an hour ago`
     /// in a caption someone glances at, and the extra precision is not real
     /// information at that scale.
-    private static func ageText(_ age: TimeInterval) -> String {
+    static func ageText(_ age: TimeInterval) -> String {
         switch age {
         case ..<60: return "\(Int(age.rounded()))s"
         case ..<3600: return "\(Int(age / 60))m"
@@ -403,6 +505,41 @@ final class SophonDevice: Identifiable {
     /// peripheral's GATT database rather than one connection, and clearing it on
     /// reset made the rows flash in and out on every simulator connect.
     var offersLinkParams: Bool?
+
+    /// Whether this peripheral offers the Battery characteristic (#268), or nil
+    /// while characteristic discovery is still outstanding.
+    ///
+    /// Same tri-state, and same reason, as ``offersLinkParams``: *not yet known*
+    /// and *never going to answer* must not look alike. Without it `battery ==
+    /// nil` conflates four states -- characteristic absent, read in flight, read
+    /// failed, and the `mv == 0` sentinel -- and a healthy board renders
+    /// `Not reported` with a footer naming three causes, none of them the real
+    /// one, for as long as the first read takes. That is #263 exactly, and it
+    /// was reintroduced here within a day of fixing it.
+    ///
+    /// Latched across `resetLinkStats()` for the reason ``offersLinkParams`` is:
+    /// it describes the peripheral's GATT database, not one session.
+    var offersBattery: Bool?
+
+    /// Most recent battery reading from the peripheral, or nil if none has
+    /// arrived (#268).
+    ///
+    /// Session-scoped like ``linkParams``: cleared by `resetLinkStats()`, since
+    /// a reading describes the pack of the board on the other end of *this*
+    /// link. Nothing derives a percentage or a capacity from it -- see
+    /// ``BatteryReading`` for why that would be modelling rather than measuring.
+    var battery: BatteryReading?
+
+    /// When this app last received a battery reading.
+    ///
+    /// Distinct from ``BatteryReading/ageSeconds``, which is how old the reading
+    /// already was **when the board sent it**. The true age is the sum: the
+    /// board and the app each work on a one-minute cycle, so both terms can
+    /// reach a minute and neither alone is the answer.
+    ///
+    /// `@ObservationIgnored` for the same reason as ``rssiAt``: its only reader
+    /// is inside a `TimelineView`, which re-reads on its own clock.
+    @ObservationIgnored private(set) var batteryAt: Date?
 
     /// When the first Link Params read of this session was issued, or nil if
     /// none has been.
@@ -764,6 +901,10 @@ final class SophonDevice: Identifiable {
         attMTU = nil
         linkParams = nil
         linkParamsRequestedAt = nil
+        battery = nil
+        batteryAt = nil
+        // offersBattery deliberately NOT cleared -- it describes the GATT
+        // database, which survives a reconnect. Same rule as offersLinkParams.
         // offersLinkParams is deliberately NOT cleared here. It describes the
         // peripheral's GATT database, which is stable across a reconnect, and
         // latching it is what keeps the three rows on screen through this very

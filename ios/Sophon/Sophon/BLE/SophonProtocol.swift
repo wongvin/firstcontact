@@ -33,6 +33,7 @@ nonisolated enum SophonProtocol {
     /// rarely, and a subscription would spend the connection-event budget these
     /// values exist to explain.
     static let linkParamsCharacteristicUUID = CBUUID(string: "C6560004-84D5-4DC2-8C1E-4B4EB2337CE4")
+    static let batteryCharacteristicUUID = CBUUID(string: "C6560005-84D5-4DC2-8C1E-4B4EB2337CE4")
 
     /// Manufacturer Specific Data company ID, mirroring `SOPHON_COMPANY_ID` in
     /// `zephyr/sophon/src/version.h`.
@@ -141,6 +142,81 @@ nonisolated struct LinkParams: Equatable, Sendable {
         self.latency = latency
         self.timeoutUnits = timeoutUnits
     }
+}
+
+/// Terminal voltage of the peripheral's pack, and the age of that reading (#268).
+///
+/// **Voltage only.** There is no fuel gauge on a XIAO nRF52840 -- the BQ25101 is
+/// a charger, so nothing counts charge in or out -- and a LiPo's discharge curve
+/// is nearly flat across 3.7-3.9 V, most of its usable range. Under a 52 Hz IMU
+/// and an active radio the terminal voltage sags in bursts too. A percentage or
+/// an mAh figure derived from this would be modelled rather than measured, which
+/// is the failure #228, #230, #237 and #263 each exist to correct.
+///
+/// The age comes from the peripheral because only the peripheral knows it. The
+/// board samples on its own one-minute timer and the GATT read returns that
+/// cache, so a read proves somebody asked and nothing more -- exactly what #237
+/// had to correct for RSSI, where a reply refreshed a timestamp without any new
+/// measurement behind it.
+nonisolated struct BatteryReading: Equatable, Sendable {
+    /// Minimum. Byte 4 (flags) is optional — see `usbPowered`.
+    static let wireSize = 4
+
+    /// Terminal millivolts. Never zero: the sentinel is rejected in `init`.
+    let millivolts: UInt16
+
+    /// Seconds since the peripheral took this reading, as it reported them.
+    let ageSeconds: UInt16
+
+    /// Whether USB was supplying the board when the sample was taken, or nil if
+    /// the peripheral predates the flags byte.
+    ///
+    /// **This is the whole of what can be known about the source.** VBAT is the
+    /// charger's OUT, the BAT pad and the top of the divider shorted together,
+    /// so no measurement at that node can say what is driving it.
+    ///
+    /// - `false` — the board is running off the pack, so the reading **is** the
+    ///   pack. This is the only case where calling it a battery voltage is a
+    ///   claim the hardware supports.
+    /// - `true` — the charger is holding the node. The reading is simply the
+    ///   voltage on VBAT, which may or may not be a pack.
+    /// - `nil` — firmware older than the flags byte; the source is unknown.
+    ///
+    /// Note what is absent: **pack absence is not detectable.** `/CHG` would
+    /// have been the extra evidence, but P0.17 does not carry it — the net is
+    /// named `~{CHG}` while the pin lands on the BQ25101's `PRETERM` input.
+    let usbPowered: Bool?
+
+    var volts: Double { Double(millivolts) / 1000 }
+
+    init?(_ data: Data) {
+        // Minimum length, not exact, unlike `LinkParams`. Appending a field
+        // must not become a parse failure the way #263 showed an exact check can
+        // be -- there, a payload one field longer would have left the row at
+        // `Reading…` forever. The flags byte was appended precisely this way.
+        guard data.count >= Self.wireSize else { return nil }
+
+        var bytes = [UInt8](repeating: 0, count: Self.wireSize)
+        data.copyBytes(to: &bytes, count: Self.wireSize)
+
+        func u16(_ offset: Int) -> UInt16 {
+            UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+        }
+
+        // `mv == 0` is the peripheral's "no reading" sentinel, not a reading of
+        // zero -- a connected pack cannot sit at 0 mV. Failing to construct is
+        // what lets the UI say `Not reported` rather than display 0.000 V, which
+        // would be a measurement nobody took.
+        let mv = u16(0)
+        guard mv != 0 else { return nil }
+
+        millivolts = mv
+        ageSeconds = u16(2)
+        // Minimum length, not exact: a peripheral on the 4-byte form is not an
+        // error, it simply cannot say where its power is coming from.
+        usbPowered = data.count >= 5 ? (data[data.startIndex + 4] & 0x01) != 0 : nil
+    }
+
 }
 
 /// What a Sophon says about itself before you connect.

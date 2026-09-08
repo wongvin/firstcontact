@@ -92,4 +92,59 @@ struct sophon_link_params {
 void sophon_link_params_pack(const struct sophon_link_params *in,
 			     uint8_t out[SOPHON_LINK_PARAMS_SIZE]);
 
+/*
+ * Battery: terminal millivolts and the AGE of that reading (#268).
+ *
+ * Wire form, little-endian, 5 bytes:
+ *   0..1  u16  mV
+ *   2..3  u16  age of the reading, seconds
+ *   4     u8   flags -- bit 0 set when USB was supplying the board
+ *
+ * The age is on the wire rather than left to the central to guess, because a
+ * GATT read proves only that somebody asked. The board samples on its own
+ * one-minute timer and this read returns the cache, so the value behind it is
+ * up to a minute old in normal operation and older if sampling has since
+ * failed. A reading whose timestamp refreshes merely by being read is the
+ * defect #237 had to correct in the RSSI row; there is no reason to rebuild it
+ * here when four bytes states the truth instead.
+ *
+ * `mv == 0` means **no reading**, not a reading of zero -- a connected pack
+ * cannot sit at 0 mV, so the sentinel is unambiguous. It is what a board whose
+ * divider failed to initialise reports, and the app renders it with the #230
+ * `Not reported` idiom rather than as a fault.
+ *
+ * The flags byte is what makes the voltage interpretable. VBAT is the charger's
+ * OUT, the BAT pad and the top of the divider shorted together, so the voltage
+ * alone cannot say what is driving it. VBUS **absent** proves the pack is, so
+ * the reading is the pack; VBUS **present** means the reading is simply what is
+ * on VBAT, which may or may not be a pack. Pack ABSENCE stays undetectable.
+ *
+ * Appended rather than folded into spare bits of `mv`, so the append-only rule
+ * that governs the scan response holds here too: the app's parser requires a
+ * MINIMUM of 4 bytes and ignores extras, so a central built against the earlier
+ * 4-byte form still parses this.
+ *
+ * Deliberately no percentage and no capacity: see battery.h and PROTOCOL.md.
+ */
+#define SOPHON_BATTERY_SIZE 5
+
+void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,
+			 uint8_t out[SOPHON_BATTERY_SIZE]);
+
+/*
+ * Push the current battery reading to a subscribed central.
+ *
+ * Notify, unusually for this service -- the stats and link-params
+ * characteristics are deliberately read-only because they change constantly and
+ * a subscription would spend connection events restating them. Battery is the
+ * opposite case: it changes rarely, and one of its fields (the USB flag) changes
+ * what the reading MEANS. Polling a rare event means either a slow cadence that
+ * reports reality late, or a fast one that spends the budget those other
+ * characteristics were made reads to protect.
+ *
+ * Called only on an actual change, so a stationary pack costs nothing.
+ * A no-op when nobody has subscribed.
+ */
+void sophon_ble_battery_notify(void);
+
 #endif /* SOPHON_BLE_H */

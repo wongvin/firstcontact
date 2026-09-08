@@ -6,6 +6,21 @@ the iOS app at [`ios/Sophon/`](../../ios/Sophon/).
 Named for Cixin Liu's proton-scale probe: it sits inside what it observes and
 relays continuously to a distant receiver.
 
+## The board
+
+**Seeed XIAO nRF52840 Sense Plus.** Everything established about its battery
+sensing — the divider, the enable pin's hazard, the charger, what the hardware
+can and cannot report, and how to read the schematic — is in
+[HARDWARE.md](HARDWARE.md).
+
+Two things from there worth knowing before touching this app:
+
+- **Use the KiCad sources, not the PDF.** The wiki's `…SCH_PCB_v1.1.zip` contains
+  a **v1.0** schematic, and it disagrees with v1.1 about a resistor that scales
+  every battery reading. #268 shipped the wrong value on the strength of it.
+- **P0.14 must be held low.** It looks like a power-saving enable; releasing it
+  can push P0.31 to its 3.6 V limit.
+
 ## Status
 
 **Streaming motion (#209).** The board samples the on-board LSM6DS3TR-C at a

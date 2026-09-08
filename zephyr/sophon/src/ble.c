@@ -10,6 +10,7 @@
 
 #include <sophon_build_time.h>
 
+#include "battery.h"
 #include "ble.h"
 #include "ident.h"
 #include "version.h"
@@ -23,6 +24,8 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
  *   Service:     C6560001-84D5-4DC2-8C1E-4B4EB2337CE4
  *   Motion Data: C6560002-84D5-4DC2-8C1E-4B4EB2337CE4  (notify)
  *   TX Stats:    C6560003-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
+ *   Link Params: C6560004-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
+ *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  */
 #define SOPHON_UUID_SERVICE \
 	BT_UUID_128_ENCODE(0xC6560001, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
@@ -32,6 +35,8 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
 	BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_LINK_PARAMS \
 	BT_UUID_128_ENCODE(0xC6560004, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_BATTERY \
+	BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
 static const struct bt_uuid_128 sophon_service_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
@@ -41,6 +46,8 @@ static const struct bt_uuid_128 sophon_stats_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_STATS);
 static const struct bt_uuid_128 sophon_link_params_uuid =
 	BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
+static const struct bt_uuid_128 sophon_battery_uuid =
+	BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -113,6 +120,28 @@ static ssize_t stats_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
+static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			    void *buf, uint16_t len, uint16_t offset)
+{
+	uint8_t wire[SOPHON_BATTERY_SIZE];
+	uint16_t mv;
+	uint16_t age_s;
+	uint8_t flags;
+
+	ARG_UNUSED(conn);
+
+	/*
+	 * Returns the cache and never samples here. A conversion sequence takes
+	 * ~70 ms and sleeps between samples; doing that inside a read handler
+	 * would park the Bluetooth RX thread for the duration. The age field is
+	 * what makes returning a cached value honest rather than merely cheap.
+	 */
+	sophon_battery_read(&mv, &age_s, &flags);
+	sophon_battery_pack(mv, age_s, flags, wire);
+
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
+}
+
 BT_GATT_SERVICE_DEFINE(sophon_svc,
 	BT_GATT_PRIMARY_SERVICE(&sophon_service_uuid),
 	BT_GATT_CHARACTERISTIC(&sophon_motion_uuid.uuid,
@@ -133,6 +162,20 @@ BT_GATT_SERVICE_DEFINE(sophon_svc,
 			       BT_GATT_CHRC_READ,
 			       BT_GATT_PERM_READ,
 			       link_params_read, NULL, NULL),
+	/*
+	 * Read for the same reason, and more so: the pack moves over hours. A
+	 * notify would cost connection events to report a number that had not
+	 * changed. Registered unconditionally even when the divider failed to
+	 * initialise -- it then reports the mv == 0 sentinel, which the app
+	 * shows as Not reported. A conditionally-present characteristic would
+	 * instead be indistinguishable from firmware predating this change,
+	 * and both cases want the same words anyway (#268).
+	 */
+	BT_GATT_CHARACTERISTIC(&sophon_battery_uuid.uuid,
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ,
+			       battery_read, NULL, NULL),
+	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
 /*
@@ -394,6 +437,45 @@ void sophon_link_params_pack(const struct sophon_link_params *in,
 	sys_put_le32(in->interval_us, &out[0]);
 	sys_put_le16(in->latency,     &out[4]);
 	sys_put_le16(in->timeout,     &out[6]);
+}
+
+void sophon_ble_battery_notify(void)
+{
+	uint8_t wire[SOPHON_BATTERY_SIZE];
+	uint16_t mv;
+	uint16_t age_s;
+	uint8_t flags;
+
+	sophon_battery_read(&mv, &age_s, &flags);
+	sophon_battery_pack(mv, age_s, flags, wire);
+
+	if (!current_conn) {
+		return;
+	}
+
+	/*
+	 * By UUID, like the motion notify, rather than by index into
+	 * sophon_svc.attrs. An index would be arithmetic over the attribute
+	 * table that silently shifts the moment a characteristic is inserted
+	 * above it -- and would then notify the wrong attribute rather than
+	 * failing.
+	 *
+	 * Unlike motion, the result is discarded and nothing is counted. The
+	 * transmit counters exist to explain gaps in a 52 Hz stream; a dropped
+	 * battery notification costs nothing, because the next change notifies
+	 * again and the central polls every 60 s regardless. -ENOTCONN with
+	 * nobody subscribed is the normal state of a board.
+	 */
+	(void)bt_gatt_notify_uuid(current_conn, &sophon_battery_uuid.uuid,
+				  sophon_svc.attrs, wire, sizeof(wire));
+}
+
+void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,
+			 uint8_t out[SOPHON_BATTERY_SIZE])
+{
+	sys_put_le16(mv,    &out[0]);
+	sys_put_le16(age_s, &out[2]);
+	out[4] = flags;
 }
 
 void sophon_ble_tx_stats(struct sophon_tx_stats *out)
