@@ -436,3 +436,97 @@ are also logged rather than silently discarded.
 - **Whether `Reading…` is ever visible at all on a fast link.** The window is one GATT read. It may complete before the first frame is drawn, in which case 4.1 shows values immediately — which is a pass, not a failure. The requirement is that the rows never *vanish*, not that the transient is observed.
 - **A peripheral that offers the characteristic and returns a malformed value.** `LinkParams.init?` rejects anything that is not exactly 8 bytes, so the row would stay at `Reading…`. Not reachable without a modified firmware, and #231 is where wire-contract misparsing belongs.
 - **Discovery failing outright** (`didDiscoverCharacteristicsFor` with a non-nil error). `offersLinkParams` stays `nil`, and nothing re-issues discovery, so the rows stay **absent** for the life of that connection. That is the safe direction — hiding rows rather than claiming to be reading something nobody asked for — but it is reasoned through, not tested.
+
+## 5. Battery voltage (issue #268)
+
+A 200 mAh LiPo is now connected to `Sophon-86F0`, and the board said nothing
+about it. This reports **terminal voltage and nothing else** — no percentage, no
+remaining capacity. There is no fuel gauge on a XIAO nRF52840: the BQ25101 is a
+charger, nothing counts charge in or out, and a LiPo's discharge curve is nearly
+flat across 3.7–3.9 V. Anything beyond volts would be modelled, not measured.
+
+### 5a. The two things that cannot be measured, and are not claimed
+
+Read before running anything — several cases below look like failures until this
+is clear.
+
+**Remaining capacity.** Not derivable. See above.
+
+**Pack presence.** VBAT is the charger's `OUT`, the `BAT` pad and the top of the
+divider shorted together, so no measurement at that node can say what is driving
+it. The one available discriminator is **VBUS**:
+
+| VBUS | What may honestly be said | Row label |
+|---|---|---|
+| absent | the board is running off the pack, so the reading **is** the pack | `Battery` |
+| present | the charger is holding VBAT; the reading is just that net's voltage | `VBAT net` |
+
+Pack **absence** stays undetectable. `/CHG` would have been the extra evidence,
+but P0.17 does not carry it: the net is named `~{CHG}` while the pin lands on the
+BQ25101's `PRETERM` input, with programming resistor `R8` marked `DNP`.
+Established from the KiCad netlist, not the PDF — see
+`zephyr/sophon/HARDWARE.md`.
+
+### 5b. OPEN — which board revision, and therefore which divider constant
+
+**Unresolved at the time of writing.** Seeed ships two archives that disagree:
+the wiki's `…SCH_PCB_v1.1.zip` contains a rev **v1.0** schematic with
+`R17 = 510k`, while `…nRF52840_Plus.zip` carries the **v1.1** `.kicad_sch` with
+`R17 = 499k`. The overlay is configured for **499k**.
+
+The two differ by **1.46%** — about 60 mV at a full pack, which reads as a
+perfectly ordinary battery voltage either way.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 5.1 | **With the pack installed**, put a meter across the `BAT`/`GND` pads and compare against the value the board logs at boot. | Agreement within a few tens of millivolts confirms `R17 = 499k`. A board reading ~1.46% **low** against the meter means this is a v1.0 with `R17 = 510k`, and `app.overlay` must be reverted to `499000`→`510000` / `1499000`→`1510000`. |
+| 5.2 | Do **not** run 5.1 with the pack removed. | Recorded as a trap, not a case. With no pack, VBAT is held only by the charger's output capacitance; the divider draws ~2.8 µA and a 10 MΩ meter another ~0.4 µA, enough to sag the node and possibly trigger a recharge cycle. The two instruments can then disagree while both are right about different moments. |
+
+### 5c. P0.14 must never be released
+
+The enable pin looks like a power-saving control. Treating it as one is what
+creates a hazard, and an interim build did exactly that.
+
+Seeed's FAQ: *"When P0.14 is set HIGH, the battery voltage reading path is
+disabled and P0.31 may reach the input voltage limit of 3.6V, posing a risk of
+damaging the P0.31 pin."* The arithmetic agrees — P0.14 is the divider's low leg,
+so driven high AIN7 sits at `3.3 + (Vbat − 3.3) × 499/1499`, exactly **3.60 V** at
+a full 4.2 V pack. High-impedance is worse: nothing holds the node down and R16
+pulls it to the full pack voltage.
+
+| ID | Steps | Expected |
+|---|---|---|
+| 5.3 | Inspect `app.overlay`: the `vbatt` node must have **no `power-gpios`**, and `prj.conf` must not set `CONFIG_PM_DEVICE`. | Both absent. `power-gpios` hands the pin to the driver, whose entire purpose is to release it between samples. |
+| 5.4 | With a scope or meter on P0.31 relative to GND, watch across several sample periods on a charged pack. | Stays near `Vbat × 499/1499` ≈ 1.4 V at all times. It must **never** approach 3.6 V. This is the case that catches a reintroduced release. |
+| 5.5 | Confirm the IMU still streams after any change to `prj.conf` power management. | `no IMU sample for 400 ms` must not appear. Enabling `CONFIG_PM_DEVICE_RUNTIME` alongside the divider changed every device's lifecycle and stopped the data-ready trigger firing — init still reported success. *Measured 2026-09-07.* |
+
+### 5d. The reading itself
+
+| ID | Steps | Expected |
+|---|---|---|
+| 5.6 | Connect a board on battery power and open the detail view. | A row reading `Battery` with a plausible voltage, 3.0–4.2 V, to two decimals. |
+| 5.7 | Leave it for several minutes on a discharging pack. | The value drifts down slowly. It must not jump or flicker — eight conversions spaced 10 ms apart are averaged precisely so a single sample taken during a radio burst does not dominate. |
+| 5.8 | Put the board on USB with the pack fitted, detail view open. | Row label changes to **`VBAT net`** and the footer explains why. It must **not** keep saying `Battery`: with the charger holding the node, that is a claim the hardware does not support. |
+| 5.9 | Remove the pack and run on USB alone. | Still `VBAT net`. The app must not attempt to announce that the pack is missing — it cannot know. *This is the case that started the issue: an interim build read 3.94 V and called it a battery.* |
+| 5.10 | Disconnect USB with the pack fitted. | Reverts to `Battery` within one poll (~60 s). |
+| 5.11 | Connect a board whose firmware predates the flags byte, if one is to hand. | Row reads **`VBAT net`**, not `Battery`, and the USB footer is absent. `usbPowered` is nil — the source is unknown, so the app takes the weaker claim, since "this is the voltage on VBAT" is true either way while "this is the battery" is not. **Not reproducible today:** no firmware emitting the 4-byte form exists, so this branch cannot be exercised and must not be recorded as passing. |
+| 5.11a | Open the detail view during a connect, before the first battery read returns. | Reads **`Reading…`**, never `Not reported`. A read in flight is not a peripheral that cannot report — conflating them made a healthy board display a footer naming three wrong causes. *Found in review 2026-09-08; the #263 defect reintroduced within a day of fixing it.* |
+| 5.11b | Release a board with the detail view open and watch the battery row for three minutes. | The value immediately gains an age suffix and dims — it must **not** sit unqualified in primary styling. Otherwise three rows of one section disagree: State says `Released`, the link-parameter rows say `Available while connected`, and this one asserts a current voltage. |
+| 5.11c | Forget a released board, let it be rediscovered, and connect again. | A reading appears normally. Checks that `batteryCharacteristics` was cleared on disconnect and forget: a stale `CBCharacteristic` from the previous connection would be used by the poll in the window between `didConnect` and characteristic discovery. |
+
+### 5e. Staleness and lifetime
+
+| ID | Steps | Expected |
+|---|---|---|
+| 5.12 | Read the boot console immediately after flashing. | `battery NNNN mV (first reading)` appears about 70 ms after init — eight samples at 10 ms spacing. A `0 mV` here means the reading was taken before sampling completed, which an interim build did. |
+| 5.13 | Watch the console for several minutes on a stable pack. | Silent. Only a move of ≥50 mV is logged, so an eight-hour run does not bury anything in per-minute lines. |
+| 5.14 | With the detail view open, power the board off and watch the Battery row. | An age suffix appears once the total age passes 240 s and climbs. Both terms count: the board's own cache age plus time since the app last read. |
+| 5.15 | Disconnect and reconnect a board. | The reading clears on session reset and repopulates from the read issued at characteristic discovery, not five minutes later. |
+| 5.16 | Connect to the **simulator** peripheral. | Row reads `Not reported`, and the footer says why. An iOS peripheral has no divider, and `UIDevice.batteryLevel` would be the phone's own charge — a different quantity wearing the same label. |
+
+### 5f. Not covered
+
+- **Accuracy against a reference.** 1% on each divider resistor bounds the ratio error at ~±1.35%, before the SAADC's own gain and reference error. Nothing here calibrates the chain; 5.1 checks the *constant*, not absolute accuracy.
+- **Behaviour below ~3.0 V.** Not exercised — deliberately not discharging a LiPo that far to test a display.
+- **Charge-current control.** `P0.13_HICHG` selects ~50 mA vs ~100 mA. Untouched by this issue.
+- **The `/CHG`-cycling heuristic** for detecting an absent pack under USB. Plausible — a standalone charger with no pack terminates and re-triggers periodically — but P0.17 does not expose charge status on this board, so there is nothing to observe.

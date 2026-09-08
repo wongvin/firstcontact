@@ -329,18 +329,21 @@ private struct DeviceDetailView: View {
             case .values(let params):
                 LabeledContent(label, value: value(params))
             case .reading:
-                LabeledContent(label, value: "Reading…")
-                    .foregroundStyle(.secondary)
+                LabeledContent(label) {
+                    Text("Reading…").foregroundStyle(.secondary)
+                }
             case .notResponding:
-                LabeledContent(label, value: "Not responding")
-                    .foregroundStyle(.orange)
+                LabeledContent(label) {
+                    Text("Not responding").foregroundStyle(.orange)
+                }
             case .offline:
                 // Same words as the transmit counters use for the same state, so
                 // two sections of one screen do not invent separate vocabulary
                 // for "there is no link" -- which is the inconsistency #263 is
                 // about in the first place.
-                LabeledContent(label, value: "Available while connected")
-                    .foregroundStyle(.secondary)
+                LabeledContent(label) {
+                    Text("Available while connected").foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -373,12 +376,40 @@ private struct DeviceDetailView: View {
             // be: nil inside one would render an EmptyView in a real List cell.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let reading = device.rssiReading(asOf: context.date)
-                LabeledContent("RSSI", value: reading?.label ?? Self.notReported)
-                    .foregroundStyle(reading?.isStale == false ? .primary : .secondary)
+                LabeledContent("RSSI") {
+                    Text(reading?.label ?? Self.notReported)
+                        .foregroundStyle(reading?.isStale == false ? .primary : .secondary)
+                }
             }
 
             if let mtu = device.attMTU {
                 LabeledContent("ATT MTU", value: "~\(mtu)")
+            }
+
+            // Its own timeline, like the RSSI row: the age is a function of
+            // elapsed time and a one-minute poll produces nothing to redraw on
+            // in between. One row in every branch, so the layout is fixed.
+            //
+            // Voltage only, no percentage and no capacity -- there is no fuel
+            // gauge on the board and anything further would be modelled rather
+            // than measured (#268). The footer says so where it applies.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                // batteryPlaceholder, not a bare Not reported: with no value yet
+                // this must distinguish a read that has not come back from a
+                // peripheral that will never answer. Conflating them made a
+                // healthy board display a footer naming three causes, none of
+                // them the real one, for as long as the first read took (#263).
+                // One row in every branch.
+                let reading = device.batteryReading(asOf: context.date)
+                // Styling on the VALUE, not on the LabeledContent. Applied to
+                // the row it tints the label too, and a greyed-out label reads
+                // as a disabled control rather than as an absent measurement --
+                // most visibly on a simulator, where every value in this section
+                // is absent and the whole section faded out.
+                LabeledContent(device.batteryRowLabel) {
+                    Text(reading?.label ?? device.batteryPlaceholder)
+                        .foregroundStyle(reading?.isStale == false ? .primary : .secondary)
+                }
             }
 
             // The interval iOS granted, which Core Bluetooth will not tell this
@@ -492,6 +523,20 @@ private struct DeviceDetailView: View {
                 } else {
                     Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
                 }
+            }
+            // VBAT is the charger's OUT, the BAT pad and the top of the divider
+            // shorted together, so with USB connected nothing at that node can
+            // say what is driving it -- including whether a pack is fitted at
+            // all. The row label already says `VBAT net` rather than `Battery`;
+            // this explains why (#268).
+            if device.battery?.usbPowered == true {
+                Text("USB is powering this board, so the charger is holding VBAT and the reading is simply the voltage on that net — not necessarily a battery. With USB disconnected the board can only be running off its pack, and the row says Battery. Whether a pack is *absent* cannot be determined: the one pin that might have said so carries the charger's PRETERM input rather than its charge status.")
+            }
+            // Gated on a POSITIVE "does not offer it", not on the absence of a
+            // value. A read still in flight is not a peripheral that cannot
+            // report, and saying so while waiting is the #263 defect.
+            if device.offersBattery == false, device.state.isConnected, device.hasSession {
+                Text("No battery voltage: this peripheral does not report one. That is every simulated Sophon — an iOS peripheral has no battery divider, and its own charge level is a different quantity wearing the same label — and every board running firmware older than #268, or one whose divider failed to start. Voltage is the only figure the hardware can measure; there is no fuel gauge, so no percentage or remaining capacity is derived from it.")
             }
             // Said once, in prose, rather than as three rows repeating a
             // sentinel. The issue allows either; a footnote is what the rest of

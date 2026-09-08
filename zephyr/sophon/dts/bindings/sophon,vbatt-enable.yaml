@@ -1,0 +1,23 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Application-owned enable pin for the battery voltage divider (#268).
+
+  Deliberately NOT the divider's `power-gpios`. That property hands the pin to
+  Zephyr's voltage-divider driver, which releases it between samples -- and on
+  the XIAO nRF52840 there is no safe released state: P0.14 is the divider's low
+  leg, so releasing it lets AIN7 rise to the ADC pin's 3.6 V absolute maximum.
+
+  A binding of its own rather than borrowing `gpio-leds`, which would instantiate
+  an LED device and describe the pin as something it is not.
+
+compatible: "sophon,vbatt-enable"
+
+include: base.yaml
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: The enable pin, with the polarity that makes ACTIVE = enabled.

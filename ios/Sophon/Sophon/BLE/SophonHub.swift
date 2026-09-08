@@ -29,6 +29,7 @@ final class SophonHub: NSObject {
     /// Held per device so stats can be re-read on demand without rediscovering.
     private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
     private var linkParamsCharacteristics: [UUID: CBCharacteristic] = [:]
+    private var batteryCharacteristics: [UUID: CBCharacteristic] = [:]
 
     /// Peripherals that accepted a connection but had no Sophon service behind
     /// it. Tracked so the disconnect they are about to get is not treated as a
@@ -57,6 +58,7 @@ final class SophonHub: NSObject {
     /// can change.
     private var sweepTask: Task<Void, Never>?
     private var rssiTask: Task<Void, Never>?
+    private var batteryTask: Task<Void, Never>?
     private let log = Logger(subsystem: "com.vwong.Sophon", category: "ble")
 
     override init() {
@@ -174,6 +176,7 @@ final class SophonHub: NSObject {
         devices.removeAll { $0.id == device.id }
         statsCharacteristics[device.id] = nil
         linkParamsCharacteristics[device.id] = nil
+        batteryCharacteristics[device.id] = nil
         withoutService.remove(device.id)
         log.info("forgot \(device.displayName, privacy: .public)")
         applyRadioState()
@@ -227,6 +230,48 @@ final class SophonHub: NSObject {
 
     /// Called by the detail view so the sweep can leave its device alone.
     func setDeviceOnScreen(_ id: UUID?) { deviceOnScreen = id }
+
+    /// Re-read every connected peripheral's battery voltage.
+    ///
+    /// Hub-owned rather than a view's `.task`, the same as the RSSI poll and for
+    /// the same reason (#237): a `NavigationStack` cancels the device list's
+    /// tasks when a detail view is pushed, and a minute-scale cadence makes a
+    /// stalled poll far more visible than a one-second one would.
+    ///
+    /// One minute, matching the board's own sampling timer. Unlike `readRSSI`,
+    /// this genuinely is an over-the-air round trip, so the cadence does answer
+    /// to cost -- but one ATT read per board per minute against ~20 connection
+    /// events a second is far below anything measurable.
+    ///
+    /// Matching the board's 60 s sampling rather than beating it is the point:
+    /// this read returns the board's cache, so polling faster would return the
+    /// same value with a smaller number in its age field and no more truth in
+    /// it. Equal cadences put the worst-case age at ~120 s -- up to 60 s of
+    /// board-side cache, plus up to 60 s until the next read.
+    private func pollBattery() {
+        for device in devices where device.peripheral.state == .connected {
+            guard let characteristic = batteryCharacteristics[device.id] else { continue }
+            device.peripheral.readValue(for: characteristic)
+        }
+    }
+
+    private func startBatteryPolling() {
+        guard batteryTask == nil else { return }
+        batteryTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                // Sleeps FIRST, unlike the RSSI loop. Characteristic discovery
+                // already issues one read, so polling immediately would double
+                // up on every connect.
+                try? await Task.sleep(for: .seconds(60))
+                self?.pollBattery()
+            }
+        }
+    }
+
+    private func stopBatteryPolling() {
+        batteryTask?.cancel()
+        batteryTask = nil
+    }
 
     /// Poll every connected peripheral's RSSI.
     ///
@@ -304,7 +349,13 @@ final class SophonHub: NSObject {
         // unrelated callbacks. resume() cannot serve as the hook -- it guards on
         // `isSuspended` and returns early at startup, when nothing was ever
         // suspended.
-        if wantScan { startRSSIPolling() } else { stopRSSIPolling() }
+        if wantScan {
+            startRSSIPolling()
+            startBatteryPolling()
+        } else {
+            stopRSSIPolling()
+            stopBatteryPolling()
+        }
         let wasScanning = (radio == .ready)
 
         // Duplicate reporting costs a callback per advertisement -- tens per
@@ -381,6 +432,7 @@ final class SophonHub: NSObject {
         }
         statsCharacteristics.removeAll()
         linkParamsCharacteristics.removeAll()
+        batteryCharacteristics.removeAll()
     }
 
     /// Put the central back on the air after `suspend()`.
@@ -563,6 +615,13 @@ extension SophonHub: CBCentralManagerDelegate {
             device.endSession()
             self.log.info("disconnected \(device.displayName, privacy: .public)")
             self.statsCharacteristics[peripheral.identifier] = nil
+            // Cleared with its siblings. A CBCharacteristic is invalidated by the
+            // disconnect that produced this callback, and the peripheral
+            // identifier is stable -- so a stale entry survives into the next
+            // connection, where pollBattery can use it in the window between
+            // didConnect and characteristic discovery. `.connected` is true a
+            // round trip before the map is rewritten.
+            self.batteryCharacteristics[peripheral.identifier] = nil
             self.linkParamsCharacteristics[peripheral.identifier] = nil
 
             // Do not re-arm a link that was dropped on purpose. Without this,
@@ -644,7 +703,8 @@ extension SophonHub: CBPeripheralDelegate {
             peripheral.discoverCharacteristics(
                 [SophonProtocol.motionCharacteristicUUID,
                  SophonProtocol.statsCharacteristicUUID,
-                 SophonProtocol.linkParamsCharacteristicUUID],
+                 SophonProtocol.linkParamsCharacteristicUUID,
+                 SophonProtocol.batteryCharacteristicUUID],
                 for: sophon)
         }
     }
@@ -668,6 +728,12 @@ extension SophonHub: CBPeripheralDelegate {
             let offers = characteristics.contains {
                 $0.uuid == SophonProtocol.linkParamsCharacteristicUUID
             }
+            let offersBattery = characteristics.contains {
+                $0.uuid == SophonProtocol.batteryCharacteristicUUID
+            }
+            if device?.offersBattery != offersBattery {
+                device?.offersBattery = offersBattery
+            }
             // Guarded like every other latch here: a repeat didDiscoverServices
             // re-enumerates and would otherwise notify every observer with an
             // identical value (#261).
@@ -682,6 +748,27 @@ extension SophonHub: CBPeripheralDelegate {
                     // that it is refreshed on demand from the detail view.
                     self.statsCharacteristics[peripheral.identifier] = characteristic
                     peripheral.readValue(for: characteristic)
+                case SophonProtocol.batteryCharacteristicUUID:
+                    self.batteryCharacteristics[peripheral.identifier] = characteristic
+
+                    // Read once here so a reading is on screen without waiting a
+                    // full minute -- and so a reconnect after a release shows a
+                    // value immediately rather than at the next poll.
+                    peripheral.readValue(for: characteristic)
+
+                    // Subscribed as well as polled, which no other characteristic
+                    // here is. The board notifies only on a CHANGE, and the
+                    // change that matters is USB being plugged or unplugged --
+                    // that alters whether the reading may be called a battery
+                    // voltage at all. Polling a rare event forces a choice
+                    // between reporting it late and spending the connection-event
+                    // budget the stats and link-params reads exist to protect.
+                    //
+                    // The 60 s poll stays as a backstop: a dropped notification
+                    // is not retried by the peripheral, and nothing here counts
+                    // them, so the poll is what guarantees the value cannot be
+                    // wrong indefinitely.
+                    peripheral.setNotifyValue(true, for: characteristic)
                 case SophonProtocol.linkParamsCharacteristicUUID:
                     // Read once here, and again whenever stats are refreshed --
                     // iOS revises the interval on its own schedule, so a value
@@ -735,6 +822,24 @@ extension SophonHub: CBPeripheralDelegate {
             return
         }
         guard let data = characteristic.value else { return }
+
+        if characteristic.uuid == SophonProtocol.batteryCharacteristicUUID {
+            let byteCount = data.count
+            guard let reading = BatteryReading(data) else {
+                // Also the mv == 0 sentinel, which is not a malformed payload but
+                // the board saying it has no reading -- logged at info, not error,
+                // because a board whose divider failed to start is a normal state
+                // the UI renders as Not reported (#268).
+                MainActor.assumeIsolated {
+                    self.log.info("no battery reading (\(byteCount, privacy: .public) bytes)")
+                }
+                return
+            }
+            MainActor.assumeIsolated {
+                self.byID[peripheral.identifier]?.ingestBattery(reading)
+            }
+            return
+        }
 
         if characteristic.uuid == SophonProtocol.statsCharacteristicUUID {
             let byteCount = data.count
