@@ -9,22 +9,46 @@
 # runner does not know, it fails to find the volume -- this script then falls
 # back to a plain copy, which is all the runner does anyway.
 #
+# This is the UF2 path, for boards still running the Adafruit bootloader.
+# Boards migrated to MCUboot are flashed with scripts/flash-swd.sh instead --
+# they have no UF2 volume at all, so this script simply will not find one.
+#
 # Usage: scripts/flash.sh
 
 set -euo pipefail
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKSPACE="${SOPHON_ZEPHYR_WORKSPACE:-$HOME/zephyrproject}"
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+sophon_common_init
+
 UF2="$APP_DIR/build/zephyr/zephyr.uf2"
 
 if [[ ! -f "$UF2" ]]; then
   echo "error: $UF2 not found -- run scripts/build.sh first" >&2
+  if [[ -d "$APP_DIR/build-mcuboot" ]]; then
+    echo "       (an MCUboot build exists -- did you mean scripts/flash-swd.sh?)" >&2
+  fi
   exit 1
 fi
 
-# shellcheck disable=SC1091
-source "$WORKSPACE/.venv/bin/activate"
-export ZEPHYR_BASE="$WORKSPACE/zephyr"
+# A stale UF2 is the one silent failure in this set: build MCUboot, then run
+# this script from habit, and it would cheerfully flash an image from an earlier
+# UF2 build without complaint. Refuse when any source is newer than the artefact.
+NEWER="$(find "$APP_DIR/src" "$APP_DIR/prj.conf" "$APP_DIR/CMakeLists.txt" \
+           -newer "$UF2" -print -quit 2>/dev/null || true)"
+if [[ -n "$NEWER" ]]; then
+  echo "error: $UF2 is older than $NEWER" >&2
+  echo "       run scripts/build.sh before flashing" >&2
+  exit 1
+fi
+if [[ -d "$APP_DIR/build-mcuboot" && "$APP_DIR/build-mcuboot" -nt "$UF2" ]]; then
+  echo "error: the MCUboot build is newer than this UF2 image." >&2
+  echo "       This board is on the UF2 path; if you meant the MCUboot board," >&2
+  echo "       use scripts/flash-swd.sh. Otherwise rebuild: scripts/build.sh" >&2
+  exit 1
+fi
+
+sophon_activate_west
 
 if west flash -d "$APP_DIR/build" -r uf2; then
   exit 0

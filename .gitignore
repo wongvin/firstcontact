@@ -222,6 +222,12 @@ graphify-out/
 Secrets.xcconfig
 GeneratedSecrets.swift
 
-# Zephyr build output. `build/` above (Python packaging) already matches this by
-# accident; spelled out so the coverage is deliberate rather than incidental.
+# Zephyr build output. `build/` above (Python packaging) already matches the
+# default directory by accident; spelled out so the coverage is deliberate.
+#
+# `build-*/` covers sysbuild and variant builds -- `build-mcuboot/` alone is
+# ~1900 files, and the default rule does not match it because it only matches a
+# directory named exactly `build`. Anything of the form build-<variant> is a
+# build tree by Zephyr convention, never source.
 zephyr/*/build/
+zephyr/*/build-*/
