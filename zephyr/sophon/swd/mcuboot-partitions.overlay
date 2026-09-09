@@ -1,0 +1,98 @@
+/*
+ * Flash layout for the MCUboot experiment (#253).
+ *
+ * The XIAO board files define NO partitions at all -- no `boot_partition`, no
+ * `slot0_partition` -- because the board ships with Adafruit's UF2 bootloader,
+ * which is not MCUboot and needs none. A sysbuild with MCUboot therefore fails
+ * at configure time with `required nodelabel not found: slot0_partition`.
+ *
+ * Kept OUT of `app.overlay` deliberately. Applying it to the normal build would
+ * move the application's load address and produce a UF2 that the Adafruit
+ * bootloader places wrongly -- a bricked-looking board from a file that flashed
+ * without complaint. This overlay is opt-in, for the MCUboot build only.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS REPLACES. The stock layout, read off the board over SWD before any
+ * write (see HARDWARE.md and the backup in ~/sophon-flash-backups):
+ *
+ *   0x000000  Nordic MBR (4K)
+ *   0x001000  SoftDevice S140 v7.3.0  <- used by the bootloader, not by Sophon
+ *   0x027000  Sophon application      <- where the UF2 bootloader places images
+ *   0x0F4000  Adafruit UF2 bootloader <- UICR NRFFW[0] points here
+ *   0x0FE000  MBR parameter page      <- UICR NRFFW[1]
+ *
+ * Flashing MCUboot overwrites the MBR at 0x000000 and, with this layout, the
+ * region the Adafruit bootloader occupies. **The board then has no UF2 recovery
+ * path** -- SWD is the only way back, which is the whole point of #253 and the
+ * reason the full-flash and UICR backup is taken first.
+ * ---------------------------------------------------------------------------
+ *
+ * NO scratch partition. sysbuild selects CONFIG_BOOT_SWAP_USING_OFFSET=y, which
+ * swaps in place -- "each sector X+1 in the secondary slot moved to index X in
+ * the primary" -- and needs no scratch area at all.
+ *
+ * An earlier revision copied Zephyr's nrf52840dk layout wholesale. That table is
+ * written for swap-using-scratch, so it allocated 120 KB that nothing ever
+ * touched, and the cost came straight off the slots: 420 KB each instead of 480.
+ *
+ * This mode's real constraint is different: an incoming image is written at
+ * slot1 + one sector rather than at its start, so slot1's usable capacity is
+ * 4 KB less than its size. Both slots must also have uniform sector sizes, which
+ * the nRF52840 satisfies -- 4 KB pages throughout.
+ *
+ * Sophon is ~169 KB, so a 480 KB slot leaves generous room either way.
+ */
+
+/*
+ * The stock layout comes from `nordic/nrf52840_partition_uf2_sdv7.dtsi`, pulled
+ * in by `xiao_ble_common.dtsi` -- not from the board directory, which is why it
+ * is easy to miss:
+ *
+ *   0x000000  reserved_partition_0  "SoftDevice"  156K, read-only
+ *   0x027000  code_partition        "Application" 788K
+ *   0x0EC000  storage_partition     "Storage"      32K
+ *   0x0F4000  boot_partition        "UF2"          48K, read-only
+ *
+ * It matches the flash dump taken over SWD exactly, including UICR NRFFW[0]
+ * pointing at 0x0F4000. And the "SoftDevice" label is accurate, which an
+ * earlier revision of this comment denied: S140 v7.3.0 really is present at
+ * 0x001000-0x027000, confirmed by the info-struct magic 0x51B1E5DB at 0x3004 and
+ * a declared size of 0x27000. Sophon never calls it -- Zephyr runs its own
+ * controller -- but the Adafruit bootloader uses it for BLE OTA.
+ *
+ * Every one of those four is deleted below. Deleting `boot_partition` is the
+ * consequential one -- it is the region the Adafruit UF2 bootloader occupies.
+ */
+
+/delete-node/ &reserved_partition_0;
+/delete-node/ &code_partition;
+/delete-node/ &storage_partition;
+/delete-node/ &boot_partition;
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 0x0000C000>;   /* 48K */
+		};
+
+		slot0_partition: partition@c000 {
+			label = "image-0";
+			reg = <0x0000C000 0x00078000>;   /* 480K */
+		};
+
+		slot1_partition: partition@84000 {
+			label = "image-1";
+			reg = <0x00084000 0x00078000>;   /* 480K */
+		};
+
+		storage_partition: partition@fc000 {
+			label = "storage";
+			reg = <0x000FC000 0x00004000>;   /* 16K */
+		};
+	};
+};

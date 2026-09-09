@@ -1,0 +1,21 @@
+/*
+ * Point the APPLICATION image at slot 0 (#253).
+ *
+ * Separate from the partition overlay because the two images need different
+ * answers and share the partition table. MCUboot's own
+ * `boot/zephyr/app.overlay` sets `zephyr,code-partition = &boot_partition` for
+ * itself; the application must instead run from slot 0.
+ *
+ * It cannot go in the shared overlay: application overlays are applied after
+ * MCUboot's, so a `chosen` there would override MCUboot's own choice and build
+ * a bootloader that expects to run from slot 0.
+ *
+ * Needed at all because deleting the stock `code_partition` leaves the
+ * `zephyr,code-partition` chosen by `nrf52840_partition_uf2_sdv7.dtsi` dangling.
+ */
+
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};

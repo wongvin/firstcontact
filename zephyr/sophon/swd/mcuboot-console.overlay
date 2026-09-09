@@ -1,0 +1,33 @@
+/*
+ * Give MCUboot a console on uart0 (#253).
+ *
+ * MCUboot image only -- the application keeps its CDC ACM console.
+ *
+ * WHY IT CANNOT USE THE BOARD'S DEFAULT CONSOLE. `boards/common/usb/
+ * cdc_acm_serial.dtsi` sets `zephyr,console = &board_cdc_acm_uart`, and CDC ACM
+ * needs the USB device stack. MCUboot does not bring that up, so building it
+ * with a console failed at LINK time, minutes into the build:
+ *
+ *     undefined reference to `__device_dts_ord_127'
+ *
+ * The first fix was to switch MCUboot's console off entirely
+ * (`CONFIG_CONSOLE=n`, `CONFIG_SERIAL=n` in sysbuild/mcuboot.conf). That worked,
+ * and cost more than it saved: MCUboot then logged nothing at all, so its stage
+ * of the boot was invisible. Asked how long MCUboot took, the only tool left was
+ * sampling the program counter over SWD -- which halts the CPU, perturbs the
+ * measurement it is taking, and strands the BLE link (see BOOTLOADER.md).
+ *
+ * uart0 needs no USB stack. It is a plain UARTE on P1.11 (TX, pad D6) and P1.12
+ * (RX, pad D7) at 115200 8N1, already `status = "okay"` in the board devicetree
+ * and reachable from the Debug Probe's UART connector.
+ *
+ * Unlike CDC ACM -- where the host's baud rate is a legacy negotiation the
+ * device merely records -- these settings are real and both ends must agree.
+ */
+
+/ {
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+	};
+};

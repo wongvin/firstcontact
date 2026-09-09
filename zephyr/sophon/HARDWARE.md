@@ -9,6 +9,9 @@ Several entries record things that turned out to be wrong on the first attempt.
 Those are kept deliberately: each one produced a plausible result rather than an
 error, which is the only reason they were worth an hour of measurement.
 
+See also [BOOTLOADER.md](BOOTLOADER.md) for what occupies flash, the SWD
+access path, and backup/recovery.
+
 ## Where the authoritative data is
 
 | Source | Contents |

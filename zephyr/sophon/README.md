@@ -64,8 +64,22 @@ Requires Zephyr **>= 4.4**; `CMakeLists.txt` fails at configure time otherwise.
 Double-tap the reset button — a UF2 volume mounts — then:
 
 ```bash
-scripts/flash.sh
+scripts/build.sh                      # UF2 (default during the transition)
+SOPHON_BOOT=mcuboot scripts/build.sh  # MCUboot via sysbuild
+
+scripts/flash.sh                      # UF2 boards
+scripts/flash-swd.sh                  # MCUboot boards, over a CMSIS-DAP probe
 ```
+
+**The boards have diverged**: `Sophon-86F0` runs MCUboot and is flashed over
+SWD; `Sophon-4D88` still runs the Adafruit UF2 bootloader. Which path a board
+takes, the memory maps, the backup and recovery procedure, and the hazards of
+working over SWD are all in [BOOTLOADER.md](BOOTLOADER.md).
+
+The one worth knowing before you touch a probe: **never end an SWD session with
+`resume` — always `reset run`.** Resuming after a halt leaves the BLE stack
+believing a connection the peer abandoned is still live, and only a reset
+recovers it.
 
 It tries `west flash -r uf2` and falls back to copying `build/zephyr/zephyr.uf2`
 onto the volume. The runner matches a board-id string; if the fallback is what
