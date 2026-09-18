@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-18
+
+### chore: ignore `.vscode/`
+
+- VS Code's CMake Tools extension writes `.vscode/settings.json` on its own, and what it wrote is a `cmake.sourceDirectory` absolute path — machine-specific, and carrying a home directory into a public repo.
+- It also points the IDE at a build path that does not work: `zephyr/CLAUDE.md` documents that builds go through `scripts/build.sh` precisely because `west` cannot run from inside this repo, having no `.west/` marker to walk up to. Committing the setting would have shared a broken configuration rather than a useful one.
+- The rule was already in the file, commented out by the GitHub template that generated it, one line below a note offering exactly this choice.
+
 ## 2026-09-09
 
 ### feat: MCUboot + SWD flashing, and a recovery loop that is proven (#253)
