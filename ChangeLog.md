@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-30
+
+### docs: it is the halt, not SWD access (#275)
+
+- `BOOTLOADER.md` recorded #253's most expensive finding correctly — halting the CPU stops Zephyr's link-layer controller and its timers together, so a peer times out at 420 ms while the board notices nothing — and then generalised one step too far, calling **diagnostic reads the dangerous case**. That was reasoned from the operation which produced the finding, sampling the program counter, which really does require a halt. It is not true of reads.
+- Measured against `Sophon-86F0` while it was connected to the iOS app and streaming at ~54 Hz: `dump_image` of `0x000000-0x084000`, **540,672 bytes in 13 seconds**, no `halted` in the OpenOCD output, no `reset run` afterwards, and the link still streaming throughout. `flash-swd.sh` already relied on this for its SoftDevice probe at `0x3004` without the document saying so.
+- The section now names which operations halt rather than warning off a category: reads do not, `halt` does, and anything that runs code on the target — erase, write, `verify_image` — does. A hazard stated too broadly costs a capability, and the tempting moment is exactly when you want to see what a board is doing *without* disturbing it.
+- The `cmp`-not-`verify_image` section gains the other half of its own argument: the re-dump needs no halt, so it is the one verification step that works against a board serving a connection.
+- The three references that describe PC sampling specifically — `BOOTLOADER.md:362`, `sysbuild/mcuboot.conf:18`, `swd/mcuboot-console.overlay:17` — are correct as written and deliberately untouched.
+- Surfaced while checking whether `flash-swd.sh` had ever half-completed a write. It had not: the bootloader was byte-identical across all 40,176 defined bytes, and the application differed only in the three ASCII digits of its build timestamp plus the SHA-256 and RSA signature that follow from it. **The `KEYHASH` TLV was unchanged**, which independently confirms the same key signed both.
+
 ## 2026-09-18
 
 ### chore: ignore `.vscode/`

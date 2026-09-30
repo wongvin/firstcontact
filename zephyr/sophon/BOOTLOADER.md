@@ -185,6 +185,11 @@ together would leave a board with no bootloader and no known-good image.
 the CPU in a HardFault. Re-dump and compare on the host instead — which
 re-tests read repeatability for free.
 
+The re-dump half also **needs no halt** (#275), so it is the one verification step
+that can be run against a board that is up and serving a connection. That is the
+other half of why this approach is preferred, not merely a workaround for
+`verify_image` timing out.
+
 ### Restoring
 
 ```bash
@@ -436,8 +441,30 @@ left the board unreachable for over a minute; a reset restored connection in
 115 ms.
 
 This is why the symptom correlates with MCUboot without MCUboot being at fault —
-SWD is what brought halting into the workflow. It also means **diagnostic reads
-are the dangerous case**, because resuming feels less disruptive than resetting.
+SWD is what brought halting into the workflow.
+
+#### It is the halt, not SWD access (#275)
+
+An earlier revision of this section went one step further and said *diagnostic
+reads are the dangerous case*. That was generalised from the operation which
+produced the finding — sampling the program counter, which does require a halt —
+and it is wrong about reads.
+
+Measured against `Sophon-86F0` while it was connected to the iOS app and streaming
+at ~54 Hz: a `dump_image` of `0x000000-0x084000`, **540,672 bytes in 13 seconds**,
+with no `halted` in the OpenOCD output, no `reset run` afterwards, and the BLE link
+still streaming throughout. `flash-swd.sh` already depends on this for its
+SoftDevice probe at `0x3004`, which reads a word before any write.
+
+| Operation | Halts the core? |
+|---|---|
+| `read_memory`, `dump_image` | **no** — safe against a live, connected board |
+| `halt` — PC sampling, register inspection | **yes** — this is the hazard above |
+| `flash erase_address`, `flash write_image`, `verify_image` | **yes** — they run code on the target |
+
+The distinction is worth having precisely because the tempting moment is when you
+want to know what a board is doing *without* disturbing it. Reading flash is that
+tool, and it costs nothing.
 
 ### Erase and write need separate OpenOCD sessions
 
