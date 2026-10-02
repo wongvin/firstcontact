@@ -1,4 +1,14 @@
-# Shared prologue for the Sophon scripts. Source it; do not execute it.
+#!/usr/bin/env bash
+#
+# Shared prologue for the Sophon scripts. Source it; do not execute it -- the
+# file only defines functions, and it is deliberately left non-executable.
+#
+# The shebang is for the linter, not for running this. Without a shell
+# declaration shellcheck reports SC2148 and then analyses NOTHING, so the one
+# file all four scripts depend on was the only one never actually checked, while
+# the scripts around it came back clean. A shebang is an ordinary comment when a
+# file is sourced, and the mode bit decides executability, so declaring bash here
+# costs nothing and matches every other script in this directory.
 #
 # west walks UP from $PWD looking for a .west/ marker, so it cannot resolve a
 # workspace from inside this repo. Exporting ZEPHYR_BASE is what makes a

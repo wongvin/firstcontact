@@ -146,8 +146,19 @@ scripts  ~/zephyr-sdk-1.0.1/hosttools/opt/openocd/share/openocd/scripts
 
 ```bash
 openocd -s "$SCRIPTS" -f interface/cmsis-dap.cfg -c "transport select swd" \
-        -c "adapter speed 4000" -f target/nrf52.cfg -c "init; halt; ...; reset run; exit"
+        -c "adapter speed 4000" -f target/nrf52.cfg -c "<commands>; exit"
 ```
+
+What goes in `<commands>` depends on whether the core has to stop (#275):
+
+| | `<commands>` |
+|---|---|
+| **Reading** — `dump_image`, `read_memory` | `init; …` |
+| **Writing or running code** — erase, `flash write_image`, `verify_image` | `init; reset halt; …; reset run` |
+
+The template here used to be `init; halt; …; reset run` for everything, which is
+correct but not free: it stops the core for a read that never needed it, and
+stopping the core strands a connected BLE link until the reset.
 
 A healthy connection reports `SWD DPIDR 0x2ba01477` and
 `Cortex-M4 r0p1 processor detected`.
@@ -164,11 +175,25 @@ The backup is the artefact that makes everything else reversible. **Take one
 before migrating any board.**
 
 ```bash
-openocd ... -c "init; halt;
+openocd ... -c "init;
    dump_image flash-1MB.bin 0x00000000 0x100000;
    dump_image uicr-4KB.bin  0x10001000 0x1000;
-   reset run; exit"
+   exit"
 ```
+
+**No `halt`, and therefore no `reset run` (#275).** Both used to be here and neither
+is needed: `dump_image` reads through the debug access port without stopping the
+core, so there is nothing to resume, and the `reset run` only existed to undo the
+`halt`. Dropping the pair changes what this command *costs*, not just its length —
+a backup is now safe to take from a board that is up and serving a connection,
+where the old form would have stranded the BLE link for the duration and reset the
+board at the end.
+
+Measured taking the `Sophon-86F0` MCUboot-era backup: 1 MB of flash plus 4 KB of
+UICR in **25 s**, no halt, the board left exactly as it was found.
+
+Keep `reset run` where a `halt` really is required — erase, write, and anything
+else that runs code on the target. The rule is in Hazards below.
 
 Both halves matter. UICR holds `NRFFW[0]` (the bootloader address the MBR jumps
 to) and `PSELRESET` (what makes the reset button work); a mass erase clears them,
@@ -178,6 +203,24 @@ Backups live in `~/sophon-flash-backups/` — **outside the repo**, because a
 1 MB image derived from a CC BY-SA design does not belong in a public repo with
 no LICENSE. That also means they are unreplicated; losing them and the probe
 together would leave a board with no bootloader and no known-good image.
+
+**The only backup that exists predates the MCUboot migration.** Verified against
+the file itself:
+
+```
+Sophon-86F0_20260908T111618Z_flash-1MB.bin   (8 Sep; MCUboot was flashed 9 Sep)
+  SoftDevice info magic @0x3004: 0x51b1e5db   <- SoftDevice present
+  word @0xC000 (MCUboot slot0): 0x1dc0482d    <- not an MCUboot image header
+  0xF4000 (Adafruit UF2 region): not blank    <- UF2 bootloader present
+```
+
+So restoring it produces a board that boots — **on the Adafruit UF2 bootloader,
+with the migration undone**. That is a genuine recovery from a brick, and it is
+*not* a way back to a working MCUboot board. No backup of that state exists.
+
+It matters most where the failure is a signing-key change (#274): the thing you
+would want back is the previous MCUboot pair, and this file is not it. Taking a
+current backup belongs to #270, which owns board backups.
 
 ### Verify with `cmp`, not `verify_image`
 
@@ -466,20 +509,47 @@ The distinction is worth having precisely because the tempting moment is when yo
 want to know what a board is doing *without* disturbing it. Reading flash is that
 tool, and it costs nothing.
 
-### Erase and write need separate OpenOCD sessions
+### Never end an OpenOCD session between an erase and its write
 
-Erasing leaves the core executing blank flash, which locks up on a double fault.
-OpenOCD writes flash by running a helper routine in target RAM, which a locked-up
-core cannot do:
+Erasing and then writing in what *looks* like the natural way fails:
 
 ```
 Error: timeout waiting for algorithm, a target reset is recommended
 Error: Failed to write to nrf5 flash
 ```
 
-`reset halt` between the erase and the write fixes it. Same root cause as
-`verify_image` failing: **any OpenOCD operation that runs code on the target
-needs the core in a sane state.**
+OpenOCD writes flash by running a helper routine in target RAM, and a locked-up
+core cannot run it. Same root cause as `verify_image` failing: **any OpenOCD
+operation that runs code on the target needs the core in a sane state.**
+
+**What locks the core up is the session ending, not the erase (#277).** OpenOCD
+releases the core when it exits; a core released into blank flash double-faults,
+and the next session finds it wedged. An earlier revision of this section drew the
+wrong rule from that — *erase and write need separate sessions* — and the fix it
+prescribed, `reset halt` between two invocations, worked by re-establishing a sane
+core rather than by separating the operations.
+
+Keep the core halted for one session and the situation never arises. Measured on
+`Sophon-86F0`:
+
+```
+init; reset halt;
+flash erase_address 0x00000000 0x000FC000;
+flash write_image <mcuboot.hex>; flash write_image <app.signed.hex>;
+reset run; exit
+```
+
+**27 s**, no timeout, both images verified on read-back, `slot1` confirmed blank
+afterwards. This is what `flash-swd.sh` now does, and it is the same shape the
+restore procedure above always used — which was the clue that the two-session rule
+was not load-bearing.
+
+**Erase the whole region, not only what you write.** `flash write_image erase`
+also works in one session, and is 10 s rather than 27, but it erases only the
+sectors it writes — so `slot1` keeps whatever was there. A stale image left in
+`slot1` with a valid trailer is swapped in at the next boot, quietly replacing
+what was just flashed. That has not bitten yet only because nothing has written
+`slot1`; it becomes live with #271.
 
 ### Console capture must survive re-enumeration
 
@@ -518,6 +588,9 @@ date.
 | Invalid `SOPHON_BOOT` rejected | verified |
 | `flash.sh` refuses a UF2 image older than sources | verified |
 | `flash.sh` refuses when the MCUboot build is newer, and names `flash-swd.sh` | verified |
+| `flash-swd.sh` refuses a stale build (#277) | verified — caught a **true positive** on first use: `sysbuild/mcuboot.conf` had been edited 13 minutes after the build |
+| `flash-swd.sh` reads both images back and compares before reporting success (#277) | verified — full run 33 s, both `MATCH` |
+| `flash-swd.sh` catches an OpenOCD failure that prints no error text (#277) | verified against a stub; the previous `grep … && exit 1` did not |
 | `flash-swd.sh` refuses a board with a SoftDevice at `0x3004` | **not verified** — needs a UF2 board attached |
 
 That last one is the important one and the one still untested: flashing MCUboot
