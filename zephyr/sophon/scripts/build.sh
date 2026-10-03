@@ -57,7 +57,54 @@ for f in "$PARTITIONS" "$APP_SLOT0" "$BOOT_CONSOLE"; do
   [[ -f "$f" ]] || { echo "error: missing overlay $f" >&2; exit 1; }
 done
 
+# --- signing key (#274) ------------------------------------------------------
+#
+# MCUboot validates every image on boot against a public key compiled INTO the
+# bootloader, and `imgtool` signs the application with the private half of the
+# same file. One path, two consumers -- which is why the bootloader and the
+# application can never be flashed independently once this changes.
+#
+# Resolution order, deliberately:
+#
+#   1. $SOPHON_SIGNING_KEY   -- an absolute path, for CI or a non-macOS host
+#   2. ~/.sophon/keys/...    -- where #287 put it on this machine
+#
+# The default is NOT baked into committed config as an absolute path: that is
+# the mistake .vscode/settings.json made (ac6abfd), and it would hardcode one
+# developer's $HOME into the build.
+#
+# Note the doubled quoting where this is passed to west below. It is not a typo:
+# BOOT_SIGNATURE_KEY_FILE is a Kconfig *string*, so the quotes have to survive
+# into the generated .conf file. Without them the value is written bare and
+# Kconfig rejects it -- "malformed string literal in assignment", which aborts
+# the build well after the point where the cause is obvious.
+SIGNING_KEY="${SOPHON_SIGNING_KEY:-$HOME/.sophon/keys/sophon-fw-rsa-2048.pem}"
+if [[ ! -f "$SIGNING_KEY" ]]; then
+  echo "error: no signing key at $SIGNING_KEY" >&2
+  echo "       set SOPHON_SIGNING_KEY to an absolute path, or see" >&2
+  echo "       ~/.sophon/README.md for what belongs there." >&2
+  exit 1
+fi
+
+# Warn by FINGERPRINT, not by filename -- a filename is a label anyone can
+# change, and the thing that actually matters is which key a bootloader will
+# trust. This is the same SHA-256 that appears as the KEYHASH TLV in a signed
+# image: of the DER PKCS#1 RSAPublicKey, NOT SubjectPublicKeyInfo, which is what
+# most tooling emits by default.
+DEMO_KEYHASH="fc5701dc6135e1323847bdc40f04d2e5bee5833b23c29f93593d00018cfa9994"
+if command -v openssl >/dev/null 2>&1; then
+  KEYHASH="$(openssl rsa -in "$SIGNING_KEY" -RSAPublicKey_out -outform DER 2>/dev/null \
+             | shasum -a 256 | cut -d" " -f1)"
+  if [[ "$KEYHASH" == "$DEMO_KEYHASH" ]]; then
+    echo "warning: signing with MCUboot's PUBLIC demo key." >&2
+    echo "         Its private half ships in every MCUboot checkout, so images are" >&2
+    echo "         integrity-checked but NOT authenticated -- anyone can produce a" >&2
+    echo "         signature the bootloader will accept. Tracked in #274." >&2
+  fi
+fi
+
 exec west build -p always -b "$BOARD" --sysbuild -d "$BUILD_DIR" "$APP_DIR" "$@" \
   -- -DSB_CONFIG_BOOTLOADER_MCUBOOT=y \
+     -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\"$SIGNING_KEY\"" \
      -DEXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$APP_SLOT0" \
      -Dmcuboot_EXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$BOOT_CONSOLE"
