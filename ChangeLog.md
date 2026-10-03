@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-04
+
+### chore: consolidate preserved artifacts under `~/.sophon/` (#287)
+
+- `~/sophon-flash-backups/` was one of **30 visible directories** in `$HOME`, and #274 was about to add a second for the signing key. Both now live under one dotfolder — `~/.sophon/{backups,keys}` — matching the `.ssh`/`.gnupg` precedent this machine already follows for irreplaceable credentials. Home is down to 29.
+- **One directory rather than an XDG split**, because the two things inside carry the same consequence: lose the backup and a bricked board stays bricked, lose the key and no image can ever be signed for the bootloader a board already carries. #270 and #274 defer the *same* replication question about them; splitting across `~/.config` and `~/.local/share` would mean answering it twice about one risk. XDG is also a poor fit for a key specifically — it defines config, data, cache and state directories and **none for credentials**, which is why `ssh` and `gpg` never migrated.
+- **Moved with verification, not `mv`.** These are the only copies that exist, so: MD5 recorded, copied, `cmp` against each original, counts checked, and only then the originals removed — then MD5 re-checked against what was recorded before. All four identical.
+- **`~/.sophon/README.md` is part of the deliverable, not a nicety.** A directory of opaque `.bin` files with no explanation is one tidy-up away from deletion by someone who does not know what they are looking at. It states what each half is for, that `uicr-4KB` matters as much as `flash-1MB` because UICR holds `NRFFW[0]` and `PSELRESET`, what the `uf2-sdv7` and `mcuboot` era tags mean, and that restoring the wrong era silently undoes the migration.
+- **Two stale claims in `BOOTLOADER.md` corrected while here.** It still said *"the only backup that exists predates the MCUboot migration"* — true when written, wrong since the MCUboot-era backup was taken. It now shows both pairs with the bytes that identify each, the 371,718-byte (35.4%) difference between them, and the finding that the **UICR halves are byte-identical across eras** — which halves #270's portability question, since only the flash image is in doubt.
+- A third defect was self-inflicted and caught before commit: replacing one line of `flash-swd.sh`'s failure message orphaned its continuation, leaving *"MCUboot migration / migration -- restoring it…"*. The message is now three lines that say which pair to restore rather than which one not to.
+
 ## 2026-10-03
 
 ### build: pre-commit, wired to clang-format (#285)
