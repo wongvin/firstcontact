@@ -205,7 +205,7 @@ static const struct sensor_trigger drdy_trigger = {
  * short (see data_ready), and if this ever fires it means something overran a
  * sample period and is worth investigating rather than shrugging at.
  */
-#define STALL_TIMEOUT_MS 250 /* ~13 sample periods at 54 Hz */
+#define STALL_TIMEOUT_MS   250 /* ~13 sample periods at 54 Hz */
 #define WATCHDOG_PERIOD_MS 200
 
 static void watchdog_work_handler(struct k_work *work)

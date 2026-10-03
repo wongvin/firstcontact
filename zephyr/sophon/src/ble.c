@@ -27,27 +27,18 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
  *   Link Params: C6560004-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  */
-#define SOPHON_UUID_SERVICE \
-	BT_UUID_128_ENCODE(0xC6560001, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
-#define SOPHON_UUID_MOTION \
-	BT_UUID_128_ENCODE(0xC6560002, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
-#define SOPHON_UUID_STATS \
-	BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
-#define SOPHON_UUID_LINK_PARAMS \
+#define SOPHON_UUID_SERVICE BT_UUID_128_ENCODE(0xC6560001, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_MOTION  BT_UUID_128_ENCODE(0xC6560002, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_STATS   BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_LINK_PARAMS                                                                    \
 	BT_UUID_128_ENCODE(0xC6560004, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
-#define SOPHON_UUID_BATTERY \
-	BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_BATTERY BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
-static const struct bt_uuid_128 sophon_service_uuid =
-	BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
-static const struct bt_uuid_128 sophon_motion_uuid =
-	BT_UUID_INIT_128(SOPHON_UUID_MOTION);
-static const struct bt_uuid_128 sophon_stats_uuid =
-	BT_UUID_INIT_128(SOPHON_UUID_STATS);
-static const struct bt_uuid_128 sophon_link_params_uuid =
-	BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
-static const struct bt_uuid_128 sophon_battery_uuid =
-	BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
+static const struct bt_uuid_128 sophon_service_uuid = BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
+static const struct bt_uuid_128 sophon_motion_uuid = BT_UUID_INIT_128(SOPHON_UUID_MOTION);
+static const struct bt_uuid_128 sophon_stats_uuid = BT_UUID_INIT_128(SOPHON_UUID_STATS);
+static const struct bt_uuid_128 sophon_link_params_uuid = BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
+static const struct bt_uuid_128 sophon_battery_uuid = BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -79,8 +70,8 @@ static void motion_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
  * side. Reading through `conn` cannot go stale: a read only happens while
  * connected, and the value is whatever the link is using at that moment.
  */
-static ssize_t link_params_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-				void *buf, uint16_t len, uint16_t offset)
+static ssize_t link_params_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+				uint16_t len, uint16_t offset)
 {
 	struct bt_conn_info info;
 	struct sophon_link_params params;
@@ -106,8 +97,8 @@ static ssize_t link_params_read(struct bt_conn *conn, const struct bt_gatt_attr 
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
-static ssize_t stats_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			  void *buf, uint16_t len, uint16_t offset)
+static ssize_t stats_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			  uint16_t len, uint16_t offset)
 {
 	struct sophon_tx_stats snapshot;
 	uint8_t wire[SOPHON_STATS_SIZE];
@@ -120,8 +111,8 @@ static ssize_t stats_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
-static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			    void *buf, uint16_t len, uint16_t offset)
+static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			    uint16_t len, uint16_t offset)
 {
 	uint8_t wire[SOPHON_BATTERY_SIZE];
 	uint16_t mv;
@@ -142,25 +133,20 @@ static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *att
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
-BT_GATT_SERVICE_DEFINE(sophon_svc,
-	BT_GATT_PRIMARY_SERVICE(&sophon_service_uuid),
-	BT_GATT_CHARACTERISTIC(&sophon_motion_uuid.uuid,
-			       BT_GATT_CHRC_NOTIFY,
+BT_GATT_SERVICE_DEFINE(
+	sophon_svc, BT_GATT_PRIMARY_SERVICE(&sophon_service_uuid),
+	BT_GATT_CHARACTERISTIC(&sophon_motion_uuid.uuid, BT_GATT_CHRC_NOTIFY,
 			       BT_GATT_PERM_NONE, /* notify-only: never read directly */
 			       NULL, NULL, NULL),
 	BT_GATT_CCC(motion_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-	BT_GATT_CHARACTERISTIC(&sophon_stats_uuid.uuid,
-			       BT_GATT_CHRC_READ,
-			       BT_GATT_PERM_READ,
+	BT_GATT_CHARACTERISTIC(&sophon_stats_uuid.uuid, BT_GATT_CHRC_READ, BT_GATT_PERM_READ,
 			       stats_read, NULL, NULL),
 	/*
 	 * Read, not notify. These change rarely, and a subscription would spend
 	 * the connection-event budget these values exist to explain -- the same
 	 * reasoning that made the stats characteristic a read (#224).
 	 */
-	BT_GATT_CHARACTERISTIC(&sophon_link_params_uuid.uuid,
-			       BT_GATT_CHRC_READ,
-			       BT_GATT_PERM_READ,
+	BT_GATT_CHARACTERISTIC(&sophon_link_params_uuid.uuid, BT_GATT_CHRC_READ, BT_GATT_PERM_READ,
 			       link_params_read, NULL, NULL),
 	/*
 	 * Read for the same reason, and more so: the pack moves over hours. A
@@ -171,12 +157,9 @@ BT_GATT_SERVICE_DEFINE(sophon_svc,
 	 * instead be indistinguishable from firmware predating this change,
 	 * and both cases want the same words anyway (#268).
 	 */
-	BT_GATT_CHARACTERISTIC(&sophon_battery_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-			       BT_GATT_PERM_READ,
-			       battery_read, NULL, NULL),
-	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-);
+	BT_GATT_CHARACTERISTIC(&sophon_battery_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ, battery_read, NULL, NULL),
+	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 
 /*
  * The advertisement and the scan response are SEPARATE 31-byte budgets, not one
@@ -203,10 +186,10 @@ static const struct bt_data adv_data[] = {
  * which exposes a single CBAdvertisementDataManufacturerDataKey.
  */
 static const struct sophon_mfg_data mfg_data = {
-	.company_id       = SOPHON_COMPANY_ID,
+	.company_id = SOPHON_COMPANY_ID,
 	.scan_rsp_version = SOPHON_SCAN_RSP_VERSION,
-	.device_type      = SOPHON_DEVICE_TYPE,
-	.hw_version       = SOPHON_HW_VERSION,
+	.device_type = SOPHON_DEVICE_TYPE,
+	.hw_version = SOPHON_HW_VERSION,
 	.fw_version_major = SOPHON_FW_VERSION_MAJOR,
 	.fw_version_minor = SOPHON_FW_VERSION_MINOR,
 };
@@ -222,10 +205,9 @@ static const struct sophon_mfg_data mfg_data = {
  * than approximate. Note sizeof(scan_rsp) would NOT work: struct bt_data holds
  * {type, data_len, *data}, so it measures descriptors, not on-air bytes.
  */
-BUILD_ASSERT(BT_DATA_SERIALIZED_SIZE(SOPHON_NAME_MAX - 1) +
-		     BT_DATA_SERIALIZED_SIZE(1) +
-		     BT_DATA_SERIALIZED_SIZE(sizeof(struct sophon_mfg_data)) <=
-	     BT_GAP_ADV_MAX_ADV_DATA_LEN,
+BUILD_ASSERT(BT_DATA_SERIALIZED_SIZE(SOPHON_NAME_MAX - 1) + BT_DATA_SERIALIZED_SIZE(1) +
+			     BT_DATA_SERIALIZED_SIZE(sizeof(struct sophon_mfg_data)) <=
+		     BT_GAP_ADV_MAX_ADV_DATA_LEN,
 	     "Sophon scan response exceeds the legacy 31-byte limit");
 
 static int start_advertising(void)
@@ -257,18 +239,17 @@ static int start_advertising(void)
 	};
 	int err;
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1,
-			      adv_data, ARRAY_SIZE(adv_data),
-			      scan_rsp, ARRAY_SIZE(scan_rsp));
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, adv_data, ARRAY_SIZE(adv_data), scan_rsp,
+			      ARRAY_SIZE(scan_rsp));
 	if (err) {
 		LOG_ERR("bt_le_adv_start failed (%d) -- if -22/-EINVAL, the "
-			"advertising payload is over 31 bytes", err);
+			"advertising payload is over 31 bytes",
+			err);
 		return err;
 	}
 
 	LOG_INF("advertising as %s (scan rsp %zu B of %d)", device_name,
-		bt_data_get_len(scan_rsp, ARRAY_SIZE(scan_rsp)),
-		BT_GAP_ADV_MAX_ADV_DATA_LEN);
+		bt_data_get_len(scan_rsp, ARRAY_SIZE(scan_rsp)), BT_GAP_ADV_MAX_ADV_DATA_LEN);
 	return 0;
 }
 
@@ -308,12 +289,9 @@ static void log_link_params(struct bt_conn *conn, const char *what)
 	 * 30 ms interval is the shape of an explanation, 18400 us against 30000 us
 	 * is arithmetic homework. Timeout is in 10 ms units on the wire.
 	 */
-	LOG_INF("link params %s: interval %u us (%u.%02u ms), latency %u, timeout %u ms",
-		what,
-		info.le.interval_us,
-		info.le.interval_us / 1000U, (info.le.interval_us % 1000U) / 10U,
-		info.le.latency,
-		info.le.timeout * 10U);
+	LOG_INF("link params %s: interval %u us (%u.%02u ms), latency %u, timeout %u ms", what,
+		info.le.interval_us, info.le.interval_us / 1000U,
+		(info.le.interval_us % 1000U) / 10U, info.le.latency, info.le.timeout * 10U);
 }
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -359,8 +337,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
  * deprecated 1.25 ms unit, and re-reading through bt_conn_get_info() gets
  * `interval_us` without a conversion to get wrong.
  */
-static void le_param_updated(struct bt_conn *conn, uint16_t interval,
-			     uint16_t latency, uint16_t timeout)
+static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t latency,
+			     uint16_t timeout)
 {
 	ARG_UNUSED(interval);
 	ARG_UNUSED(latency);
@@ -394,8 +372,8 @@ int sophon_ble_notify(const struct sophon_frame *frame)
 		return -ENOTCONN;
 	}
 
-	err = bt_gatt_notify_uuid(current_conn, &sophon_motion_uuid.uuid,
-				  sophon_svc.attrs, frame, SOPHON_FRAME_SIZE);
+	err = bt_gatt_notify_uuid(current_conn, &sophon_motion_uuid.uuid, sophon_svc.attrs, frame,
+				  SOPHON_FRAME_SIZE);
 
 	/*
 	 * Note what is NOT done here: seq is not rewound or reused on failure.
@@ -425,18 +403,18 @@ int sophon_ble_notify(const struct sophon_frame *frame)
 
 void sophon_stats_pack(const struct sophon_tx_stats *in, uint8_t out[SOPHON_STATS_SIZE])
 {
-	sys_put_le32(in->sent,    &out[0]);
+	sys_put_le32(in->sent, &out[0]);
 	sys_put_le32(in->no_conn, &out[4]);
-	sys_put_le32(in->no_mem,  &out[8]);
-	sys_put_le32(in->other,   &out[12]);
+	sys_put_le32(in->no_mem, &out[8]);
+	sys_put_le32(in->other, &out[12]);
 }
 
 void sophon_link_params_pack(const struct sophon_link_params *in,
 			     uint8_t out[SOPHON_LINK_PARAMS_SIZE])
 {
 	sys_put_le32(in->interval_us, &out[0]);
-	sys_put_le16(in->latency,     &out[4]);
-	sys_put_le16(in->timeout,     &out[6]);
+	sys_put_le16(in->latency, &out[4]);
+	sys_put_le16(in->timeout, &out[6]);
 }
 
 void sophon_ble_battery_notify(void)
@@ -466,14 +444,14 @@ void sophon_ble_battery_notify(void)
 	 * again and the central polls every 60 s regardless. -ENOTCONN with
 	 * nobody subscribed is the normal state of a board.
 	 */
-	(void)bt_gatt_notify_uuid(current_conn, &sophon_battery_uuid.uuid,
-				  sophon_svc.attrs, wire, sizeof(wire));
+	(void)bt_gatt_notify_uuid(current_conn, &sophon_battery_uuid.uuid, sophon_svc.attrs, wire,
+				  sizeof(wire));
 }
 
 void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,
 			 uint8_t out[SOPHON_BATTERY_SIZE])
 {
-	sys_put_le16(mv,    &out[0]);
+	sys_put_le16(mv, &out[0]);
 	sys_put_le16(age_s, &out[2]);
 	out[4] = flags;
 }

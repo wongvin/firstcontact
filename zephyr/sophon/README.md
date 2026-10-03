@@ -86,11 +86,18 @@ through `scripts/build.sh`. That setting is machine-specific as well, carrying a
 absolute home path, which is why `.vscode/` is gitignored.
 
 Formatting follows Zephyr's own style, copied to
-[`zephyr/.clang-format`](../.clang-format):
+[`zephyr/.clang-format`](../.clang-format), and **`src/` is clean under it** (#280):
 
 ```bash
+# check
+"$(xcrun -f clang-format)" --style=file --dry-run --Werror src/*.c src/*.h
+# apply
 "$(xcrun -f clang-format)" --style=file -i src/*.c src/*.h
 ```
+
+Adopting it moved 176 of 1998 lines, and the rebuilt binary was **byte-identical
+apart from the three characters of the build timestamp** — formatting does not
+reach codegen, which is worth knowing before reformatting firmware again.
 
 ## Flash
 

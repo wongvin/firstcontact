@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 
-#include <zephyr/app_version.h>  /* generated from zephyr/sophon/VERSION */
+#include <zephyr/app_version.h> /* generated from zephyr/sophon/VERSION */
 #include <zephyr/sys/util.h>
 
 /*
@@ -66,11 +66,11 @@
  */
 struct sophon_mfg_data {
 	uint16_t company_id;
-	uint8_t  scan_rsp_version;
+	uint8_t scan_rsp_version;
 	uint16_t device_type;
-	uint8_t  hw_version;
-	uint8_t  fw_version_major;
-	uint8_t  fw_version_minor;
+	uint8_t hw_version;
+	uint8_t fw_version_major;
+	uint8_t fw_version_minor;
 } __packed;
 
 BUILD_ASSERT(sizeof(struct sophon_mfg_data) == SOPHON_MFG_DATA_SIZE,

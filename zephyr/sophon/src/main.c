@@ -258,10 +258,8 @@ static void stats_work_handler(struct k_work *work)
 		return;
 	}
 
-	LOG_WRN("tx failures: no-buffer %u (+%u), other %u (+%u); sent %u",
-		now.no_mem, now.no_mem - last.no_mem,
-		now.other, now.other - last.other,
-		now.sent);
+	LOG_WRN("tx failures: no-buffer %u (+%u), other %u (+%u); sent %u", now.no_mem,
+		now.no_mem - last.no_mem, now.other, now.other - last.other, now.sent);
 
 	last = now;
 }
@@ -287,8 +285,8 @@ int main(void)
 	 * question the version cannot -- is this the build I just flashed -- and
 	 * unlike the version it cannot be forgotten.
 	 */
-	LOG_INF("Sophon starting -- fw %s, hw %u, built %s", APP_VERSION_STRING,
-		SOPHON_HW_VERSION, SOPHON_BUILD_TIME);
+	LOG_INF("Sophon starting -- fw %s, hw %u, built %s", APP_VERSION_STRING, SOPHON_HW_VERSION,
+		SOPHON_BUILD_TIME);
 
 	(void)led_init();
 
@@ -326,8 +324,8 @@ int main(void)
 
 	err = sophon_imu_init(imu_sample);
 	if (err) {
-		LOG_WRN("no IMU (%d); falling back to %d ms zero-filled frames",
-			err, FALLBACK_NOTIFY_PERIOD_MS);
+		LOG_WRN("no IMU (%d); falling back to %d ms zero-filled frames", err,
+			FALLBACK_NOTIFY_PERIOD_MS);
 		k_timer_start(&fallback_timer, K_MSEC(FALLBACK_NOTIFY_PERIOD_MS),
 			      K_MSEC(FALLBACK_NOTIFY_PERIOD_MS));
 	}

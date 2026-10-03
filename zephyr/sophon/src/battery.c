@@ -133,8 +133,7 @@ static void sample_work_handler(struct k_work *work)
 	 * instant -- a reading taken on battery and reported after USB was
 	 * plugged in would otherwise be labelled as the charger's.
 	 */
-	uint8_t flags = nrf_power_usbregstatus_vbusdet_get(NRF_POWER)
-		? SOPHON_BATTERY_FLAG_USB : 0;
+	uint8_t flags = nrf_power_usbregstatus_vbusdet_get(NRF_POWER) ? SOPHON_BATTERY_FLAG_USB : 0;
 
 	bool changed;
 
@@ -168,7 +167,9 @@ static void sample_work_handler(struct k_work *work)
 
 	if (!logged) {
 		LOG_INF("battery %u mV%s (first reading)", mv,
-			(flags & SOPHON_BATTERY_FLAG_USB) ? " [USB present -- VBAT net, not necessarily a pack]" : " [on battery]");
+			(flags & SOPHON_BATTERY_FLAG_USB)
+				? " [USB present -- VBAT net, not necessarily a pack]"
+				: " [on battery]");
 		logged = true;
 		last_logged = mv;
 	} else if (abs((int)mv - (int)last_logged) >= LOG_DELTA_MV) {
@@ -269,8 +270,7 @@ void sophon_battery_read(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
  * no safe released state on this board -- see app.overlay. Held ACTIVE (low) for
  * the life of the application.
  */
-static const struct gpio_dt_spec vbatt_enable =
-	GPIO_DT_SPEC_GET(DT_NODELABEL(vbatt_enable), gpios);
+static const struct gpio_dt_spec vbatt_enable = GPIO_DT_SPEC_GET(DT_NODELABEL(vbatt_enable), gpios);
 
 int sophon_battery_init(void)
 {
