@@ -231,3 +231,5 @@ GeneratedSecrets.swift
 # build tree by Zephyr convention, never source.
 zephyr/*/build/
 zephyr/*/build-*/
+# clangd's compile database, symlinked from a build dir -- see zephyr/sophon/README.md
+zephyr/*/compile_commands.json

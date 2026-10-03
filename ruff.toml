@@ -1,0 +1,41 @@
+# Ruff configuration (#279). Repo-wide, because the Python here lives in two
+# unrelated places: zephyr/sophon/scripts/ (build and flash tooling) and
+# api/server/ (the local FastAPI backend). Neither owns the other, so the config
+# sits at the root rather than in either manifest.
+#
+# Run with `ruff check .` and `ruff format .` from the repo root.
+
+line-length = 100
+
+exclude = [
+    "zephyr/*/build",
+    "zephyr/*/build-*",
+    "webapp/node_modules",
+]
+
+[lint]
+# Explicit rather than inherited. Ruff's default set has grown between releases,
+# so pinning what is enabled keeps a `ruff` upgrade from turning into an
+# unexplained wall of new findings in an unrelated commit.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes -- unused imports, undefined names
+    "I",    # isort -- import ordering
+    "UP",   # pyupgrade -- deprecated idioms for the target version
+    "B",    # bugbear -- mutable defaults, shadowed loop vars
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff's own
+]
+
+ignore = [
+    # The scripts print with explicit line breaks for terminal output; E501 is
+    # already covered by line-length above for code.
+    "E741",  # ambiguous variable name -- `l` is not used here, but the rule
+             # fires on single-letter names that are clear in context
+]
+
+[lint.per-file-ignores]
+# kicad-netlist.py parses S-expressions with short-lived locals whose names match
+# the schematic's own vocabulary; renaming them to satisfy a linter would make
+# the parser harder to check against the file format it reads.
+"zephyr/sophon/scripts/kicad-netlist.py" = ["E741"]

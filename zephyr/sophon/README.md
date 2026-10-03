@@ -59,6 +59,39 @@ SOPHON_BOARD=xiao_ble/nrf52840 scripts/build.sh
 
 Requires Zephyr **>= 4.4**; `CMakeLists.txt` fails at configure time otherwise.
 
+### Editor support — clangd, not CMake Tools (#279)
+
+A build already writes `compile_commands.json`, so C completion and
+go-to-definition need nothing installed — `clangd` ships with Xcode
+(`xcrun -f clangd`). Point it at a build:
+
+```bash
+ln -sf build-mcuboot/sophon/compile_commands.json compile_commands.json
+#  or: build/compile_commands.json for the UF2 build
+```
+
+The symlink is gitignored; it names whichever build you are working in.
+
+[`.clangd`](.clangd) drops three GCC-only flags that Apple clang does not
+recognise. Without it every file opens with three driver errors before any code
+is analysed, which looks like a broken setup and is not. Verified with
+`clangd --check=src/ble.c`: no driver errors and **no diagnostics about this
+code**. `--check` still reports ~10 "errors" from clangd's own refactoring
+machinery failing on Zephyr macros — those are not about the source.
+
+**Do not point the VS Code CMake Tools extension at this directory.** It writes a
+`cmake.sourceDirectory` into `.vscode/settings.json` and then tries to configure
+the app standalone, which cannot work: `west` can only resolve the workspace
+through `scripts/build.sh`. That setting is machine-specific as well, carrying an
+absolute home path, which is why `.vscode/` is gitignored.
+
+Formatting follows Zephyr's own style, copied to
+[`zephyr/.clang-format`](../.clang-format):
+
+```bash
+"$(xcrun -f clang-format)" --style=file -i src/*.c src/*.h
+```
+
 ## Flash
 
 Double-tap the reset button — a UF2 volume mounts — then:

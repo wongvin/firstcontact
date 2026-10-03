@@ -57,6 +57,70 @@ The wire contract between them is
 implement and which now has three implementers: the firmware, the app's decoder,
 and the simulator's encoder.
 
+## Getting set up
+
+Nothing here needs all of it — each target stands alone. Install what the target
+you are touching needs.
+
+### Everything
+
+```bash
+brew bundle          # from the repo root; see Brewfile for what and why
+```
+
+Four tools: `shellcheck`, `tio`, `ruff`, `swiftlint`. Deliberately *not* in there
+are `clang-format` and `clangd`, which ship with Xcode (`xcrun -f clang-format`)
+and cost ~1.5 GB to duplicate via `llvm`; `jq`, which macOS ships at
+`/usr/bin/jq`; and `arm-zephyr-eabi-gdb`, which comes with the Zephyr SDK.
+
+### [`webapp/`](webapp/) — Node
+
+```bash
+cd webapp && npm install && npm run dev
+```
+
+`eslint` and `typescript` are devDependencies, so `npm run lint` needs no global
+install.
+
+### [`api/`](api/) — Python
+
+```bash
+pip install -r api/server/requirements.txt
+```
+
+### [`ios/`](ios/) — Xcode
+
+Xcode, and a free Apple ID for signing. Device setup — trusting the Mac,
+Developer Mode, and the ~7-day free-signing expiry — is in
+[ios/CLAUDE.md](ios/CLAUDE.md).
+
+### [`zephyr/`](zephyr/) — the one that is not a package manager away
+
+The firmware builds against a **shared Zephyr workspace at `~/zephyrproject`**
+and the **Zephyr SDK**, neither of which this repo vendors or installs. Follow
+Zephyr's [getting started
+guide](https://docs.zephyrproject.org/latest/develop/getting_started/index.html),
+then build with the wrapper script — never bare `west`:
+
+```bash
+zephyr/sophon/scripts/build.sh
+```
+
+Two things that will bite otherwise, both explained in
+[zephyr/CLAUDE.md](zephyr/CLAUDE.md) rather than repeated here:
+
+- **`west` cannot run from inside this repo.** It walks *up* from `$PWD` looking
+  for a `.west/` marker and finds nothing. The wrapper exports `ZEPHYR_BASE` and
+  activates the workspace venv, which is what makes a freestanding app buildable.
+- **This repo does not pin the Zephyr revision.** The firmware follows whatever
+  `~/zephyrproject` happens to be at, so a `west update` elsewhere can change its
+  dependencies with no record here. `CMakeLists.txt` guards a minimum of **4.4**
+  and fails at configure time below that — but only on the version, not on
+  anything else that moved.
+
+Flashing over SWD additionally needs a CMSIS-DAP probe; OpenOCD comes with the
+SDK. See [zephyr/sophon/BOOTLOADER.md](zephyr/sophon/BOOTLOADER.md).
+
 ## Conventions
 
 Repo-wide conventions — issue tracking, branching, commit hygiene — are in

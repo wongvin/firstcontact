@@ -163,6 +163,34 @@ stopping the core strands a connected BLE link until the reset.
 A healthy connection reports `SWD DPIDR 0x2ba01477` and
 `Cortex-M4 r0p1 processor detected`.
 
+### There is a debugger, and it has never been used (#279)
+
+Every OpenOCD invocation in this document prints:
+
+```
+Info : starting gdb server for nrf52.cpu on 3333
+```
+
+and the Zephyr SDK ships `arm-zephyr-eabi-gdb`. So source-level debugging has
+been available throughout #253 and #277 and was not used once:
+
+```bash
+~/zephyr-sdk-1.0.1/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb \
+    build-mcuboot/sophon/zephyr/zephyr.elf \
+    -ex "target extended-remote :3333"
+```
+
+Worth stating because of what was done instead. Asked how long MCUboot took to
+boot, the answer reached for was sampling the program counter by hand over SWD —
+which halts the CPU, perturbs the measurement, and strands the BLE link. A
+breakpoint through the GDB server halts the core too, so it carries the **same**
+hazard and the same rule: finish with `reset run`, never a bare `resume`. What it
+does buy is symbols, a backtrace and a source line instead of a bare address.
+
+`arm-zephyr-eabi-addr2line` is the cheaper tool for the common case — turning a
+fault address from the console into a file and line without touching the target
+at all.
+
 ### APPROTECT
 
 `UICR APPROTECT` reads `0xFFFFFFFF` and `CTRL-AP APPROTECTSTATUS` reads `1`:
