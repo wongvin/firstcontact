@@ -1,0 +1,16 @@
+# clangd configuration for the firmware (#279).
+#
+# The build is GCC (arm-zephyr-eabi-gcc from the Zephyr SDK) while clangd is
+# Apple clang from Xcode, so a handful of GCC-only flags in compile_commands.json
+# are not understood and each one is reported as an error before any code is
+# analysed. They affect codegen, not parsing, so dropping them for the indexer
+# changes nothing about what it sees.
+#
+# Verified: with these removed, `clangd --check=src/ble.c` reports no driver
+# errors. The remaining "errors" from --check are clangd's own refactoring
+# machinery failing on Zephyr macros, not diagnostics about this code.
+CompileFlags:
+  Remove:
+    - -fno-printf-return-value
+    - -mfp16-format=*
+    - -fno-reorder-functions

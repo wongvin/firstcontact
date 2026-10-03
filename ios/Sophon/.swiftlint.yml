@@ -1,0 +1,61 @@
+# SwiftLint configuration for the Sophon app (#279).
+#
+# Every deviation from the defaults below is justified against code that exists
+# here. The defaults produced 72 violations on a codebase that is internally
+# consistent; 45 of those were the defaults disagreeing with deliberate choices,
+# not defects. Tuning them is what makes the remaining output signal.
+#
+# NOTE ON `included:` -- it resolves relative to THIS FILE, not the working
+# directory. A wrong path does not error under `--quiet`: SwiftLint reports
+# "No lintable files found" and then zero violations, which reads exactly like a
+# clean run. That cost a wrong measurement while writing this file, and it is the
+# same failure as a shell library with no shebang reporting no problems because
+# it was never analysed. Verify with `swiftlint lint` (no --quiet) and check the
+# file count in the "Done linting!" line.
+
+included:
+  - Sophon
+
+excluded:
+  - Sophon/Preview Content
+
+# ax/ay/az/gx/gy/gz are the six IMU axis components, named to match PROTOCOL.md
+# and the firmware's frame.h. `tx` is transmit, `lo`/`hi` are range bounds, `ts`
+# is a timestamp. All are two characters, all are the clearest available name,
+# and renaming them to satisfy a length floor would make the wire contract harder
+# to follow across the two halves of this project.
+identifier_name:
+  min_length:
+    warning: 2
+  allowed_symbols: ["_"]
+
+# The code is already disciplined -- p95 is 82 characters and p99 is 97 -- so the
+# default 120 costs nothing and is kept. The violations that remain are all
+# single-line user-facing copy inside Text(...), which is a real and separate
+# question about how that copy is laid out; it is NOT silenced here by inflating
+# the limit until the rule stops meaning anything.
+line_length:
+  warning: 120
+  error: 300
+  ignores_urls: true
+  ignores_comments: true
+
+# A SwiftUI view file legitimately runs long: ContentView is 742 lines and
+# SophonHub 892, and both are cohesive rather than grab-bags. 400 is written for
+# a different shape of code.
+file_length:
+  warning: 900
+  error: 1200
+
+type_body_length:
+  warning: 500
+  error: 800
+
+function_body_length:
+  warning: 80
+  error: 150
+
+disabled_rules:
+  # Trailing commas in multi-line literals keep diffs to one line when an element
+  # is appended. A deliberate style here, not an oversight.
+  - trailing_comma
