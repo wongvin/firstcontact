@@ -135,6 +135,13 @@ Two things that will bite otherwise, both explained in
 Flashing over SWD additionally needs a CMSIS-DAP probe; OpenOCD comes with the
 SDK. See [zephyr/sophon/BOOTLOADER.md](zephyr/sophon/BOOTLOADER.md).
 
+Board artifacts that **cannot be regenerated** live outside the repo in
+**`~/.sophon/`** — `backups/` for full flash and UICR images, `keys/` for firmware
+signing. A fresh clone has neither, and neither can be recovered from this
+repository: a backup is the only way back for a board whose bootloader is gone, and
+the signing key is the only thing that can produce an image its bootloader will
+accept. `~/.sophon/README.md` explains the contents on its own terms.
+
 ## Conventions
 
 Repo-wide conventions — issue tracking, branching, commit hygiene — are in

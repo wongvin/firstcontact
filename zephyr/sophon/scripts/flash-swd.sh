@@ -187,10 +187,9 @@ if ! oocd_run "erase and write" \
   echo "       a re-run is the whole recovery in most cases." >&2
   echo "       If the core is wedged: openocd ... -c 'init; nrf52_recover; exit'," >&2
   echo "       then re-run. See BOOTLOADER.md." >&2
-  echo "       NOTE the backup in ~/sophon-flash-backups/ predates the MCUboot" >&2
-  echo "       migration -- restoring it returns this board to the Adafruit UF2" >&2
-  echo "       bootloader, not to its pre-flash MCUboot state. There is no backup" >&2
-  echo "       of that state (#270)." >&2
+  echo "       Backups are in ~/.sophon/backups/, one pair per era. Restore the" >&2
+  echo "       _mcuboot_ pair, NOT the _uf2-sdv7_ one -- the latter predates the" >&2
+  echo "       migration and returns this board to the Adafruit UF2 bootloader." >&2
   exit 1
 fi
 

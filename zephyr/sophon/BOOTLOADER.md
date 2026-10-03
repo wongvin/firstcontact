@@ -227,28 +227,48 @@ Both halves matter. UICR holds `NRFFW[0]` (the bootloader address the MBR jumps
 to) and `PSELRESET` (what makes the reset button work); a mass erase clears them,
 and without the backup the board has no bootloader pointer and a dead K1.
 
-Backups live in `~/sophon-flash-backups/` — **outside the repo**, because a
-1 MB image derived from a CC BY-SA design does not belong in a public repo with
-no LICENSE. That also means they are unreplicated; losing them and the probe
-together would leave a board with no bootloader and no known-good image.
+Backups live in **`~/.sophon/backups/`** — outside the repo, because a 1 MB image
+derived from a CC BY-SA design does not belong in a public repo with no LICENSE.
+That also means they are unreplicated; losing them and the probe together would
+leave a board with no bootloader and no known-good image.
 
-**The only backup that exists predates the MCUboot migration.** Verified against
-the file itself:
+`~/.sophon/` holds everything about this board that cannot be regenerated —
+`backups/` and, from #274, `keys/` for the firmware signing key. One directory
+because both carry the same consequence: lose the backup and a bricked board stays
+bricked, lose the key and no image can ever be signed for the bootloader a board
+already carries. Its own `README.md` explains the contents to someone who finds it
+without this repo (#287).
+
+**There are two backups of `Sophon-86F0`, one per era, and restoring the wrong one
+silently undoes the migration.** The era is in the filename for exactly this
+reason:
 
 ```
-Sophon-86F0_20260908T111618Z_flash-1MB.bin   (8 Sep; MCUboot was flashed 9 Sep)
+Sophon-86F0_20260908T111618Z_uf2-sdv7_{flash-1MB,uicr-4KB}.bin
   SoftDevice info magic @0x3004: 0x51b1e5db   <- SoftDevice present
   word @0xC000 (MCUboot slot0): 0x1dc0482d    <- not an MCUboot image header
   0xF4000 (Adafruit UF2 region): not blank    <- UF2 bootloader present
+
+Sophon-86F0_20261002T031412Z_mcuboot_{flash-1MB,uicr-4KB}.bin
+  SoftDevice info magic @0x3004: 0xf3bf8811   <- absent, as it must be
+  word @0xC000 (MCUboot slot0): 0x96f3b83d    <- MCUboot image header
+  0xF4000 (Adafruit UF2 region): blank
 ```
 
-So restoring it produces a board that boots — **on the Adafruit UF2 bootloader,
-with the migration undone**. That is a genuine recovery from a brick, and it is
-*not* a way back to a working MCUboot board. No backup of that state exists.
+Restoring the `uf2-sdv7` pair produces a board that boots — **on the Adafruit UF2
+bootloader, with the migration undone**. A genuine recovery from a brick, and not
+a way back to a working MCUboot board. The two differ in **371,718 bytes, 35.4% of
+flash**.
 
 It matters most where the failure is a signing-key change (#274): the thing you
-would want back is the previous MCUboot pair, and this file is not it. Taking a
-current backup belongs to #270, which owns board backups.
+want back is the previous MCUboot pair, and only the `mcuboot` files are that.
+
+**The UICR halves are byte-identical across both eras** — the migration never
+touched UICR. `NRFFW[0]` still reads `0x000F4000`, pointing at a region that is now
+blank; harmless, because MCUboot runs from `0x0` and the MBR that would read that
+pointer was overwritten, but it is a stale value that reads like a fact. That also
+halves #270's open question about whether a backup is portable between boards:
+only the flash image is in doubt.
 
 ### Verify with `cmp`, not `verify_image`
 
