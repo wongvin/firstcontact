@@ -34,6 +34,11 @@ brew "tio"
 # as api/server/, so it does not belong in either one's manifest.
 brew "ruff"
 
+# Git hook runner (#285). Wired to clang-format for zephyr/sophon/src/ only --
+# the one target that is actually clean. Hooks are per-clone and NOT automatic:
+# `pre-commit install` once, or a fresh clone has none. See .pre-commit-config.yaml.
+brew "pre-commit"
+
 # Swift linter for ios/. Complements the swift-reviewer agent rather than
 # overlapping it: that agent catches observability, actor isolation and Core
 # Bluetooth semantics; this catches the mechanical layer beneath.

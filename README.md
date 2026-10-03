@@ -68,7 +68,8 @@ you are touching needs.
 brew bundle          # from the repo root; see Brewfile for what and why
 ```
 
-Four tools: `shellcheck`, `tio`, `ruff`, `swiftlint`. Deliberately *not* in there
+Five tools: `shellcheck`, `tio`, `ruff`, `swiftlint`, `pre-commit`. Deliberately
+*not* in there
 are `clang-format` and `clangd`, which ship with Xcode (`xcrun -f clang-format`)
 and cost ~1.5 GB to duplicate via `llvm`; `jq`, which macOS ships at
 `/usr/bin/jq`; and `arm-zephyr-eabi-gdb`, which comes with the Zephyr SDK.
@@ -81,6 +82,19 @@ cd webapp && npm install && npm run dev
 
 `eslint` and `typescript` are devDependencies, so `npm run lint` needs no global
 install.
+
+### Git hooks
+
+```bash
+pre-commit install        # once per clone -- a fresh clone has NO hooks until this
+pre-commit run --all-files
+```
+
+Currently one hook: `clang-format` over `zephyr/sophon/src/`, which fails the
+commit and reformats in place, so nothing lands unreviewed — re-stage and commit
+again. Scope is deliberately narrow; see
+[`.pre-commit-config.yaml`](.pre-commit-config.yaml) for why `ios/` and
+`api/server/` are not wired up yet, and why `clangd` is not a hook at all.
 
 ### [`api/`](api/) — Python
 

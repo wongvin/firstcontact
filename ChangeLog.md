@@ -2,6 +2,15 @@
 
 ## 2026-10-03
 
+### build: pre-commit, wired to clang-format (#285)
+
+- #279 deferred `pre-commit` on an explicit condition — wiring hooks to tools that currently fail is how `--no-verify` becomes muscle memory. #280 satisfied that condition for `zephyr/sophon/`, so the hook is scoped to exactly that and nothing else: `ios/` still has 30 swiftlint findings (#281) and `api/server/` 30 ruff findings (#282).
+- **`clangd` was asked for and is not a candidate.** It is a language server, not a linter — `--check` exists to debug clangd's own configuration and rebuilds a preamble per file. Measured here: **22 s for `battery.c`**, the smallest `.c` in the tree, and ~73 s for `ble.c`, against **under 1 s for `clang-format` across all 11 files**. The real C static analyser is `clang-tidy`, which is not in the Xcode toolchain and would mean the ~1.5 GB `llvm` install #279 avoided — a separate decision, and the Zephyr build's own `-Wall` already covers much of the same ground. clangd keeps the editor job #279 gave it.
+- **A local hook, not `pre-commit/mirrors-clang-format`**, so the hook, the editor and the command in `zephyr/sophon/README.md` all resolve to the same binary — the one Xcode ships. A pinned mirror would be a second clang-format version, and the first time the two disagreed the hook would rewrite what the editor had just formatted.
+- **Verified failing, not just passing.** A hook that has only ever passed is indistinguishable from one that never ran — the `common.sh` lesson from #279. A deliberately misformatted line was added to `battery.h` and a real `git commit` attempted: the hook **refused the commit**, reformatted the file in place, and `git log` stayed put. Then `--all-files` on the restored tree: passed.
+- Formatting happens **in place**. `pre-commit` aborts the commit when a hook modifies files, so nothing lands unreviewed; the cost is a `git add -u` rather than remembering a command.
+- `pre-commit install` is per-clone and not automatic — stated in `README.md` under Getting set up, because a fresh clone silently has no hooks at all.
+
 ### style: adopt Zephyr's clang-format in the firmware (#280)
 
 - #279 added `zephyr/.clang-format` and deliberately did not apply it, which left a style config nothing conformed to — a check that always reports something, which is the thing this repo keeps arguing against. Applied now: **176 of 1998 lines across 8 of 11 files**, almost all of it rejoining lines hand-wrapped at 80 columns to Zephyr's 100, plus `#define` value alignment. `ident.c`, `ident.h` and `imu.h` were already conformant.

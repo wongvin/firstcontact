@@ -1,0 +1,34 @@
+# Pre-commit hooks (#285). Install them once per clone -- they are NOT automatic:
+#
+#     pre-commit install
+#
+# A fresh clone has no hooks until that is run. Run them over everything with
+# `pre-commit run --all-files`.
+#
+# SCOPE IS DELIBERATE. Only what is actually clean is wired up. zephyr/sophon/ is
+# clang-format, ruff and shellcheck clean as of #280; ios/ has 30 outstanding
+# swiftlint findings (#281) and api/server/ has 30 ruff findings (#282). Adding
+# hooks that fail on arrival is how `--no-verify` becomes muscle memory, which is
+# the reason #279 deferred this until now.
+#
+# NOT HERE: clangd. It is a language server, not a linter -- `--check` exists to
+# debug clangd's own configuration and rebuilds a preamble per file. Measured on
+# this repo: 22 s for battery.c, the smallest .c in the tree, against under 1 s
+# for clang-format across all 11 files. The real C static analyser is clang-tidy,
+# which is not in the Xcode toolchain and would mean installing llvm (~1.5 GB) --
+# a separate decision, and the Zephyr build's own -Wall already covers much of it.
+
+repos:
+  - repo: local
+    hooks:
+      # A LOCAL hook rather than pre-commit/mirrors-clang-format, so the hook, the
+      # editor and the command in zephyr/sophon/README.md all resolve to the SAME
+      # binary -- the one Xcode ships. A pinned mirror would be a second
+      # clang-format version, and the first time the two disagreed the hook would
+      # be rewriting what the editor had just formatted.
+      - id: clang-format-firmware
+        name: clang-format (firmware C)
+        entry: bash -c '"$(xcrun -f clang-format)" --style=file -i "$@"' --
+        language: system
+        files: ^zephyr/sophon/src/.*\.(c|h)$
+        description: Formats to zephyr/.clang-format, Zephyr's own style.
