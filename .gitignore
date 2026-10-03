@@ -233,3 +233,17 @@ zephyr/*/build/
 zephyr/*/build-*/
 # clangd's compile database, symlinked from a build dir -- see zephyr/sophon/README.md
 zephyr/*/compile_commands.json
+
+# Signing keys must never reach this public repo (#274). The real ones live in
+# ~/.sophon/keys/ and are never copied here -- this is the guard against a stray
+# copy made while debugging, not the primary control.
+*.pem
+*.p8
+*.key
+
+# ...with one deliberate exception. A PUBLIC key is not a secret, and committing
+# one records which trust anchor a given bootloader build carries -- which is how
+# the demo-to-project transition stays auditable in git history. It must carry
+# `.pub.pem` to be committable at all, so a private key cannot reach the repo by
+# being dropped in the right place with the wrong name.
+!*.pub.pem
