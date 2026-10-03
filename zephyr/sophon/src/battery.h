@@ -46,7 +46,7 @@
  * least one full interval, so the mean straddles both the transmit bursts and
  * the quiet between them.
  */
-#define SOPHON_BATTERY_SAMPLES 8
+#define SOPHON_BATTERY_SAMPLES       8
 #define SOPHON_BATTERY_SAMPLE_GAP_MS 10
 
 /*

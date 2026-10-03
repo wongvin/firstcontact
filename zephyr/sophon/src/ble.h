@@ -36,10 +36,10 @@ int sophon_ble_notify(const struct sophon_frame *frame);
  * Counters are cumulative since boot and never reset.
  */
 struct sophon_tx_stats {
-	uint32_t sent;     /* accepted by the stack */
-	uint32_t no_conn;  /* -ENOTCONN: nobody subscribed. Expected, not a fault. */
-	uint32_t no_mem;   /* -ENOMEM: TX buffers full. The interesting one. */
-	uint32_t other;    /* anything else the stack returned */
+	uint32_t sent;    /* accepted by the stack */
+	uint32_t no_conn; /* -ENOTCONN: nobody subscribed. Expected, not a fault. */
+	uint32_t no_mem;  /* -ENOMEM: TX buffers full. The interesting one. */
+	uint32_t other;   /* anything else the stack returned */
 };
 
 void sophon_ble_tx_stats(struct sophon_tx_stats *out);

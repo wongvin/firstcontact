@@ -2,6 +2,16 @@
 
 ## 2026-10-03
 
+### style: adopt Zephyr's clang-format in the firmware (#280)
+
+- #279 added `zephyr/.clang-format` and deliberately did not apply it, which left a style config nothing conformed to — a check that always reports something, which is the thing this repo keeps arguing against. Applied now: **176 of 1998 lines across 8 of 11 files**, almost all of it rejoining lines hand-wrapped at 80 columns to Zephyr's 100, plus `#define` value alignment. `ident.c`, `ident.h` and `imu.h` were already conformant.
+- **Comments were untouched**, which was the real risk in sources this heavily annotated. Verified by filtering the diff for changes on comment lines: none.
+- **The rebuilt binary is byte-identical apart from the build timestamp.** Same size, 169,160 bytes, and exactly **3 differing bytes** — `04:00:58Z` against `04:02:05Z`, inside the generated timestamp string. Formatting does not reach codegen, and that is now a measurement rather than an assumption. The check is cheap and worth repeating before any future mechanical pass.
+- One line came out better than it went in: a 150-character `LOG_INF` ternary in `battery.c` is now split across three lines with the two branches aligned.
+- **`kicad-netlist.py` ruff findings resolved**, one of them a real defect — `import re` was dead. `try/except/pass` became `contextlib.suppress(ValueError)` with a comment saying *which* atoms are expected to be non-numeric; `zip(xs, xs[1:])` became `itertools.pairwise(xs)`, which is the same thing and carries no `strict=` question; and the file handle in `main()` is now closed, which it never was.
+- **The parser was validated against its own documented known answer**, not just the linter: `VBAT — R16 — AIN7 — R17 — P0.14` still resolves to `R16 pin 2, R17 pin 1, U1 P0.31/AIN7` on net `P0.31_AIN7_BAT`, with `R16 = 1M_1%` and `R17 = 499k_1%` — exactly what `HARDWARE.md` records. Its docstring asks for that check on any change; this is the first time it has been made.
+- `zephyr/.clang-format` and `zephyr/sophon/README.md` updated: both said the sources did not conform, and both now carry the `--dry-run --Werror` command that proves they do.
+
 ### docs: development prerequisites and a Brewfile (#279)
 
 - Nothing told a new clone what to install. The root `README.md` had Projects, Sophon and Conventions and **no setup section**, while the largest prerequisite in the repo — a shared Zephyr workspace at `~/zephyrproject` plus the SDK, without which no firmware builds — lived only in `zephyr/CLAUDE.md`, a file written as agent instructions. A human reading READMEs would never have reached it.

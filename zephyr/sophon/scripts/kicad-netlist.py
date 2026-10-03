@@ -45,11 +45,11 @@ The schematics this parses may be licensed; Seeed's XIAO designs are CC BY-SA
 on, which is why no generated netlist is committed alongside it.
 """
 
+import contextlib
+import itertools
 import math
-import re
 import sys
 from collections import defaultdict
-
 
 # --- S-expression reader -------------------------------------------------
 
@@ -126,10 +126,10 @@ def nums(node, start=1, count=3):
     out = []
     for c in node[start : start + count]:
         if isinstance(c, tuple):
-            try:
+            # Atoms that are not numbers are skipped: an `at` node carries a
+            # rotation that may be absent, and `xy` carries only coordinates.
+            with contextlib.suppress(ValueError):
                 out.append(float(c[1]))
-            except ValueError:
-                pass
     return out
 
 
@@ -197,7 +197,7 @@ def build_nets(root):
     for wire in kids(root, "wire"):
         for pts in kids(wire, "pts"):
             xs = [tuple(round(v, 3) for v in nums(p, 1, 2)) for p in kids(pts, "xy")]
-            edges += list(zip(xs, xs[1:]))
+            edges += list(itertools.pairwise(xs))
 
     labels = defaultdict(list)
     for kind in ("label", "global_label", "hierarchical_label"):
@@ -283,7 +283,8 @@ def main():
 
     want_values = "--values" in sys.argv
     filters = [a for a in sys.argv[2:] if a != "--values"]
-    text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+    with open(sys.argv[1], encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
     root = parse(tokenize(text))[0]
 
     if want_values:

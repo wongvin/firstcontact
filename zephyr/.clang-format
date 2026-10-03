@@ -11,10 +11,14 @@
 #     xcrun -f clang-format
 #     "$(xcrun -f clang-format)" -i zephyr/sophon/src/*.c
 #
-# NOTE: the existing sources do not yet conform -- 176 of 1998 lines differ,
-# almost all of it rejoining lines hand-wrapped at 80 columns to Zephyr's 100.
-# Comments are untouched by the reformat. Tracked separately rather than mixed
-# into the commit that added this file.
+# zephyr/sophon/src/ IS clean under this config (#280). Check with:
+#
+#     "$(xcrun -f clang-format)" --style=file --dry-run --Werror src/*.c src/*.h
+#
+# The adopting reformat moved 176 of 1998 lines, almost all of it rejoining lines
+# hand-wrapped at 80 columns to Zephyr's 100. Comments were untouched, and the
+# built binary was byte-identical apart from the three characters of the build
+# timestamp -- so the style is enforceable here, not aspirational.
 #
 # SPDX-License-Identifier: Apache-2.0
 #

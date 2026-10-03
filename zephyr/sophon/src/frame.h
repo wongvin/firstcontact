@@ -14,12 +14,12 @@
 #define SOPHON_FRAME_SIZE 18
 
 struct sophon_frame {
-	uint16_t seq;   /* wraps at 65535 */
-	uint32_t t_ms;  /* ms since boot, this board only */
-	int16_t ax;     /* milli-g */
+	uint16_t seq;  /* wraps at 65535 */
+	uint32_t t_ms; /* ms since boot, this board only */
+	int16_t ax;    /* milli-g */
 	int16_t ay;
 	int16_t az;
-	int16_t gx;     /* centi-deg/s */
+	int16_t gx; /* centi-deg/s */
 	int16_t gy;
 	int16_t gz;
 } __packed;
