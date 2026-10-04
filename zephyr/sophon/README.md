@@ -109,6 +109,7 @@ SOPHON_BOOT=mcuboot scripts/build.sh  # MCUboot via sysbuild
 
 scripts/flash.sh                      # UF2 boards
 scripts/flash-swd.sh                  # MCUboot boards, over a CMSIS-DAP probe
+scripts/flash-ota.sh                  # MCUboot boards, over the air (#271)
 ```
 
 **The boards have diverged**: `Sophon-86F0` runs MCUboot and is flashed over

@@ -15,6 +15,10 @@
 #include "ident.h"
 #include "version.h"
 
+#if defined(CONFIG_MCUBOOT_IMG_MANAGER)
+#include <zephyr/dfu/mcuboot.h>
+#endif
+
 LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
 
 /*
@@ -363,6 +367,84 @@ bool sophon_ble_subscribed(void)
 	return motion_subscribed;
 }
 
+#if defined(CONFIG_MCUBOOT_IMG_MANAGER)
+/*
+ * Image confirmation policy (#271).
+ *
+ * MCUboot's rule is fixed and dumb: if `image_ok` is unset at the next reset,
+ * swap back. ALL of the judgement lives in deciding when to write that byte, so
+ * this short function -- not the SMP transport -- is the rollback feature.
+ *
+ * The line drawn here is THE FIRST FRAME ACTUALLY DELIVERED to a subscribed
+ * central. That is the one thing this board exists to do, done once, and it is
+ * the strongest evidence available locally:
+ *
+ *   hard fault / boot loop       caught -- never reaches this point
+ *   bt_enable() fails            caught -- nothing can ever subscribe
+ *   advertising never starts     caught -- likewise
+ *   GATT table wrong             caught -- subscription impossible
+ *   IMU absent                   NOT a failure, deliberately: main.c documents
+ *                                the zero-frame fallback as intended behaviour
+ *   frame contents wrong         NOT caught -- the board cannot tell, and no
+ *                                local policy can
+ *
+ * Confirming at boot instead would make rollback nominal; confirming on a timer
+ * would infer health from the absence of a crash.
+ *
+ * The consequence is deliberate: because the DFU client is not the Sophon app,
+ * an update is NOT permanent until someone reconnects with the app and sees a
+ * frame. A board updated and then left alone reverts at its next reset. That
+ * turns human verification into a required step rather than an optional one.
+ *
+ * Deferred to a work item rather than called inline. This runs on the system
+ * work queue at ~54 Hz, and boot_write_img_confirmed() writes flash -- which on
+ * this part is radio-synchronised and can take tens of milliseconds. Deferring
+ * keeps the frame that triggered it from paying for it.
+ */
+static void confirm_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	int err = boot_write_img_confirmed();
+
+	if (err) {
+		LOG_ERR("image confirm FAILED (%d) -- this build reverts on the next reset", err);
+		return;
+	}
+
+	LOG_INF("image confirmed -- this build is now permanent");
+}
+
+static K_WORK_DEFINE(confirm_work, confirm_work_handler);
+
+static void maybe_confirm_image(void)
+{
+	static bool considered;
+
+	if (considered) {
+		return;
+	}
+	considered = true;
+
+	/*
+	 * The normal case. A directly-flashed image reports confirmed because
+	 * nothing ever marked it for test, so this short-circuits every boot
+	 * that did not arrive by swap -- and avoids rewriting a trailer that
+	 * already says what we want it to say.
+	 */
+	if (boot_is_img_confirmed()) {
+		return;
+	}
+
+	LOG_INF("running an unconfirmed image -- confirming on first delivered frame");
+	k_work_submit(&confirm_work);
+}
+#else
+static inline void maybe_confirm_image(void)
+{
+}
+#endif /* CONFIG_MCUBOOT_IMG_MANAGER */
+
 int sophon_ble_notify(const struct sophon_frame *frame)
 {
 	int err;
@@ -386,6 +468,8 @@ int sophon_ble_notify(const struct sophon_frame *frame)
 	switch (err) {
 	case 0:
 		tx_stats.sent++;
+		/* Delivered, not merely attempted -- see maybe_confirm_image(). */
+		maybe_confirm_image();
 		break;
 	case -ENOMEM:
 		tx_stats.no_mem++;

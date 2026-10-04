@@ -506,6 +506,46 @@ this rule is the **opposite** of #231's, deliberately: showing wrong motion as
 good is worse than showing none, while hiding a working board is worse than
 showing it unlabelled.
 
+## Firmware update — MCUmgr SMP over BLE (#271)
+
+A second GATT service is present and **not advertised**: MCUmgr's SMP, service
+UUID `8d53dc1d-1db7-4cd3-868b-8a527460aa84`, one characteristic that is
+write-without-response plus notify.
+
+**Not advertised is deliberate and has a consequence.** The advertisement is at
+21 of 31 bytes and the scan response at 26 of 31; a 128-bit UUID costs 18 bytes
+serialised and does not fit without giving up something #230 put there on
+purpose. So a board advertises only `c6560001-…`, and SMP is discovered after
+connecting.
+
+A client that **connects by address** — `smpmgr`, and `scripts/flash-ota.sh`
+which wraps it — is unaffected. A client that **scans for the SMP service UUID**,
+which is how nRF Connect Device Manager filters, may never list the board at all
+even though SMP works perfectly over a connection. Unconfirmed from the app side;
+recorded so it is not mistaken for a broken transport.
+
+### It costs one connection, and there is only one
+
+`CONFIG_BT_MAX_CONN=1`. The DFU client and the app cannot both hold the board, a
+connected board does not advertise, and an update therefore requires the app to
+be **force-quit** — backgrounded is not enough, because it reclaims the link in
+the gap between the upload finishing and the next command. Studied in #291.
+
+### Measured
+
+| | |
+|---|---|
+| 190 KB upload at ATT MTU 23 | **~55 s** |
+| swap on reset | ~20 s |
+| full scripted cycle | ~2 min |
+
+**The ATT MTU stays at 23.** Raising it to 247 with DLE is worth roughly 4–6× by
+the arithmetic in #271, and the measurement matched that model closely enough to
+trust it — but a sub-minute upload is acceptable for an occasional update, and
+the raise would cost RAM and change the negotiated value the app displays. The
+18-byte frame is unaffected either way: it is one radio packet at a 27-byte
+payload limit and still one at 251.
+
 ## Security
 
 **No pairing.** `CONFIG_BT_SMP` is off, the link is unencrypted, and the
@@ -516,6 +556,31 @@ its keys while the phone still believes it is bonded, which requires a manual
 
 Full reasoning, and the shape of the change if it is ever wanted, is in
 UPDATED-PLAN.md.
+
+### The management transport is unauthenticated too (#271)
+
+`CONFIG_MCUMGR_TRANSPORT_BT_PERM_RW` — the SMP service requires neither
+encryption nor pairing, so **anyone in radio range can push firmware**.
+
+That is a decision, not an oversight, and it rests on two things.
+
+**The real control is the signing key, not the link.** Since #274 the bootloader
+validates every image against a project key held on one machine. An attacker who
+writes slot1 still cannot make MCUboot boot it — the image fails
+`BOOT_VALIDATE_SLOT0` and the board reverts. Encrypting the transport would hide
+the contents of a firmware image that is not secret.
+
+**And the stronger setting is unreachable on this board.**
+`MCUMGR_TRANSPORT_BT_PERM_RW_AUTHEN` requires MITM-protected pairing, which needs
+an IO capability — a display for a passkey, a keypad, or out-of-band. The XIAO's
+one button is wired to RESET. Only Just Works is available, which gives
+encryption without authentication: it stops passive eavesdropping, not anyone
+willing to pair.
+
+So the available choice is between *unauthenticated* and *unauthenticated plus
+encryption nobody needs*, at the cost of `BT_SMP`, bonding storage, and the
+reflash-and-forget friction described above. Revisit if the threat model changes;
+it is one Kconfig line either way.
 
 ## A second peripheral implementation
 
