@@ -2,6 +2,23 @@
 
 ## 2026-10-04
 
+### feat: SMP over BLE — upload, swap and revert proven (#271, partial)
+
+- **Firmware can now be delivered without a probe.** `CONFIG_MCUMGR_TRANSPORT_BT` with `img_mgmt` and `os_mgmt`, and the full cycle demonstrated over the air on `Sophon-86F0`: upload **190,124 bytes in 54.9 s**, mark for test, reset to swap (~47 s), then reset again with nothing confirming it and watch MCUboot **revert on its own** (~52 s). No SWD in any step.
+- **This is the mechanism, not yet the feature.** Nothing calls `boot_write_img_confirmed()`, so *every* update would currently revert — rollback is vacuous in the other direction until the confirmation policy exists. That policy is the actual deliverable and is still to come.
+- **Cost against slot0's 480 KB:** flash 169,160 → **189,788** (+20,628, +12.2%, 38.96% of the slot); RAM 35,032 → **42,712** (16.29% of 256 KB). The bootloader is untouched at 40,176 B, so the tight 48 KB partition is unaffected.
+- **Reassembly is a precondition, not an optimisation.** At the 23-byte ATT MTU a write carries 20 bytes and the 8-byte SMP header leaves 12 for the whole CBOR body — an upload request carrying `off`, `len`, a 32-byte `sha` and `data` cannot be encoded at all. `MCUMGR_GRP_OS_MCUMGR_PARAMS` is its other half: it is how the client learns it may write a packet larger than the MTU.
+- **`SOC_FLASH_NRF_PARTIAL_ERASE` is what keeps the link alive**, and the upload succeeding is the proof. A page erase blocks for 89,700 µs — 21% of the 420 ms supervision timeout — on each of ~46 pages. Sliced at 3 ms it fits between connection events. `SOC_FLASH_NRF_RADIO_SYNC_TICKER` was confirmed to resolve as the reasoning assumed rather than taken on faith.
+- **`CONN_PARAM_CONTROL`'s shipped defaults are wrong for an Apple central** and are overridden. `MIN_INT=6`/`MAX_INT=9` is 7.5–11.25 ms, breaking Apple's accessory rules on two counts; iOS rejects the update and the retry timer re-requests every second for the whole upload. Set to 12/24 — 15 ms/30 ms.
+- **The ATT MTU is deliberately unchanged at 23.** The measured 54.9 s matched the 50–60 s predicted, so the model's 4–6× estimate for raising it to 247 with DLE is probably sound — but it stays a before/after to be measured rather than a prediction to act on.
+- **macOS addresses the board by CoreBluetooth UUID, not MAC.** `smpmgr --ble` wants `962CDEDA-…`, not the `EC:C6:E9:14:26:2A` from the boot banner, and that UUID is **per-host** — it must be rediscovered on another Mac rather than written down.
+- **The SMP service is not advertised** — only `c6560001-…`. `smpmgr` connects by address and discovers, so it does not care; nRF Connect Device Manager filters its scan on the SMP UUID and may never list the board. Unresolved, and not free to fix: the advertisement is at 21 of 31 and the scan response at 26 of 31.
+- **Console output misled the reading twice, and live `state-read` settled it both times.** After the swap the CDC ACM showed `fw 2.0.0` and the swap was nearly recorded as failed; the banner was stale buffered output, with a `[00:12:56]` line from the previous session beneath it. Reading state over SMP is the reliable observation here, not the console.
+- `confirmed=True` on a directly-flashed image means only that nothing marked it for test — it cannot be distinguished from a real confirmation. `confirmed=False` after a swap is unambiguous, and is the state that arms rollback. Relevant to #272.
+- `VERSION` minor to 1, per its own rule: 2.1.0 was built, uploaded, swapped to and ran.
+
+## 2026-10-04
+
 ### feat: sign firmware with a project key (#274)
 
 - `Sophon-86F0` now boots only images signed by a key that exists on one machine. Before this, its bootloader trusted **MCUboot's upstream demo key** — tracked in every MCUboot checkout since the "Support RSA, and ECDSA P-256 signing" commit — so validation proved an image was intact, not that anyone in particular produced it.
