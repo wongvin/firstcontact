@@ -2,6 +2,16 @@
 
 ## 2026-10-04
 
+### feat: flash-ota.sh — OTA in one command (#271)
+
+- **New `scripts/flash-ota.sh`**, the counterpart to `flash-swd.sh`: resolve the board, upload into the spare slot, mark for test, reset, verify. About **2 minutes** end to end — ~55 s upload at the default MTU, ~20 s swap.
+- It is deliberately **short where `flash-swd.sh` is careful**, and the asymmetry is real. SWD erases first, so a partial write leaves an unbootable board. OTA writes only the spare slot: the running image is untouched until MCUboot swaps, and a bad image reverts on its own. **There is no brick path here**, so the paranoia is not warranted.
+- **It deliberately does not confirm.** It marks for test and stops, then says that opening the Sophon app and seeing data is what makes the update permanent. Automating that away would delete the feature.
+- **New `scripts/ble-find.py`**, because the address cannot be hardcoded: `smpmgr --ble` documents a "Bluetooth address", but CoreBluetooth never exposes a MAC — it hands out a UUID identifying the board *to this host only*, which differs per Mac. It exits 1 when nothing advertises, with the message that a **connected** board does not advertise either, since nothing on air distinguishes "busy" from "absent".
+- **The script failed twice before working, and the first diagnosis was wrong.** `CONFIG_BT_MAX_CONN=1`, and every `smpmgr` invocation connects and disconnects on its own: the upload holds the link ~55 s, releases it, and a backgrounded iOS app that has been retrying the whole time takes the board in that gap. A comment blaming a `state-write` timeout was written into the source before that was understood, and is now corrected — **asserting an inferred cause in a code comment** is the thing this repo has spent the week correcting elsewhere. Confirmed by changing nothing but force-quitting the app and watching the same run go from failing to completing in 2m03s.
+- The mark step now **reads back `pending=True` before resetting**, with up to three attempts — #277's lesson arriving in a second place. On failure it says plainly that the image is uploaded and nothing is at risk.
+- `BOOTLOADER.md`'s *"What MCUboot does not give us yet"* said Sophon had **no DFU transport** and that the second slot cost ~450 KB for a mechanism nothing could reach. Replaced with what the transport is, what it measured, and the three non-obvious things about it. The comparison table's **no transport yet** row is corrected too.
+
 ### feat: image confirmation policy — the rollback feature (#271)
 
 - MCUboot's rule is fixed and dumb: **if `image_ok` is unset at the next reset, swap back.** All of the judgement lives in deciding when to write that byte, so a ~15-line function in `ble.c` — not the SMP transport — is the actual feature. Until now nothing confirmed anything, which made rollback vacuous in the other direction: *every* update would have reverted.

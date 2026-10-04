@@ -21,7 +21,7 @@ plausible result rather than an error.
 | Recovery | double-tap, always available | **SWD only** |
 | App space | 788 KB | 480 KB (two slots) |
 | Also present | Nordic MBR + SoftDevice S140 v7.3.0 | neither — overwritten |
-| Update path | UF2, or BLE OTA via the SoftDevice | dual-slot with rollback, **no transport yet** |
+| Update path | UF2, or BLE OTA via the SoftDevice | dual-slot with rollback, **MCUmgr SMP over BLE** (#271) |
 
 The boards have diverged and both paths are supported during the transition:
 
@@ -366,13 +366,32 @@ sysbuild selects `CONFIG_BOOT_SWAP_USING_OFFSET=y`, which swaps in place and
 - all sectors in both slots must be the same size — satisfied here, the nRF52840
   has uniform 4 KB pages.
 
-### What MCUboot does not give us yet
+### The DFU transport (#271)
 
-Sophon has **no DFU transport** — no MCUmgr, no SMP over BLE. slot1 can only be
-filled over SWD, which is also how slot0 is flashed directly. Until a transport
-exists, the dual-slot layout costs ~450 KB of application space for a mechanism
-nothing can reach. The alternative is `CONFIG_SINGLE_APPLICATION_SLOT`, which
-keeps image validation and drops the update path.
+An earlier revision of this section said Sophon had **no** DFU transport, and
+that the second slot therefore cost ~450 KB for a mechanism nothing could reach.
+That is no longer true: `CONFIG_MCUMGR_TRANSPORT_BT` with `img_mgmt` and
+`os_mgmt` makes slot1 fillable over the air, and `scripts/flash-ota.sh` wraps the
+cycle.
+
+Measured on `Sophon-86F0`: **190 KB uploaded in ~55 s** at the default 23-byte
+ATT MTU, swap on reset in **~20 s**, and ~2 minutes for the whole scripted run.
+
+Three things about it that are not obvious:
+
+- **Reassembly is a precondition, not a tuning knob.** At a 23-byte MTU an ATT
+  write carries 20 bytes and the 8-byte SMP header leaves 12 for the entire CBOR
+  body — an upload request carrying `off`, `len`, a 32-byte `sha` and `data`
+  cannot be encoded at all. `MCUMGR_GRP_OS_MCUMGR_PARAMS` is its other half: it
+  is how the client learns it may write a packet larger than the MTU.
+- **`SOC_FLASH_NRF_PARTIAL_ERASE` is what keeps the link alive.** A page erase
+  blocks for 89,700 µs — 21% of the 420 ms supervision timeout — on each of ~46
+  pages. Sliced at 3 ms it fits between connection events. The upload completing
+  at all is that setting working.
+- **One connection, and several commands.** `CONFIG_BT_MAX_CONN=1` while
+  `flash-ota.sh` connects separately to scan, upload, mark, reset and verify. A
+  backgrounded iOS app reclaims the board in the gap after the upload and the run
+  fails partway. Force-quit it, do not merely disconnect.
 
 ### Why the application cannot simply stay at 0x27000
 
@@ -707,7 +726,8 @@ Both paths are supported until every board has migrated.
 scripts/build.sh                      # UF2 — the current default
 SOPHON_BOOT=mcuboot scripts/build.sh  # MCUboot via sysbuild
 scripts/flash.sh                      # UF2 boards
-scripts/flash-swd.sh                  # MCUboot boards
+scripts/flash-swd.sh                  # MCUboot boards, bootloader + app, by probe
+scripts/flash-ota.sh                  # MCUboot boards, app only, over the air
 ```
 
 Separate build directories per mode (`build/`, `build-mcuboot/`) so both
