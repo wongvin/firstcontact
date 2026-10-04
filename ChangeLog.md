@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-05
+
+### docs: design for a probe-free UF2 to MCUboot migration (#294)
+
+- Adopting MCUboot needs a probe, four test pads, and the board in hand. That does not scale past boards you can reach, and it is why #270 still lists `Sophon-4D88` as un-migrated. New `zephyr/sophon/UF2-MIGRATION.md` asks whether a board can migrate **itself**, from a UF2 copied onto a mounted volume. **Design only — nothing in it has run on hardware**, and figures are marked measured or derived throughout.
+- **The direct version fails for an architectural reason**, not a configurable one: the bootloader is running on the MBR it would have to erase, so erasing it mid-transfer kills the USB stack performing the transfer. Adafruit's own self-update works through MBR commands that replace the SoftDevice or the bootloader but **not the MBR**, because the MBR is the code doing the copy.
+- **The installer is just an application.** An ordinary Zephyr app at the normal address, which the bootloader accepts without complaint, carrying MCUboot and the signed app as embedded blobs. Once running it owns the chip. The trap is self-overwrite — slot0 is `0xC000–0x84000` and an app at `0x27000` sits inside it — solved by placing the payload at `0x84000` and running the write routine from RAM.
+- **Order is the whole safety argument.** Application first, MCUboot last: everything before the `0x0` write leaves a board where double-tap reset still works, compressing the unrecoverable window to about **1.5 seconds** out of ~25.
+- Three-column memory map in the house style, A → B → C, where **B is the one that earns its place**: it is still layout A. The board has not repartitioned; the bootloader wrote an application and some data into the application partition, which is all it was ever asked to do.
+- **Two errors caught in review, both the same shape.** The first draft called Adafruit's block bounds-check *the assumption the whole approach rests on* — wrong twice over, since every block in this UF2 targets the application window and nothing is addressed to `0x0`, and since the bounds-check was never what killed the direct version anyway. The second put the payload at `0x088000`, a 16 KB gap above the only address that matters; `0x84000` is the first address not in slot0 and the gap defended against nothing. **An arbitrary number in a memory map reads like it means something.**
+
 ## 2026-10-04
 
 ### docs: record the OTA decisions that only existed as config (#271)
