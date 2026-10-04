@@ -2,6 +2,13 @@
 
 ## 2026-10-04
 
+### docs: record the OTA decisions that only existed as config (#271)
+
+- **ATT MTU stays at 23.** The measurement — 190 KB in ~55 s — matched the 50–60 s the model predicted, so its 4–6× estimate for raising to 247 with DLE is probably sound. Declined anyway: a sub-minute upload is acceptable for an occasional update, against RAM cost and a change to the negotiated value the app displays. **The 18-byte frame is unaffected either way** — one radio packet at a 27-byte payload limit and still one at 251 — so nothing in `UPDATED-PLAN.md`'s connection-event budget moves.
+- **The security posture is `PERM_RW`: unauthenticated, anyone in range can push firmware.** That was true the moment the transport landed and was written down nowhere, which makes a deliberate choice indistinguishable from an oversight. Two reasons it is deliberate. The real control is the signing key from #274 — an attacker who writes slot1 still cannot make MCUboot boot it. And `PERM_RW_AUTHEN` is **unreachable on this board**: MITM-protected pairing needs an IO capability, and the XIAO's one button is wired to RESET. The available choice is unauthenticated, or unauthenticated plus encryption nobody needs, at the cost of `BT_SMP` and bonding storage.
+- **`PROTOCOL.md` gains the management transport**, which it had not mentioned at all. Including the finding that the **SMP service is not advertised** — the advertisement is at 21 of 31 and the scan response at 26 of 31, and a 128-bit UUID costs 18 bytes serialised. A client that connects by address is unaffected; one that scans for the SMP UUID, as nRF Connect Device Manager does, may never list the board despite SMP working over a connection.
+- **"Characterise what an update does to motion streaming" is moot, not skipped.** `CONFIG_BT_MAX_CONN=1` means a DFU client and the app cannot both hold the board, so an upload and the 52 Hz stream *cannot* overlap. It becomes a real question only if the limit is relaxed — #291. The cost shows up instead as the app needing to be force-quit for the ~2 minutes an update takes.
+
 ### fix: flash-ota.sh could not report its own failures (#271)
 
 - **A deliberately boot-looping image reverted entirely on its own**, which closes the requirement #271 called the one that actually matters. Uploaded 2.5.0 built to `sys_reboot()` two seconds in, marked it for test, reset. MCUboot swapped it in, it restarted, MCUboot saw `image_ok` unset and put 2.4.0 back — **~2 minutes, no probe, no human action after the upload**. Distinct from the revert-by-omission already shown: this image ran and failed, rather than merely never being confirmed.
