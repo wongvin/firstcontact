@@ -2,6 +2,18 @@
 
 ## 2026-10-04
 
+### feat: image confirmation policy — the rollback feature (#271)
+
+- MCUboot's rule is fixed and dumb: **if `image_ok` is unset at the next reset, swap back.** All of the judgement lives in deciding when to write that byte, so a ~15-line function in `ble.c` — not the SMP transport — is the actual feature. Until now nothing confirmed anything, which made rollback vacuous in the other direction: *every* update would have reverted.
+- **The line drawn is the first frame actually delivered to a subscribed central** — the one thing this board exists to do, done once. It catches a boot loop, a failed `bt_enable()`, advertising that never starts, and a GATT table too broken to subscribe to. It deliberately does **not** treat a missing IMU as failure, because `main.c` documents the zero-frame fallback as intended. It cannot catch wrong frame *contents*, and no local policy could.
+- Confirming at boot would make rollback nominal; confirming on a timer would infer health from the absence of a crash. Both were considered and rejected in the comment that now sits above the code.
+- **The consequence is deliberate.** Because the DFU client is not the Sophon app, an update is not permanent until someone reconnects with the app and sees a frame. A board updated and then left alone reverts at its next reset — human verification becomes a required step rather than an optional one.
+- Deferred to a work item rather than called inline: the notify path runs on the system work queue at ~54 Hz, and `boot_write_img_confirmed()` writes flash, which on this part is radio-synchronised and can take tens of milliseconds. `boot_is_img_confirmed()` short-circuits every boot that did not arrive by swap, so the normal case costs one flash read.
+- **Proven end to end, and by an accident that made the evidence better.** 2.2.0 was uploaded over the air (53.6 s), marked for test, and swapped in as `confirmed=False`. The scripted subscriber could not connect — `BT_MAX_CONN=1`, and the iOS app had already reconnected. It had also already confirmed the image. Reading slot0's trailer over SWD, which needs no connection: **`image_ok = 0x01 SET`**, written by nothing in that session but the policy itself.
+- `copy_done = 0x01` in the same trailer settles an ambiguity recorded earlier: `confirmed=True` from `img_mgmt` cannot distinguish *confirmed after a swap* from *never swapped*, because a directly-flashed image reports confirmed when nothing ever marked it for test. The trailer distinguishes them, and is readable over SWD without a connection — useful to #272.
+- **Not verified:** the `image confirmed` log line itself. The console was idle by the time it was read and the message had already passed; the trailer byte is the stronger evidence, but the wording is untested.
+- Cost: **+396 bytes** of flash, no RAM. `VERSION` to 2.2.0, matching what is running on the board.
+
 ### feat: SMP over BLE — upload, swap and revert proven (#271, partial)
 
 - **Firmware can now be delivered without a probe.** `CONFIG_MCUMGR_TRANSPORT_BT` with `img_mgmt` and `os_mgmt`, and the full cycle demonstrated over the air on `Sophon-86F0`: upload **190,124 bytes in 54.9 s**, mark for test, reset to swap (~47 s), then reset again with nothing confirming it and watch MCUboot **revert on its own** (~52 s). No SWD in any step.
