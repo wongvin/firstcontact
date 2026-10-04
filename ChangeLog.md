@@ -1,6 +1,13 @@
 # Changelog
 
-## 2026-10-05
+## 2026-10-04
+
+### docs: correct the UF2 migration design after review (#294)
+
+- **The design assumed the installer may erase flash it does not own, and never checked.** On the nRF52840 that is an ACL question: eight protection regions in the `NVMC` block at `0x4001E800`, where a write-protected region refuses erases too and **the configuration survives until reset** — so anything the Adafruit bootloader locks stays locked underneath the installer. Disassembling the `uf2-sdv7` backup settles it: the whole bootloader region holds four references to the `0x4001E000` base and every one is used at offset `0x400`, `0x504` or `0x508` — plain erase and write. Nothing reaches `0x800`. The one candidate, stores to `0x800`/`0x804` at `0xF944C`, is addressed off `0x40027000` — USBD, part of the USB errata workaround that also writes `0x9375` to `0x4006EC00`.
+- **The trailer-page erase now leads instead of trailing, and doubles as the proof.** The old order deferred it on the reasoning that the Adafruit bootloader should stay intact as long as possible — true, but the corollary does not follow. That bootloader is reached by reset into the MBR at `0x0`; once MCUboot owns `0x0` it is unreachable whether its bytes survive or not, so **the recoverable period ends when `0x0` is first erased**. Deferring bought nothing and guaranteed that an ACL surprise would land after the point of no return. Erasing first and reading it back costs the same window and fails safe: a blocked erase changes nothing. Also recorded, from the backup: the bootloader's reset vector is **`0x000FB2E1`**, so its entry point sits inside the very page that must go.
+- **Column B carried two addresses that were build artefacts dressed as geometry.** `0x0B3834` is exactly `0x085000` plus one evening's `zephyr.signed.bin`, and `0x036000` the same for the installer and its blob. Both moved with every build, and both contradicted the document's own argument that *the image's length never enters an address calculation*. They are unlabelled edges now; only `0x027000`, `0x084000`, `0x085000` and `0x0EC000` are fixed.
+- **The constraint they hid is worth more than the numbers were.** The staged image has to fit between `0x085000` and the top of the UF2 application window at `0x0EC000` — **412 KB**, against the 480 KB slot0 it is swapped into. **This delivery route caps the image below what the partition holds**, which is invisible from the MCUboot layout where anyone would look. Not live at today's size, but an image that fits slot0 comfortably could still be undeliverable this way.
 
 ### docs: design for a probe-free UF2 to MCUboot migration (#294)
 
@@ -10,8 +17,6 @@
 - **Order is the whole safety argument.** Application first, MCUboot last: everything before the `0x0` write leaves a board where double-tap reset still works, compressing the unrecoverable window to about **1.5 seconds** out of ~25.
 - Three-column memory map in the house style, A → B → C, where **B is the one that earns its place**: it is still layout A. The board has not repartitioned; the bootloader wrote an application and some data into the application partition, which is all it was ever asked to do.
 - **Two errors caught in review, both the same shape.** The first draft called Adafruit's block bounds-check *the assumption the whole approach rests on* — wrong twice over, since every block in this UF2 targets the application window and nothing is addressed to `0x0`, and since the bounds-check was never what killed the direct version anyway. The second put the payload at `0x088000`, a 16 KB gap above the only address that matters; `0x84000` is the first address not in slot0 and the gap defended against nothing. **An arbitrary number in a memory map reads like it means something.**
-
-## 2026-10-04
 
 ### docs: record the OTA decisions that only existed as config (#271)
 
