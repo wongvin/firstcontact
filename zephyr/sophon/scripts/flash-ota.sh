@@ -95,6 +95,11 @@ smp() { smpmgr --ble "$ADDR" --timeout "${SOPHON_SMP_TIMEOUT:-30}" "$@"; }
 # Into the spare slot, so the running image is untouched. ~55 s for a 190 KB
 # image at the default 23-byte ATT MTU; see #271 for why the MTU has not been
 # raised yet.
+# The version being shipped, read from the image itself. Without this the script
+# cannot tell a successful update from a REVERTED one -- both end with the board
+# running a confirmed image, and only the version number differs.
+WANT_VER="$(strings "$IMAGE" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+
 echo "==> uploading $(wc -c < "$IMAGE" | tr -d ' ') bytes (about a minute)"
 if ! smp image upload "$IMAGE"; then
   echo "error: upload failed." >&2
@@ -104,11 +109,19 @@ if ! smp image upload "$IMAGE"; then
 fi
 
 # --- mark for test, and reset ----------------------------------------------
-HASH="$(smp image state-read 2>/dev/null | grep -oE "[0-9A-F]{64}" | tail -1)"
+# NOTE THE `|| true`, which is load-bearing. Under `set -euo pipefail` a failing
+# smpmgr makes this whole pipeline fail, and the assignment aborts the script
+# BEFORE the check below can report anything -- so the useful error never prints
+# and the script dies silently having uploaded an image it then abandons. That
+# cost two misdiagnosed failures: the trigger was the connection race described
+# above, but this is why it was invisible.
+HASH="$(smp image state-read 2>/dev/null | grep -oE "[0-9A-F]{64}" | tail -1 || true)"
 if [[ -z "$HASH" ]]; then
-  echo "error: uploaded, but could not read back the staged image's hash." >&2
-  echo "       Nothing has been marked for test, so the board still runs the" >&2
-  echo "       old image. Re-run, or inspect with: smpmgr --ble $ADDR image state-read" >&2
+  echo "error: uploaded, but could not read the staged image's hash back." >&2
+  echo "       The image IS in the spare slot and the board still runs the old" >&2
+  echo "       one, so nothing is at risk." >&2
+  echo "       Most likely something took the board's one connection while the" >&2
+  echo "       upload was releasing it -- force-quit the Sophon app and re-run." >&2
   exit 1
 fi
 
@@ -165,12 +178,32 @@ if ! STATE="$(smp image state-read 2>&1)"; then
   exit 1
 fi
 
-ACTIVE_VER="$(awk '/slot=0/,/^\)/' <<<"$STATE" | grep -oE "version='[^']+'" | head -1 | cut -d"'" -f2)"
-CONFIRMED="$(awk '/slot=0/,/^\)/' <<<"$STATE" | grep -oE "confirmed=(True|False)" | head -1)"
+# `|| true` for the same reason as above: a parse that finds nothing must fall
+# through to the reporting below, not kill the script silently.
+ACTIVE_VER="$(awk '/slot=0/,/^\)/' <<<"$STATE" | grep -oE "version='[^']+'" | head -1 | cut -d"'" -f2 || true)"
+CONFIRMED="$(awk '/slot=0/,/^\)/' <<<"$STATE" | grep -oE "confirmed=(True|False)" | head -1 || true)"
 
 echo
-echo "    running: $ACTIVE_VER   $CONFIRMED"
+echo "    uploaded: ${WANT_VER:-unknown}"
+echo "    running:  $ACTIVE_VER   $CONFIRMED"
 echo
+
+# A REVERT and a success both leave the board running a confirmed image. The
+# only thing that separates them is whether it is the version we just shipped --
+# so check that first, or a failed update reads as a successful one. Observed:
+# a deliberately boot-looping image reverted correctly and this script called it
+# "running and already confirmed".
+if [[ -n "$WANT_VER" && "$ACTIVE_VER" != "$WANT_VER" ]]; then
+  echo "==> REVERTED -- the board is NOT running what was just uploaded." >&2
+  echo "    $WANT_VER was swapped in, failed to confirm itself, and MCUboot put" >&2
+  echo "    $ACTIVE_VER back. That is rollback working, not a flashing error." >&2
+  echo >&2
+  echo "    The usual cause is that the new image did not reach the point of" >&2
+  echo "    delivering a frame -- it crashed, rebooted, or its BLE never came up." >&2
+  echo "    It is still in the spare slot; read the console on the next attempt." >&2
+  exit 1
+fi
+
 if [[ "$CONFIRMED" == "confirmed=False" ]]; then
   echo "==> done -- $ACTIVE_VER is running ON TRIAL."
   echo "    It reverts at the next reset unless it is confirmed, and this"
@@ -179,5 +212,5 @@ if [[ "$CONFIRMED" == "confirmed=False" ]]; then
   echo "    makes the update permanent."
 else
   echo "==> done -- $ACTIVE_VER is running and already confirmed."
-  echo "    Expected only if something subscribed during the wait above."
+  echo "    Something subscribed during the wait above and confirmed it."
 fi

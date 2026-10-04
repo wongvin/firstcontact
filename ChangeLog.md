@@ -2,6 +2,15 @@
 
 ## 2026-10-04
 
+### fix: flash-ota.sh could not report its own failures (#271)
+
+- **A deliberately boot-looping image reverted entirely on its own**, which closes the requirement #271 called the one that actually matters. Uploaded 2.5.0 built to `sys_reboot()` two seconds in, marked it for test, reset. MCUboot swapped it in, it restarted, MCUboot saw `image_ok` unset and put 2.4.0 back — **~2 minutes, no probe, no human action after the upload**. Distinct from the revert-by-omission already shown: this image ran and failed, rather than merely never being confirmed.
+- **The script called that a success.** A revert and a good update both end with the board running a confirmed image; only the version differs, and nothing compared them. It now reads the version out of the image it is about to upload and reports `REVERTED — the board is NOT running what was just uploaded`, naming the likely cause. Both branches are now proven on hardware.
+- **The script could not report its own failures, and that was a defect I introduced.** Under `set -euo pipefail`, `HASH="$(smp image state-read | grep … | tail -1)"` aborts the whole script when smpmgr cannot connect — *before* the `[[ -z "$HASH" ]]` check that exists to explain it. So a failed run printed nothing at all after a 55-second upload. Five command substitutions had the same shape; all now carry `|| true` so a failed read falls through to the code that reports it.
+- That is the **same defect as the `flash-swd.sh` erase guard in #277** — an error path that cannot fire — reproduced four issues after fixing it, in a script written to apply that very lesson.
+- **It also cost two wrong diagnoses, one of which was committed.** The first blamed a `state-write` timeout and was written into a source comment as established fact; the second correctly identified an iOS app reclaiming the board's single connection but did not explain the silence. Only the third was the mechanism. The comment is corrected and now records the actual cause.
+- `VERSION` to 2.5.0, confirmed on the board: `image_ok = 0x01`, build `2026-10-04T04:26:26Z`.
+
 ### feat: flash-ota.sh — OTA in one command (#271)
 
 - **New `scripts/flash-ota.sh`**, the counterpart to `flash-swd.sh`: resolve the board, upload into the spare slot, mark for test, reset, verify. About **2 minutes** end to end — ~55 s upload at the default MTU, ~20 s swap.
