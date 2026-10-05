@@ -519,10 +519,69 @@ purpose. So a board advertises only `c6560001-…`, and SMP is discovered after
 connecting.
 
 A client that **connects by address** — `smpmgr`, and `scripts/flash-ota.sh`
-which wraps it — is unaffected. A client that **scans for the SMP service UUID**,
-which is how nRF Connect Device Manager filters, may never list the board at all
-even though SMP works perfectly over a connection. Unconfirmed from the app side;
-recorded so it is not mistaken for a broken transport.
+which wraps it — is unaffected. A client that **scans for the SMP service UUID**
+will not list the board at all, even though SMP works perfectly over a
+connection.
+
+**Confirmed against nRF Connect Device Manager, 2026-10-04 (#292).** The
+consequence is real but smaller than it reads, and it is a *discovery* problem
+only:
+
+- Its scanner filters on the SMP UUID **by default**, and the board does not
+  appear while that filter is on. Turning the filter off in its settings is the
+  whole workaround.
+- Once listed, **everything works**: `os echo` round-trips, `os mcumgr-params`
+  returns `4 × 384` matching `MCUMGR_TRANSPORT_NETBUF_COUNT`/`_SIZE`, and an
+  image-state read reports both slots in agreement with `smpmgr`. Two
+  independent SMP implementations describing the same board identically is what
+  #292 was opened to obtain.
+
+**The trap is that Device Manager connects lazily — on the first SMP command,
+not when you select the device.** Until then it displays `SMP Service:
+DISCONNECTED`, which reads like a failure and is not one: the board's console
+records no connection attempt because none has been made. Sending anything, an
+`os echo` will do, connects it. Several hours went into that status line before
+it turned out to mean "idle".
+
+Advertising the UUID was built and measured rather than argued about. It fits —
+the scan response reaches exactly 31 of 31 with the name, which also establishes
+that **iOS does match a filtered scan against scan-response UUIDs**, not only
+against the advertisement. It was reverted anyway: the only thing it buys is
+visibility under one client's default filter, and it costs TX power and the #230
+pre-connect identity. A toggle in the client is cheaper than 13 bytes on the air.
+
+### Device Manager can read this board but cannot write it (#292)
+
+**At ATT MTU 23 the iOS McuManager library refuses to upload**, with
+`New MTU value 20 is outside valid range of 73...1024`. 20 B is this board's ATT
+write value, `BT_L2CAP_TX_MTU=23` less the 3-byte ATT header; 73 is the
+library's own floor.
+
+Everything else about that client works — see above — so the split is exactly
+read versus write.
+
+**The firmware is not at fault, and this is worth being precise about, because
+the obvious reading is that reassembly is broken.** It is not.
+`MCUMGR_TRANSPORT_BT_REASSEMBLY=y` is set, `MCUMGR_GRP_OS_MCUMGR_PARAMS=y`
+publishes the buffer geometry, and **Device Manager reads that geometry
+successfully** — it displays `4 × 384`, which is
+`MCUMGR_TRANSPORT_NETBUF_COUNT` × `MCUMGR_TRANSPORT_NETBUF_SIZE`. It then
+declines to use it. `smpmgr` reads the same numbers and fragments 384-byte SMP
+packets across 20-byte writes, which is why `scripts/flash-ota.sh` works at this
+MTU and Device Manager does not.
+
+So the two clients differ in whether they implement the thing the firmware
+offers, not in what the firmware offers them.
+
+**The consequence for the MTU decision.** #271 declined raising the ATT MTU on
+the grounds that a sub-minute upload was acceptable against the RAM cost. That
+weighing did not include this: at 23 the standard tooling cannot upload **at
+all**, not merely slowly. The decision stands for now — `flash-ota.sh` remains
+the upload path and is unaffected — but the cost is larger than it was recorded
+as, and anyone revisiting the MTU should weigh this rather than only the ~55 s.
+
+Raising it past 73 is expected to unblock Device Manager. **Expected, not
+measured**: nothing here has run above MTU 23.
 
 ### It costs one connection, and there is only one
 
