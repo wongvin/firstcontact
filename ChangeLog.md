@@ -2,6 +2,13 @@
 
 ## 2026-10-05
 
+### fix: the migration UF2 wedged the bootloader (#294)
+
+- **Verified on `Sophon-86F0`, restored to the UF2 era over SWD for the purpose.** The delivery half works end to end: one file copied onto the mounted volume lands a 59 KB installer at `0x27000` and the 190 KB signed image at `0x085000`, and the installer runs and reads both. Every trailer address it computes from the partition size matches the design document -- `copy_done` `0x0FBFE0`, `image_ok` `0x0FBFE8`, magic `0x0FBFF0` -- and the trailer page reads **4063/4096 non-erased bytes**, the same figure the September backup gave. That page really is live Adafruit bootloader code, so erasing it really is destructive, and the design's decision to put that erase first is load-bearing rather than stylistic.
+- **UF2 blocks must be 256-byte aligned with full payloads, and the failure when they are not is silent.** The first build started a new block at every discontinuity in the sparse hex, leaving 25 of 979 unaligned and 3 short. The bootloader's answer is to never complete: no error, the volume stays mounted, and its mass-storage stack then jams hard enough that `ls` and `diskutil` hang and `cp` sits in uninterruptible I/O wait until the device is physically reset. Blocks are now padded with `0xFF` -- the erased value, so padding writes nothing -- and the alignment is asserted in `mkuf2.py`.
+- **The verification passed a file the bootloader would not take**, which is the part worth remembering. It reconstructed all 979 blocks and compared them byte-for-byte against the inputs, and that check was *correct* -- every mapped byte did round-trip. It simply never checked the invariant that mattered.
+- **The survey is longer than the board's ~1 KB CDC ACM buffer**, so a console attached after boot saw it truncated mid-line and nothing more, and resetting to retry only re-enumerates USB and drops the console. It now reprints every 15 s, which is the whole value of a build whose only output is a report.
+
 ### feat: UF2 -> MCUboot installer, survey milestone (#294)
 
 - New `zephyr/sophon-installer/`, a sibling app rather than a build mode of `sophon/`: it is always a plain UF2 application, because a UF2 bootloader is the only thing that will accept it. **This build writes nothing, and `CONFIG_FLASH` is deliberately not enabled** so that is a property of the binary rather than a promise in a comment. It is the third item of `UF2-MIGRATION.md`'s *Before any code* -- prove the merged UF2 flashes and the installer runs before it may touch flash.

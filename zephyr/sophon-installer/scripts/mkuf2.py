@@ -125,16 +125,25 @@ def main():
         mem[STAGED_IMAGE + i] = b
 
     # --- emit ----------------------------------------------------------------
-    chunks = []
-    addrs = sorted(mem)
-    i = 0
-    while i < len(addrs):
-        start = addrs[i]
-        buf = bytearray()
-        while i < len(addrs) and len(buf) < PAYLOAD and addrs[i] == start + len(buf):
-            buf.append(mem[addrs[i]])
-            i += 1
-        chunks.append((start, bytes(buf)))
+    #
+    # EVERY BLOCK IS 256-BYTE ALIGNED WITH A FULL 256-BYTE PAYLOAD, and that is
+    # not cosmetic. The bootloader buffers blocks into flash pages; an
+    # unaligned address or a short payload is not something it is prepared for,
+    # and it answers by simply never completing -- the volume stays mounted and
+    # the board never reboots, with no error anywhere. Observed on 86F0 with an
+    # earlier version of this script that started a new block at every
+    # discontinuity in the sparse hex: 25 of 979 blocks unaligned, 3 short.
+    #
+    # Padding is 0xFF, the erased value, so a padded byte writes nothing. 0x00
+    # would clear bits that should have been left alone.
+    pages = {}
+    for addr, val in mem.items():
+        base = addr & ~(PAYLOAD - 1)
+        pages.setdefault(base, bytearray(b"\xFF" * PAYLOAD))[addr - base] = val
+    chunks = [(a, bytes(pages[a])) for a in sorted(pages)]
+
+    for a, data in chunks:
+        assert a % PAYLOAD == 0 and len(data) == PAYLOAD, f"block {a:#x} malformed"
 
     with open(args.output, "wb") as f:
         for n, (addr, data) in enumerate(chunks):

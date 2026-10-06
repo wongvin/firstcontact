@@ -152,7 +152,7 @@ static bool survey_staged_image(void)
 	return true;
 }
 
-int main(void)
+static void survey(void)
 {
 	LOG_INF("Sophon UF2 -> MCUboot installer (#294)");
 	LOG_INF("*** SURVEY BUILD -- WRITES NOTHING ***");
@@ -196,6 +196,32 @@ int main(void)
 		LOG_INF("survey OK -- both payloads present, nothing written");
 	} else {
 		LOG_ERR("survey FAILED -- see above, nothing written");
+	}
+}
+
+/*
+ * Repeat the survey rather than report it once.
+ *
+ * The report is longer than this board's CDC ACM buffer, which holds about
+ * 1 KB, so a console attached after boot sees it truncated mid-line and then
+ * nothing -- the board has already said everything it intends to say.
+ * Observed on 86F0 on the first run, and not recoverable by resetting,
+ * because a reset re-enumerates USB and drops whatever console was attached.
+ *
+ * Reprinting makes the result readable whenever a console is attached, which
+ * is the entire value of a build whose only output is a report. It costs
+ * nothing: this application has nothing else to do, and a later milestone
+ * that actually writes flash will not survey in a loop.
+ */
+#define SURVEY_PERIOD_S 15
+
+int main(void)
+{
+	for (;;) {
+		survey();
+		LOG_INF("--- repeating in %d s ---", SURVEY_PERIOD_S);
+		LOG_INF("");
+		k_sleep(K_SECONDS(SURVEY_PERIOD_S));
 	}
 	return 0;
 }
