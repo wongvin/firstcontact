@@ -1,8 +1,15 @@
 # Zephyr target — conventions
 
 Firmware for embedded boards, built with [Zephyr RTOS](https://zephyrproject.org).
-Currently one app: [`sophon/`](sophon/) — a BLE motion peripheral on a Seeed XIAO
-nRF52840 Sense Plus, paired with the iOS app at `ios/Sophon/`.
+
+- [`sophon/`](sophon/) — a BLE motion peripheral on a Seeed XIAO nRF52840 Sense
+  Plus, paired with the iOS app at `ios/Sophon/`.
+- [`sophon-installer/`](sophon-installer/) — a one-shot application that
+  migrates a board from the Adafruit UF2 bootloader to MCUboot without a probe
+  (#294). It is a sibling app rather than a build mode of `sophon/`, because it
+  is always a plain UF2 application: a UF2 bootloader is the only thing that
+  will accept it, and a build at slot0 would be nonsense. Design in
+  [`sophon/UF2-MIGRATION.md`](sophon/UF2-MIGRATION.md).
 
 ## Workspace layout — freestanding, and not pinned
 

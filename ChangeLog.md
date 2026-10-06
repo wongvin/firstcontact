@@ -2,6 +2,14 @@
 
 ## 2026-10-05
 
+### feat: UF2 -> MCUboot installer, survey milestone (#294)
+
+- New `zephyr/sophon-installer/`, a sibling app rather than a build mode of `sophon/`: it is always a plain UF2 application, because a UF2 bootloader is the only thing that will accept it. **This build writes nothing, and `CONFIG_FLASH` is deliberately not enabled** so that is a property of the binary rather than a promise in a comment. It is the third item of `UF2-MIGRATION.md`'s *Before any code* -- prove the merged UF2 flashes and the installer runs before it may touch flash.
+- **`scripts/mkuf2.py` emits UF2 blocks directly instead of merging Intel-HEX.** The file carries two disjoint regions, and merging hex first means reconciling Zephyr's extended-*segment* records with `objcopy`'s extended-*linear* ones. Verified by reconstruction: 979 blocks round-trip **byte-identical** to the installer hex plus the signed image, with no structural errors.
+- **The 412 KB fit check lives there too**, at the only point that knows the file's true length. The staged image must fit between `0x085000` and the UF2 application window's `0x0EC000` -- less than the 480 KB slot0 it is swapped into, so an image that fits the partition can still be undeliverable this way. Current build: 190,520 B placed, 231,368 B of headroom.
+- **The addresses are asserted, not restated.** `BUILD_ASSERT` derives the trailer offsets from the partition size and checks them against the figures the design document states -- `copy_done` `0x0FBFE0`, `image_ok` `0x0FBFE8`, magic `0x0FBFF0` -- so a drift between code and document stops the build. The staging offset is asserted to be slot1 **plus one sector**, which is what `CONFIG_BOOT_SWAP_USING_OFFSET` expects and the easiest thing to get silently wrong.
+- MCUboot's 40,176 B travels linked inside the installer; the 190 KB application is merged in at `0x085000`. Both come from the Sophon app's MCUboot build and neither is rebuilt here -- #274's signing key means the bootloader and the image it validates must stay the matched pair that build produced.
+
 ### docs: record the Device Manager result, which was not the predicted one (#292)
 
 - **#292 predicted the board would not appear in nRF Connect Device Manager at all**, the SMP service UUID not being advertised and that app being understood to filter its scan on it. It appears, it connects, and it works. `os echo` round-trips, `os mcumgr-params` returns `4 × 384` matching `MCUMGR_TRANSPORT_NETBUF_COUNT`/`_SIZE`, and an image-state read reports both slots in agreement with `smpmgr` — **two independent SMP implementations describing the same board identically**, which is what the issue was opened to obtain.
