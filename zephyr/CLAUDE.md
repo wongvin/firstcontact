@@ -4,6 +4,10 @@ Firmware for embedded boards, built with [Zephyr RTOS](https://zephyrproject.org
 
 - [`sophon/`](sophon/) — a BLE motion peripheral on a Seeed XIAO nRF52840 Sense
   Plus, paired with the iOS app at `ios/Sophon/`.
+- [`sophon-dumper/`](sophon-dumper/) — reads a board's whole flash and UICR out
+  over the USB console so a backup can be taken **without a probe** (#297). It
+  writes nothing, and `CONFIG_FLASH` is absent so that is a property of the
+  binary. Preparation only: restoring still needs SWD.
 - [`sophon-installer/`](sophon-installer/) — a one-shot application that
   migrates a board from the Adafruit UF2 bootloader to MCUboot without a probe
   (#294). It is a sibling app rather than a build mode of `sophon/`, because it

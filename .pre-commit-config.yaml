@@ -34,5 +34,5 @@ repos:
         # scoping above: a new app opts in once it is clean, which is a
         # one-line edit at the point someone is already adding it. The
         # alternative silently enrols whatever lands next.
-        files: ^zephyr/(sophon|sophon-installer)/src/.*\.(c|h)$
+        files: ^zephyr/(sophon|sophon-installer|sophon-dumper)/src/.*\.(c|h)$
         description: Formats to zephyr/.clang-format, Zephyr's own style.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-07
+
+### feat: probe-free flash backup via a UF2 dumper (#297)
+
+- **#294 migrates a board without a probe, and its first requirement was "take a backup", which needed one.** New `zephyr/sophon-dumper/`: a UF2 that reads the whole chip out over the CDC ACM console. It writes nothing, and `CONFIG_FLASH` is absent so that is a property of the binary. nRF52840 flash and UICR are memory mapped, so a read is a pointer dereference.
+- **It works because of where a UF2 app lands.** The dumper at `0x27000` clobbers only the application; MBR and SoftDevice are below it, storage and the bootloader above, UICR separate. **Validated against ground truth**: `86F0` restored to `uf2-sdv7` over SWD, dumped via the UF2 path, and compared — MBR, SoftDevice, storage, bootloader and UICR all **byte-identical**, with differences confined to `0x027001-0x032AFF`, which is the dumper reading its own footprint back. 16.5 s for 1 MB plus 4 KB.
+- **`printk` on CDC ACM discards rather than blocks, and nothing in that path has flow control.** An unpaced dumper dropped fifteen consecutive chunks at the same offset on every run while the serial layer reported success. Caught only because every line carries its own offset. Fixed with 1 ms pacing per line, matched to the USB frame interval. `CONFIG_USBD_CDC_ACM_BUF_POOL_SIZE` was tried and is **inert here** -- it depends on `USBD_CDC_ACM_BUF_POOL=y`, which this board leaves off, so Kconfig accepted the line and discarded the value.
+- **The capture latched onto a stale `BEGIN`.** The dumper broadcasts on a loop, so the first marker in the tty buffer is usually mid-cycle. It now treats any discontinuity as desync and waits for a whole cycle. Every line carries its offset and CRC32, and every region a CRC32 over everything in it **including the runs the board skipped** -- which is what catches a wrong skip count, since a per-line check cannot see bytes that were never sent.
+- **Generic where it can be, fenced where it cannot.** Flash base and size come from devicetree rather than being written down; the protocol carries a raw device id rather than a product name; UICR is guarded on the SoC family. The host's Sophon layer -- filename convention, `~/.sophon/backups`, era detection -- sits behind `--raw`, which writes plain `flash.bin`/`uicr.bin`. #298 carries the requirement to delete that layer rather than reorganise it.
+- **This makes preparation probe-free, not recovery.** Restoring MBR, SoftDevice or bootloader is outside the UF2 application window and unreachable once the bootloader is gone, which is the failure case. SWD remains the restore path; the probe moves from the common case to the rare one.
+
 ## 2026-10-06
 
 ### feat: a board migrates itself from UF2 to MCUboot, no probe (#294)
