@@ -30,5 +30,9 @@ repos:
         name: clang-format (firmware C)
         entry: bash -c '"$(xcrun -f clang-format)" --style=file -i "$@"' --
         language: system
-        files: ^zephyr/sophon/src/.*\.(c|h)$
+        # Named apps rather than ^zephyr/[^/]+/src/, to keep the deliberate
+        # scoping above: a new app opts in once it is clean, which is a
+        # one-line edit at the point someone is already adding it. The
+        # alternative silently enrols whatever lands next.
+        files: ^zephyr/(sophon|sophon-installer)/src/.*\.(c|h)$
         description: Formats to zephyr/.clang-format, Zephyr's own style.

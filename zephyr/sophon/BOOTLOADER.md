@@ -754,11 +754,48 @@ backup of that board.
 
 ### Migrating a board
 
+**There are two ways, and the probe-based one is the default.**
+
+#### By probe
+
 1. **Back up** full flash and UICR, and verify with `cmp` against a re-dump.
 2. `SOPHON_BOOT=mcuboot scripts/build.sh`
 3. `scripts/flash-swd.sh`
 4. Confirm it boots, advertises and accepts a connection — a program counter in
    the application region is *not* evidence that a central can connect.
+
+#### By UF2, with no probe (#294)
+
+A board can migrate **itself** from a file copied onto its mounted volume.
+`Sophon-86F0` did on 2026-10-06, unattended.
+
+```bash
+SOPHON_BOOT=mcuboot scripts/build.sh          # both payloads
+../sophon-installer/scripts/build.sh          # -> build/sophon-migrate.uf2
+# double-tap reset, then copy the file onto /Volumes/XIAO-SENSE
+```
+
+The UF2 carries two disjoint regions: an installer at `0x27000` with MCUboot
+linked inside it, and the signed application staged at `0x085000`. The installer
+writes three small things — MCUboot to `0x0`, slot1's trailer, and a stub that
+makes slot0 readable — then resets, and **MCUboot performs the 190 KB move**
+with the same swap code every OTA uses. About 45 s end to end.
+
+Design, and the pitfalls that shaped it, in
+[UF2-MIGRATION.md](UF2-MIGRATION.md). Three things to know before using it:
+
+- **It is a bootloader installer whose failure mode is losing the bootloader it
+  is replacing.** The unrecoverable window is roughly 2 s, and the only way back
+  from it is this chapter's SWD restore.
+- **It still needs a backup first, and taking one needs the probe** — the
+  contradiction #297 exists to remove.
+- **An interrupted swap is untested.** The slot0 stub is deliberately not a true
+  image, so an interruption leaves a header describing something that is not
+  there. MCUboot restarts an interrupted swap by design; that path has not been
+  exercised here.
+
+Prefer the probe for a board already on the desk. This earns its place on boards
+that cannot be held — which is the part of #270 that does not scale.
 
 ## Not established
 
