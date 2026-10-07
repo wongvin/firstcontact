@@ -1,15 +1,15 @@
 # Migrating a board from UF2 to MCUboot without a probe
 
-**Status: built, run on hardware, and the central mechanism does not work.**
-Tried on `Sophon-86F0`, 2026-10-06. The delivery half works end to end and the
-installer does everything this document says it should. **MCUboot then refuses
-to swap**, because it will not install into a primary slot that holds no valid
-image header — a requirement this design did not know about. *What hardware
-established* below has the evidence.
+**Status: built and working.** `Sophon-86F0` migrated itself from the Adafruit
+UF2 bootloader to MCUboot on 2026-10-06, unattended, from one file copied onto a
+mounted volume. No probe took part in the migration.
 
-The rest of the document is left standing rather than rewritten. Everything
-except the swap survived contact with the board, and the parts that were right
-are worth as much as the part that was wrong.
+Implemented in [`../sophon-installer/`](../sophon-installer/).
+
+This describes the design **as it now stands**, which is not the design #294
+started with: step 5 exists only because the board refused to migrate without
+it. *Pitfalls* at the end records what went wrong, and is worth reading before
+changing any address here — every one of those failures was silent.
 
 **#294 implements the design in this document and not the simpler alternative
 below**, which needs a direct-XIP MCUboot and therefore a decision belonging to
@@ -68,15 +68,20 @@ resets.
 
 ### What the installer writes, and what it does not
 
-It writes **two things**, neither of them large: MCUboot to `0x0`, and slot1's
-trailer. It never writes slot0 — the 190 KB move into slot0 is done by MCUboot
-itself on the next boot, using the same swap code every OTA uses. See *What
-MCUboot does on its first boot* below.
+It writes **three small things**, none of them the application: MCUboot to
+`0x0`, slot1's trailer, and — the one the design did not anticipate — a stub
+header and TLV that make slot0 *readable* as an image without making it contain
+one. The 190 KB move into slot0 is still done by MCUboot on the next boot, using
+the same swap code every OTA uses. See *What MCUboot requires of each slot*.
 
 That has a useful consequence. `slot0` is `0xC000–0x84000` and the installer at
-`0x27000` sits **inside it** — but nothing the installer writes touches that
-range, so it never overwrites itself and needs no `__ramfunc`. It is destroyed
-later, by the swap, long after it has finished.
+`0x27000` sits **inside it** — but every address the installer writes is below
+`0x27000` or outside slot0 entirely, so it never overwrites itself and needs no
+`__ramfunc`. It is destroyed later, by the swap, long after it has finished.
+
+**That constraint is what shapes step 5**, and it is tighter than it looks: the
+stub's TLV has to land below `0x27000`, which is why the stub understates the
+image size rather than copying it.
 
 The application image is staged at `0x085000`, which is slot1 plus one sector —
 the offset `CONFIG_BOOT_SWAP_USING_OFFSET` expects, explained below.
@@ -88,7 +93,7 @@ below it. Column B draws both as unlabelled edges for that reason; only
 `0x027000`, `0x084000`, `0x085000` and `0x0EC000` are fixed. Nothing in the
 design depends on where the image ends in any case: MCUboot finds the header at
 `0x085000` and derives the trailer from the partition size, which is the point
-argued at length under *Where the trailer actually lives*.
+argued at length under *The trailer is at the end of the SLOT*.
 
 The end address is good for exactly one thing, and it is a check that does bind.
 The staged image has to fit between `0x085000` and the top of the UF2
@@ -172,11 +177,13 @@ The full sequence, with the recovery position at each point:
 | 2. erase `0xFB000–0xFC000` (slot1's trailer page), read it back | installer | one page | **bricked** if the erase took — this is where the window opens. A *blocked* erase changes nothing and is the one safe place to abort |
 | 3. write MCUboot to `0x0` | installer | **~1.5 s** | **bricked**, SWD only |
 | 4. write slot1's trailer: magic + `image_ok` | installer | µs | MCUboot is installed but finds nothing marked; it sits there. SWD only |
-| 4b. erase storage `0xFC000–0x100000` *(optional)* | installer | ~0.4 s | same as 4 |
-| 5. reset; MCUboot swaps slot1 into slot0 | MCUboot | ~20 s | **resumable** — an interrupted swap is restartable by design |
+| 5. stub a readable image into slot0: header at `0xC000`, TLV at `0x26000` | installer | two pages | as step 4 |
+| 5b. erase storage `0xFC000–0x100000` *(optional)* | installer | ~0.4 s | as step 4 |
+| 6. reset; MCUboot swaps slot1 into slot0 | MCUboot | ~20 s | **resumable** — an interrupted swap is restartable by design |
 
-**Step 5 does not happen.** Steps 1–4b were all confirmed on hardware; the swap
-was not. See *What hardware established*.
+**All six steps have run on hardware.** Step 5 is the one that is not obvious
+from the design — see *What MCUboot requires of each slot*, and *Pitfalls* for
+why it was not there to begin with.
 
 **The installer never copies 190 KB.** The application arrives through the UF2
 bootloader's own proven path in step 1, and the one large move — step 5 — is
@@ -199,121 +206,50 @@ Derived: write time at the datasheet's 41 µs per 32-bit word. Step 3 is 12 page
 erases plus 40 KB. Nothing is radio-synchronised because the installer runs no
 BLE, so these are full-speed figures rather than the sliced ones an OTA sees.
 
-## What hardware established
+### How long the whole thing takes
 
-Run on `Sophon-86F0`, restored to the UF2 era over SWD for the purpose. The
-board was never at risk: both backups are verified and the probe stayed
-attached.
+**About 45 seconds** for Sophon's 186 KiB application, end to end from dropping
+the file on the volume to the board advertising again.
 
-**What worked, and is now measured rather than argued:**
+That single number is less useful than its shape, because **two of the four
+terms scale with the application** and a different project's image moves them:
 
-| Claim | Result |
-|---|---|
-| A UF2 can carry two disjoint regions | installer at `0x27000`, image at `0x085000`, both landed |
-| The installer may erase the bootloader's own region | **yes — no ACL lock.** The erase took and read back `0xFF` |
-| That page is live bootloader code | **4063/4096 non-erased bytes**, matching the backup exactly |
-| Erasing the MBR is safe | **`VTOR` reads `0x27000` on the running board** — the vector table is the installer's own, not the MBR's |
-| The trailer geometry and flag combination | MCUboot's own console: `Swap type: perm` |
-| MCUboot written to `0x0` | verified by read-back; it runs |
+| | | Scales with |
+|---|---|---|
+| UF2 copy | ~0.04 s per KiB of payload | installer **and** image |
+| countdown | 10 s | nothing — deliberate, and removable |
+| installer's writes | ~2 s, step 3 dominating | nothing — MCUboot is a fixed 40 KB |
+| swap | ~0.11 s per KiB of image | image |
 
-Every address derived in this document was confirmed by the installer computing
-it independently on the board and printing it.
+Roughly: **~16 s fixed, plus ~0.15 s per KiB of application.**
 
-**What failed.** MCUboot, on its own console:
+The honesty qualifier: only the copy is measured on this path, and crudely —
+the volume-eject poll has one-second granularity, and three runs gave 3 s, 5 s
+and 12 s for files of 489 and 585 KiB. The ~20 s swap is measured, but during
+#271's OTA rather than here. Step timings are derived. The installer logs every
+step with an uptime timestamp, so a single capture of its console during a
+migration would replace this whole table with measurements.
 
-```
-I: Image index: 0, Swap type: perm
-I: Primary image:   magic=unset, swap_type=0x1, copy_done=0x3, image_ok=0x3
-I: Secondary image: magic=good,  swap_type=0x1, copy_done=0x3, image_ok=0x1
-W: Failed reading image headers; Image=0
-E: Image in the primary slot is not valid!
-E: Unable to find bootable image
-```
+## What MCUboot requires of each slot
 
-The gate is in `loader.c`, and it runs **after** the swap type is chosen and
-**before** it is acted on:
+The installer does **not** copy the application into slot0. It stages it in
+slot1, sets the trailer, makes slot0 readable, and resets; MCUboot performs the
+190 KB move on its first boot using the same swap code every OTA uses. The one
+large move is done by proven code rather than by one-off installer code.
 
-```c
-rc = boot_read_image_headers(state, !boot_status_is_reset(bs), bs);
-if (rc != 0) {
-    BOOT_LOG_WRN("Failed reading image headers; Image=%u", ...);
-    BOOT_SWAP_TYPE(state) = BOOT_SWAP_TYPE_NONE;   /* swap abandoned */
-    return;
-}
-```
+MCUboot asks **three separate things** of the two slots, and conflating them is
+what made the first version of this design fail:
 
-`boot_read_image_header()` in `swap_offset.c` returns `-1` for any slot whose
-`ih_magic` is not `IMAGE_MAGIC` once a boot status is in play. Slot0 holds the
-old SoftDevice and application, so it has no magic, so the swap is abandoned —
-and MCUboot falls through to booting a primary slot it has just declared
-invalid.
+| | What it reads | Satisfied by |
+|---|---|---|
+| Which swap to perform | slot1's trailer, and nothing else | step 4 |
+| Whether it can perform one at all | a readable image header in **both** slots | step 5 |
+| How much to move | both slots' header *and* TLV trailer | step 5 |
 
-**The self-overwrite problem was hidden, not dissolved.** The installer cannot
-simply erase slot0 to fix this: slot0 is `0xC000–0x84000` and the installer runs
-at `0x27000`, *inside it*. That is the same constraint this design claimed to
-have removed by handing the move to MCUboot.
+Only the first is indifferent to the primary slot. The second and third are not,
+and they are the whole reason step 5 exists.
 
-### A header in slot0 gets further, and is still not enough
-
-Tried on the board: copy the staged image's 512-byte header from `0x085000` to
-`0x0C000` — which the installer *can* do, that sector being nowhere near
-`0x27000`.
-
-`Failed reading image headers` disappears and MCUboot commits to the swap. It
-then calls `abort()` inside `swap_offset.c`, which carries 25 assertions. The
-header advertises a 189,672-byte image over a body that is erased, so the swap
-is working on a slot whose contents contradict its own header.
-
-**What the swap needs is coherence, not a magic number.** It exchanges the two
-slots' sectors, reading the primary as a real image — because for every other
-caller, it is one.
-
-### The route that remains
-
-`CONFIG_BOOT_BOOTSTRAP` exists for this exact situation — *"allows an erased
-primary slot to be initialized from a valid image in the secondary slot"* — and
-is **not** set in this project's bootloader. With it, a primary whose header
-reads erased is accepted, and MCUboot *overwrites* rather than swaps:
-
-```c
-#ifdef MCUBOOT_BOOTSTRAP
-    /* When bootstrapping it's OK to not have image magic in the primary slot */
-    if (rc != 0 && !boot_check_header_erased(state, BOOT_SLOT_PRIMARY)) {
-```
-
-What adopting it would change, none of it free:
-
-- The **shipped bootloader** gains a Kconfig, so the blob is rebuilt and every
-  board carries it afterwards. Bootstrap only affects the empty-primary case, so
-  #271's rollback *should* be unaffected — should be, not verified.
-- The installer erases slot0's **first sector only**, `0xC000–0xD000`, which it
-  may safely do from `0x27000`. `boot_check_header_erased()` tests `ih_magic`
-  alone, so one sector is enough.
-- The installer writes **no trailer**: the bootstrap branch fires only when the
-  swap type is `NONE`, and a trailer makes it `PERM`.
-- The staged image probably moves to **`0x084000`**, because bootstrap sets
-  `REVERT`, and under `MCUBOOT_SWAP_USING_OFFSET` a revert reads the secondary at
-  offset 0 rather than one sector in. **Unverified**, and exactly the kind of
-  detail that costs a board.
-
-## What MCUboot does on its first boot
-
-> **This section's conclusion is wrong, and hardware is what showed it.** The
-> reading of the decision table is correct as far as it goes — MCUboot really
-> does choose `perm` from the secondary trailer alone, and said so on its own
-> console. What it missed is the gate above, which runs before the decision is
-> acted on and requires a valid header in *both* slots.
-
-The installer does **not** copy the application into slot0. It stages it in slot1
-and sets the trailer, and MCUboot performs the move on its first boot using the
-same swap code every OTA uses. That is the point: the 190 KB move is done by code
-that is already proven, rather than by a one-off installer.
-
-The obvious objection is that **slot0 holds no bootable image at that moment** —
-it is whatever the old SoftDevice and application left behind. The decision table
-says that does not matter. The decision table is not the whole story.
-
-### The primary slot does not participate in the decision
+### The decision comes from the secondary trailer alone
 
 `boot_swap_tables[]` in `bootutil_public.c` decides the swap type purely from the
 *secondary* slot's trailer. Every primary field is a wildcard:
@@ -352,6 +288,41 @@ a migration.
 This is also why the confirmation policy in `src/ble.c` does not apply to the
 migration boot. It confirms an image that arrived **on trial**; an image that
 arrived `PERM` is already confirmed, and `boot_is_img_confirmed()` short-circuits.
+
+### The swap still has to read the primary slot
+
+Two gates read slot0 before any data moves, and neither appears in the decision
+table above:
+
+- `boot_read_image_headers()` abandons the swap outright if **either** slot
+  lacks `IMAGE_MAGIC`, setting the swap type to `NONE` and returning.
+- `boot_read_image_size()` on the primary, at `loader.c:1131`, looks for a TLV
+  trailer at `ih_hdr_size + ih_img_size`, and is followed by `assert(rc == 0)`.
+
+At that moment slot0 holds the old SoftDevice and application, so it satisfies
+neither. **And the installer cannot simply erase it**: slot0 is `0xC000–0x84000`
+and the installer runs at `0x27000`, inside it.
+
+**Step 5 writes a stub that is readable without being true** — a header at
+`0xC000` and a TLV trailer. Nothing validates the primary before the swap, and
+slot0 is about to be overwritten by it, so only legibility is required.
+
+The size claimed in that stub is the load-bearing part. A stub claiming the real
+190 KB puts its TLV at `0x03A6E8`, **inside the installer's own code**. Claiming
+a *small* image instead puts it in the SoftDevice remnant below the installer:
+
+```
+ih_img_size = 0x26000 − 0xC000 − 512 = 105,984
+```
+
+MCUboot sizes the swap from `max(primary, secondary)`, so understating the
+primary costs nothing — the real 190 KB still moves. `it_tlv_tot` is copied from
+the staged image's own trailer rather than invented, which doubles as a check
+that the staged image's trailer is where its header says it is.
+
+`0x26000` is the last sector before the installer, and a `BUILD_ASSERT` pins it
+below `INSTALLER_BASE` — an installer that grew into it fails to build rather
+than failing on a board.
 
 ### The staging offset, which is easy to get silently wrong
 
@@ -500,6 +471,54 @@ later OTA erases as it writes.
 The full sequence, with recovery position at each point, is the table under
 *Order is the whole safety argument* above.
 
+## Building the UF2
+
+The installer is a normal Zephyr application at `0x27000`, and the two pieces of
+payload are handled differently because they differ by a factor of five.
+
+**MCUboot's 40 KB is linked into the installer** as an ordinary `const` array.
+Small enough that the linker does not care, it travels with the code that writes
+it, and there is no second address to keep in step.
+
+**The 190 KB application image is merged in as hex records at `0x085000`**, then
+the merged hex is converted with `uf2conv.py`, which handles sparse input. The
+result is one file carrying two disjoint regions — which is all a UF2 is.
+
+Keeping the image out of the installer's own binary is not only about size: it is
+the artefact most likely to change, and merging keeps it swappable without
+rebuilding the installer. It is also the piece whose address is dictated by
+MCUboot rather than chosen, so it is worth having it appear exactly once, in the
+merge step, rather than buried in a linker script.
+
+## What it leaves behind
+
+**UICR is untouched.** `NRFFW[0]` still reads `0x000F4000`, pointing at the old
+Adafruit bootloader region. Harmless — MCUboot runs from `0x0` and the MBR that
+would read that pointer is gone — but it is a stale value that reads like a fact.
+Exactly the state observed on `Sophon-86F0` after its probe-based migration.
+
+**The Adafruit bootloader is destroyed in two stages.** Step 2 erases the single
+page holding slot1's trailer, which falls inside the bootloader's
+`0xF4000–0x100000` region and contains its reset vector's target; the swap in
+step 5 then writes the old slot0 contents across the rest of slot1, including
+what is left of it.
+
+There is no going back to UF2 except by restoring a `uf2-sdv7` backup over SWD —
+the same position a probe-migrated board is in.
+
+## Whether to build it
+
+**Not for `Sophon-4D88`.** There is a probe, and `flash-swd.sh` is proven and
+verifies its own writes.
+
+It is worth building if the goal is *"MCUboot adoption is a firmware update, not a
+site visit"* — a board in a case, at distance, or several at once. That is the
+only way #270 scales past boards that can be physically held.
+
+Weigh it honestly: this is a **bootloader installer whose failure mode is losing
+the bootloader it is replacing**, written to avoid a procedure that already works.
+It should be built deliberately or not at all.
+
 ## An alternative that is simpler, and not what #294 builds
 
 There is a shorter version of all of this, and it is worth writing down because
@@ -578,53 +597,89 @@ to notice.
 **This alternative is the stronger design the day direct-XIP is adopted.** Until
 then it is recorded, not built. See #290.
 
-## What it leaves behind
+## Pitfalls, and how this design reached its shape
 
-**UICR is untouched.** `NRFFW[0]` still reads `0x000F4000`, pointing at the old
-Adafruit bootloader region. Harmless — MCUboot runs from `0x0` and the MBR that
-would read that pointer is gone — but it is a stale value that reads like a fact.
-Exactly the state observed on `Sophon-86F0` after its probe-based migration.
+Three claims in the original design were wrong. The board is what showed it, and
+**each failure was silent** — no error, or an error naming the wrong thing.
 
-**The Adafruit bootloader is destroyed in two stages.** Step 2 erases the single
-page holding slot1's trailer, which falls inside the bootloader's
-`0xF4000–0x100000` region and contains its reset vector's target; the swap in
-step 5 then writes the old slot0 contents across the rest of slot1, including
-what is left of it.
+### The swap table is not the whole story
 
-There is no going back to UF2 except by restoring a `uf2-sdv7` backup over SWD —
-the same position a probe-migrated board is in.
+The design reasoned from `boot_swap_tables[]`, which is genuinely indifferent to
+the primary slot, and concluded that slot0's contents could not matter. MCUboot
+chose `perm` exactly as predicted, and then refused anyway:
 
-## Whether to build it
+```
+I: Image index: 0, Swap type: perm
+I: Primary image:   magic=unset, swap_type=0x1, copy_done=0x3, image_ok=0x3
+I: Secondary image: magic=good,  swap_type=0x1, copy_done=0x3, image_ok=0x1
+W: Failed reading image headers; Image=0
+E: Image in the primary slot is not valid!
+E: Unable to find bootable image
+```
 
-**Not for `Sophon-4D88`.** There is a probe, and `flash-swd.sh` is proven and
-verifies its own writes.
+**Choosing a swap and being able to perform one are different questions.** The
+gate runs after the decision and before it is acted on.
 
-It is worth building if the goal is *"MCUboot adoption is a firmware update, not a
-site visit"* — a board in a case, at distance, or several at once. That is the
-only way #270 scales past boards that can be physically held.
+### A header alone makes it worse
 
-Weigh it honestly: this is a **bootloader installer whose failure mode is losing
-the bootloader it is replacing**, written to avoid a procedure that already works.
-It should be built deliberately or not at all.
+The obvious repair — write a valid header into slot0 — turns a clean refusal
+into `abort()`. The call that aborts is *gated on the very magic just
+supplied*, so supplying it opens a code path that was previously skipped.
 
-## Building the UF2
+Read off the board: the staged image's TLV trailer sits at `0x0B36E8` with magic
+`0x6907`, while the same offset into slot0, `0x03A6E8`, holds `0xf8c2` — left
+over from the SoftDevice. `boot_read_image_size()` returns `BOOT_EBADIMAGE` at
+`swap_offset.c:780`, and `assert(rc == 0)` does the rest.
 
-The installer is a normal Zephyr application at `0x27000`, and the two pieces of
-payload are handled differently because they differ by a factor of five.
+**A half-measure here is worse than none**, which is why step 5 writes both a
+header and a trailer or neither.
 
-**MCUboot's 40 KB is linked into the installer** as an ordinary `const` array.
-Small enough that the linker does not care, it travels with the code that writes
-it, and there is no second address to keep in step.
+### The self-overwrite problem was hidden, not dissolved
 
-**The 190 KB application image is merged in as hex records at `0x085000`**, then
-the merged hex is converted with `uf2conv.py`, which handles sparse input. The
-result is one file carrying two disjoint regions — which is all a UF2 is.
+The design's headline simplification was that handing the 190 KB move to MCUboot
+removed the need for `__ramfunc`, because the installer need never write slot0.
+It still cannot write slot0 — but it *must* write two small things into it, and
+both have to land below `0x27000`. The constraint never went away; it shrank.
 
-Keeping the image out of the installer's own binary is not only about size: it is
-the artefact most likely to change, and merging keeps it swappable without
-rebuilding the installer. It is also the piece whose address is dictated by
-MCUboot rather than chosen, so it is worth having it appear exactly once, in the
-merge step, rather than buried in a linker script.
+### The route not taken
+
+`CONFIG_BOOT_BOOTSTRAP` — *"allows an erased primary slot to be initialized from
+a valid image in the secondary slot"* — is MCUboot's supported answer to this
+situation, and is **not** set in this project's bootloader. It was the plan
+until step 5 turned out to work without it.
+
+It remains the better answer if the stub proves fragile. Its costs are why it
+was not reached for first: the **shipped bootloader** gains a Kconfig that every
+board then carries, and the staged image probably moves to `0x084000`, since
+bootstrap sets `REVERT` and a revert reads the secondary at offset 0 rather than
+one sector in. Both unverified.
+
+### What hardware confirmed
+
+Everything else survived contact with the board.
+
+| Claim | Result |
+|---|---|
+| A UF2 can carry two disjoint regions | installer at `0x27000`, image at `0x085000`, both landed |
+| The installer may erase the bootloader's own region | **yes — no ACL lock.** The erase took and read back `0xFF` |
+| That page is live bootloader code | **4063/4096 non-erased bytes**, matching the backup exactly |
+| Erasing the MBR is safe | **`VTOR` reads `0x27000` on the running board** — the vector table is the installer's own |
+| The trailer geometry and flag combination | MCUboot's own console: `Swap type: perm` |
+| MCUboot written to `0x0` | verified by read-back; it runs |
+
+Every address derived in this document was confirmed by the installer computing
+it independently on the board and printing it.
+
+### What is still untested
+
+- **An interrupted swap.** Step 5's stub is a lie told to a bootloader: a swap
+  interrupted between step 5 and completion leaves a header pointing at
+  nonsense. An interrupted swap is restartable by design, and that path has not
+  been exercised.
+- **Any board but `86F0`.** `Sophon-4D88` still has no `uf2-sdv7` backup (#270),
+  and nothing should be attempted there until it does.
+- **Timings.** The figures under *Where the numbers come from* remain derived,
+  not measured.
 
 ## Before any code
 

@@ -54,6 +54,14 @@ static const uint8_t mcuboot_blob[] = {
 #define STORAGE_BASE   0x0FC000U /* slot1 ends here; storage runs to 0x100000 */
 
 /*
+ * Where the stub TLV trailer for slot0 goes: the last sector before the
+ * installer. See step 5 for why slot0 needs one at all. It must sit inside
+ * slot0, below the installer, and in the SoftDevice remnant that nothing
+ * needs -- the asserts below pin all three.
+ */
+#define PRIMARY_STUB_TLV 0x026000U
+
+/*
  * MCUboot's trailer geometry. BOOT_MAX_ALIGN is 8 on this SoC, and
  * BOOT_MAGIC_SZ is 16. Reproduced from bootutil_misc.h rather than included,
  * because this application is not built against MCUboot's headers -- the
@@ -80,6 +88,10 @@ BUILD_ASSERT(SLOT1_BASE + SLOT_SIZE == 0x0FC000U, "slot1 does not end at 0xFC000
 BUILD_ASSERT(TRAILER_PAGE == 0x0FB000U, "trailer page moved");
 BUILD_ASSERT(STAGED_IMAGE == SLOT1_BASE + FLASH_SECTOR,
 	     "staged image must be slot1 + one sector, per CONFIG_BOOT_SWAP_USING_OFFSET");
+BUILD_ASSERT(PRIMARY_STUB_TLV + FLASH_SECTOR <= INSTALLER_BASE,
+	     "the stub TLV sector would overlap the installer, which is writing it");
+BUILD_ASSERT(PRIMARY_STUB_TLV > SLOT0_BASE + FLASH_SECTOR,
+	     "the stub TLV must leave room for slot0's header sector below it");
 
 /*
  * The trailer magic, copied from the BOOT_MAX_ALIGN == 8 branch of
@@ -96,6 +108,14 @@ static const uint8_t boot_magic[BOOT_MAGIC_SZ] = {
 };
 
 #define BOOT_FLAG_SET 1U /* bootutil_public.h; "leave equal to one, written to flash" */
+
+/* image.h. The TLV trailer that follows an image's body. */
+#define IMAGE_TLV_INFO_MAGIC 0x6907U
+
+struct image_tlv_info {
+	uint16_t it_magic;
+	uint16_t it_tlv_tot;
+};
 
 /* MCUboot's image header, from image.h. Only the fields this needs. */
 #define IMAGE_MAGIC 0x96f3b83dU
@@ -376,17 +396,115 @@ static int step4_write_trailer(void)
 }
 
 /*
- * Step 4b. The storage partition, which nothing currently uses.
+ * Step 5. Make slot0 coherent enough for the swap to run.
+ *
+ * THIS IS THE STEP THE DESIGN DID NOT KNOW IT NEEDED, and it was found by the
+ * board refusing to migrate. MCUboot will not swap into a primary slot it
+ * cannot read as an image, and slot0 at this moment holds the old SoftDevice
+ * and application.
+ *
+ * Two gates, in this order, and the second only appears once the first is
+ * passed:
+ *
+ *   loader.c      boot_read_image_headers() abandons the swap outright if
+ *                 either slot lacks IMAGE_MAGIC. Without a header here,
+ *                 MCUboot prints "Failed reading image headers" and gives up.
+ *
+ *   loader.c:1134 having found a magic, it then calls boot_read_image_size()
+ *                 on the primary and asserts the result. That looks for a TLV
+ *                 trailer at ih_hdr_size + ih_img_size, and aborts when it is
+ *                 not there -- so writing a header ALONE turns a clean refusal
+ *                 into an abort(). Both observed on hardware.
+ *
+ * The trick is the image size. A stub claiming the real 190 KB would put its
+ * TLV at 0x03A6E8, inside the installer's own code, which it plainly cannot
+ * write. Claiming a SMALL size instead puts the TLV in the SoftDevice remnant
+ * below the installer, which is free. MCUboot sizes the swap from
+ * max(primary, secondary), so understating the primary costs nothing -- the
+ * real 190 KB still moves.
+ *
+ * Nothing here has to be true. Slot0 is about to be overwritten by the swap;
+ * this only has to be readable.
+ */
+static int step5_stub_primary_slot(void)
+{
+	const struct image_header *staged = at(STAGED_IMAGE);
+	const struct image_tlv_info *staged_tlv;
+	struct image_header stub;
+	struct image_tlv_info tlv;
+	uint32_t tlv_off;
+
+	LOG_INF("step 5: stub a readable image into slot0");
+
+	/*
+	 * Reuse the staged image's own TLV total rather than inventing one.
+	 * Reading it also checks that the staged image's trailer is where its
+	 * header says -- a free sanity check on the thing about to be booted.
+	 */
+	tlv_off = STAGED_IMAGE + staged->ih_hdr_size + staged->ih_img_size;
+	staged_tlv = at(tlv_off);
+	if (staged_tlv->it_magic != IMAGE_TLV_INFO_MAGIC) {
+		LOG_ERR("  staged image has no TLV trailer at 0x%06X (magic 0x%04x)",
+			(unsigned int)tlv_off, staged_tlv->it_magic);
+		return -EINVAL;
+	}
+	LOG_INF("  staged TLV at 0x%06X, %u B", (unsigned int)tlv_off, staged_tlv->it_tlv_tot);
+
+	stub = *staged;
+	stub.ih_protect_tlv_size = 0;
+	stub.ih_img_size = PRIMARY_STUB_TLV - SLOT0_BASE - stub.ih_hdr_size;
+
+	tlv.it_magic = IMAGE_TLV_INFO_MAGIC;
+	tlv.it_tlv_tot = staged_tlv->it_tlv_tot;
+
+	LOG_INF("  stub header at 0x%06X claims %u B, putting its TLV at 0x%06X",
+		(unsigned int)SLOT0_BASE, stub.ih_img_size, (unsigned int)PRIMARY_STUB_TLV);
+
+	int rc = flash_erase(flash_dev, SLOT0_BASE, FLASH_SECTOR);
+
+	if (rc) {
+		LOG_ERR("  slot0 header erase returned %d", rc);
+		return rc;
+	}
+	rc = flash_write(flash_dev, SLOT0_BASE, &stub, sizeof(stub));
+	if (rc) {
+		LOG_ERR("  slot0 header write returned %d", rc);
+		return rc;
+	}
+
+	rc = flash_erase(flash_dev, PRIMARY_STUB_TLV, FLASH_SECTOR);
+	if (rc) {
+		LOG_ERR("  stub TLV erase returned %d", rc);
+		return rc;
+	}
+	rc = flash_write(flash_dev, PRIMARY_STUB_TLV, &tlv, sizeof(tlv));
+	if (rc) {
+		LOG_ERR("  stub TLV write returned %d", rc);
+		return rc;
+	}
+
+	if (!flash_matches(SLOT0_BASE, (const uint8_t *)&stub, sizeof(stub)) ||
+	    !flash_matches(PRIMARY_STUB_TLV, (const uint8_t *)&tlv, sizeof(tlv))) {
+		LOG_ERR("  READ-BACK MISMATCH");
+		return -EIO;
+	}
+
+	LOG_INF("  slot0 is now readable as an image; the swap can size itself");
+	return 0;
+}
+
+/*
+ * Step 5b. The storage partition, which nothing currently uses.
  *
  * Not required. It is erased anyway because the first time settings storage is
  * enabled it would otherwise meet flash that is neither erased nor a valid
  * structure -- a latent trap, for about 0.4 s now.
  */
-static void step4b_erase_storage(void)
+static void step5b_erase_storage(void)
 {
 	uint32_t len = 0x100000U - STORAGE_BASE;
 
-	LOG_INF("step 4b: erase storage 0x%06X-0x100000 (optional)", (unsigned int)STORAGE_BASE);
+	LOG_INF("step 5b: erase storage 0x%06X-0x100000 (optional)", (unsigned int)STORAGE_BASE);
 
 	int rc = flash_erase(flash_dev, STORAGE_BASE, len);
 
@@ -406,7 +524,10 @@ static void migrate(void)
 	if (step4_write_trailer() != 0) {
 		return;
 	}
-	step4b_erase_storage();
+	if (step5_stub_primary_slot() != 0) {
+		return;
+	}
+	step5b_erase_storage();
 
 	LOG_INF("");
 	LOG_INF("MIGRATION COMPLETE. Resetting; MCUboot swaps slot1 into slot0,");
