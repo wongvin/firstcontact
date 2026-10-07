@@ -40,7 +40,31 @@ if(NOT EXISTS "${SOPHON_MCUBOOT_BIN}")
     "  Or point at one: -DSOPHON_MCUBOOT_BIN=/path/to/zephyr.bin")
 endif()
 
+#
+# The blob's CRC32, computed at configure time and checked on the board before
+# the blob is written to 0x0 (#294 requirement). CRC32 rather than a
+# cryptographic hash because the threat here is CORRUPTION IN DELIVERY, not
+# forgery: a UF2 is unsigned either way, and the control against a hostile
+# image is MCUboot's own signature check on the application it later boots
+# (#274). A SHA-256 would mean linking a crypto backend into an application
+# whose entire value is being small and predictable.
+execute_process(
+  COMMAND python3 -c
+    "import zlib,sys;print(hex(zlib.crc32(open(sys.argv[1],'rb').read())))"
+    "${SOPHON_MCUBOOT_BIN}"
+  OUTPUT_VARIABLE SOPHON_MCUBOOT_CRC32
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  RESULT_VARIABLE SOPHON_CRC_RC)
+
+if(NOT SOPHON_CRC_RC EQUAL 0)
+  message(FATAL_ERROR "could not compute the MCUboot blob's CRC32")
+endif()
+
+message(STATUS "MCUboot blob CRC32: ${SOPHON_MCUBOOT_CRC32}")
+
 target_sources(app PRIVATE src/main.c)
+target_compile_definitions(app PRIVATE
+  SOPHON_MCUBOOT_CRC32=${SOPHON_MCUBOOT_CRC32})
 
 # Zephyr's own byte-array generator rather than a hand-rolled one. It emits a
 # comma-separated list for #include inside an initialiser, and re-runs when the

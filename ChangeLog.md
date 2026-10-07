@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-06
+
+### feat: the installer migrates, and MCUboot then refuses to swap (#294)
+
+- **The installer now writes flash**: `CONFIG_FLASH` enabled, the ACL probe erase, MCUboot to `0x0`, slot1's trailer, and a cold reset. Constants were read out of MCUboot's own source rather than recalled -- the 16-byte trailer magic from the `BOOT_MAX_ALIGN == 8` branch of `bootutil_public.c`, `BOOT_FLAG_SET`, and which branch applies at all (`CONFIG_MCUBOOT_BOOT_MAX_ALIGN=4` is not `> 8`, so the fallback of 8 stands). The other branch is a *different* 16 bytes, and getting it wrong means MCUboot silently ignores the image.
+- **Run on `Sophon-86F0`, restored to the UF2 era over SWD for the purpose. Steps 1 through 4b all worked.** The installer may erase the Adafruit bootloader's own region -- no ACL lock, the erase took and read back `0xFF`. That page holds **4063/4096 non-erased bytes** on hardware, matching the September backup, so erasing it really is destructive and the design is right to put it first. **`VTOR` reads `0x27000` on the running board**, so erasing the MBR at `0x0` does not take the vector table with it -- the design's central safety claim, confirmed rather than inferred.
+- **The central mechanism does not work.** MCUboot's own console: `Swap type: perm`, secondary `magic=good`, `image_ok=0x1` -- the trailer was read back exactly as intended -- and then `Failed reading image headers; Image=0`. A gate in `loader.c` runs **after** the swap type is chosen and **before** it is acted on, abandoning the swap when either slot lacks a valid `ih_magic`. Slot0 holds the old SoftDevice and application, so it has none. **"The installer never copies 190 KB; MCUboot does the move" does not hold.**
+- **The self-overwrite problem was hidden, not dissolved.** The installer cannot erase slot0 to fix this: slot0 is `0xC000-0x84000` and the installer runs at `0x27000`, inside it. That is precisely the constraint the revised design claimed to have removed by handing the move to MCUboot.
+- **A header in slot0 gets further and is still not enough.** Copying the staged image's 512-byte header to `0x0C000` removes the error and MCUboot commits to the swap, then `abort()`s inside `swap_offset.c`: the header advertises 189,672 bytes over an erased body. The swap needs the primary to be *coherent*, not merely to carry a magic number. `CONFIG_BOOT_BOOTSTRAP` is the remaining route and is recorded with its four unverified consequences rather than adopted.
+- `UF2-MIGRATION.md` keeps the analysis that survived -- the ACL probe, trailer geometry, every derived address, the two-region UF2 -- and corrects only the swap section, noting that its reading of the decision table was right and still insufficient.
+
 ## 2026-10-05
 
 ### fix: the migration UF2 wedged the bootloader (#294)

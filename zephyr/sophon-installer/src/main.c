@@ -23,8 +23,11 @@
 
 #include <string.h>
 
+#include <zephyr/drivers/flash.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/crc.h>
+#include <zephyr/sys/reboot.h>
 #include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(installer, LOG_LEVEL_INF);
@@ -47,6 +50,8 @@ static const uint8_t mcuboot_blob[] = {
 #define STAGED_IMAGE   0x085000U /* SLOT1_BASE + one sector */
 #define UF2_WINDOW_END 0x0EC000U /* top of what the UF2 bootloader accepts */
 #define FLASH_SECTOR   0x001000U
+#define MCUBOOT_REGION 0x00C000U /* 0x0 up to slot0: MBR + SoftDevice, in layout A */
+#define STORAGE_BASE   0x0FC000U /* slot1 ends here; storage runs to 0x100000 */
 
 /*
  * MCUboot's trailer geometry. BOOT_MAX_ALIGN is 8 on this SoC, and
@@ -76,6 +81,22 @@ BUILD_ASSERT(TRAILER_PAGE == 0x0FB000U, "trailer page moved");
 BUILD_ASSERT(STAGED_IMAGE == SLOT1_BASE + FLASH_SECTOR,
 	     "staged image must be slot1 + one sector, per CONFIG_BOOT_SWAP_USING_OFFSET");
 
+/*
+ * The trailer magic, copied from the BOOT_MAX_ALIGN == 8 branch of
+ * bootutil_public.c. Which branch applies is not a guess: this build leaves
+ * CONFIG_MCUBOOT_BOOT_MAX_ALIGN at 4, the Zephyr port only overrides
+ * BOOT_MAX_ALIGN when that symbol exceeds 8, so the fallback of 8 stands --
+ * and the BUILD_ASSERTs above independently pin the offsets to an align of 8.
+ * The other branch is a DIFFERENT 16 bytes, so getting this wrong means
+ * MCUboot silently ignores the staged image.
+ */
+static const uint8_t boot_magic[BOOT_MAGIC_SZ] = {
+	0x77, 0xc2, 0x95, 0xf3, 0x60, 0xd2, 0xef, 0x7f,
+	0x35, 0x52, 0x50, 0x0f, 0x2c, 0xb6, 0x79, 0x80,
+};
+
+#define BOOT_FLAG_SET 1U /* bootutil_public.h; "leave equal to one, written to flash" */
+
 /* MCUboot's image header, from image.h. Only the fields this needs. */
 #define IMAGE_MAGIC 0x96f3b83dU
 
@@ -101,6 +122,24 @@ struct image_header {
 static const void *at(uint32_t addr)
 {
 	return (const void *)(uintptr_t)addr;
+}
+
+/*
+ * Compare flash against a buffer without memcmp(). MCUBOOT_DEST is 0, and GCC
+ * sees a pointer literally derived from address zero as NULL -- it warns
+ * -Wnonnull and is entitled to assume the call never happens. volatile keeps
+ * the reads, and the loop keeps the compiler out of it.
+ */
+static bool flash_matches(uint32_t addr, const uint8_t *buf, size_t len)
+{
+	const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)addr;
+
+	for (size_t i = 0; i < len; i++) {
+		if (p[i] != buf[i]) {
+			return false;
+		}
+	}
+	return true;
 }
 
 static size_t count_written(uint32_t addr, size_t len)
@@ -152,7 +191,7 @@ static bool survey_staged_image(void)
 	return true;
 }
 
-static void survey(void)
+static bool survey(void)
 {
 	LOG_INF("Sophon UF2 -> MCUboot installer (#294)");
 	LOG_INF("*** SURVEY BUILD -- WRITES NOTHING ***");
@@ -170,8 +209,8 @@ static void survey(void)
 
 	LOG_INF("");
 	LOG_INF("slot1 trailer, derived from the PARTITION size (not the image):");
-	LOG_INF("  copy_done  0x%06X", SLOT1_BASE + BOOT_COPY_DONE_OFF);
-	LOG_INF("  image_ok   0x%06X", SLOT1_BASE + BOOT_IMAGE_OK_OFF);
+	LOG_INF("  copy_done  0x%06X", (unsigned int)(SLOT1_BASE + BOOT_COPY_DONE_OFF));
+	LOG_INF("  image_ok   0x%06X", (unsigned int)(SLOT1_BASE + BOOT_IMAGE_OK_OFF));
 	LOG_INF("  magic      0x%06X", SLOT1_BASE + BOOT_MAGIC_OFF);
 	LOG_INF("  slot1 ends 0x%06X", SLOT1_BASE + SLOT_SIZE);
 
@@ -184,8 +223,9 @@ static void survey(void)
 	 */
 	size_t written = count_written(TRAILER_PAGE, FLASH_SECTOR);
 
-	LOG_INF("  trailer page 0x%06X-0x%06X holds %u/%u non-erased bytes", TRAILER_PAGE,
-		TRAILER_PAGE + FLASH_SECTOR, (unsigned int)written, FLASH_SECTOR);
+	LOG_INF("  trailer page 0x%06X-0x%06X holds %u/%u non-erased bytes",
+		(unsigned int)TRAILER_PAGE, (unsigned int)(TRAILER_PAGE + FLASH_SECTOR),
+		(unsigned int)written, FLASH_SECTOR);
 	if (written == 0) {
 		LOG_WRN("  that page is ALREADY ERASED -- this board is not on the stock");
 		LOG_WRN("  UF2 layout, and the migration's assumptions do not hold");
@@ -193,35 +233,219 @@ static void survey(void)
 
 	LOG_INF("");
 	if (staged_ok) {
-		LOG_INF("survey OK -- both payloads present, nothing written");
+		LOG_INF("survey OK -- both payloads present");
 	} else {
-		LOG_ERR("survey FAILED -- see above, nothing written");
+		LOG_ERR("survey FAILED -- see above");
 	}
+	return staged_ok;
+}
+
+/* ------------------------------------------------------------------------ */
+/* The migration. Everything below writes flash.                             */
+/* ------------------------------------------------------------------------ */
+
+static const struct device *const flash_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_flash_controller));
+
+/*
+ * Step 2. Erase slot1's trailer page, and READ IT BACK.
+ *
+ * This leads, and the reason is the whole safety argument. The page is inside
+ * the Adafruit bootloader's own region, and on this SoC a write-protected
+ * region refuses erases as well as writes, with the configuration surviving
+ * until reset. If ACL were locking it, every later step would still succeed and
+ * MCUboot would then find nothing marked -- a brick discovered after the point
+ * of no return.
+ *
+ * Doing it first makes a refusal harmless: a blocked erase changes nothing, so
+ * aborting here leaves the board exactly as it was found, with 0x0 untouched
+ * and the Adafruit bootloader still reachable.
+ *
+ * The read-back is not ceremony. A blocked erase is SILENT -- it does not fail,
+ * it simply does not happen -- so the only way to learn the answer is to look.
+ */
+static int step2_erase_trailer_page(void)
+{
+	LOG_INF("step 2: erase 0x%06X-0x%06X (slot1 trailer page)", (unsigned int)TRAILER_PAGE,
+		(unsigned int)(TRAILER_PAGE + FLASH_SECTOR));
+
+	int rc = flash_erase(flash_dev, TRAILER_PAGE, FLASH_SECTOR);
+
+	if (rc) {
+		LOG_ERR("  erase returned %d -- nothing written, board untouched", rc);
+		return rc;
+	}
+
+	size_t left = count_written(TRAILER_PAGE, FLASH_SECTOR);
+
+	if (left != 0) {
+		LOG_ERR("  READ-BACK FAILED: %u/%u bytes still set", (unsigned int)left,
+			FLASH_SECTOR);
+		LOG_ERR("  the erase did not take. The most likely cause is an ACL lock");
+		LOG_ERR("  over the bootloader region, which survives until reset.");
+		LOG_ERR("  ABORTING: 0x0 is untouched and the board is as it was found.");
+		return -EACCES;
+	}
+
+	LOG_INF("  erased and verified -- the point of no return is now behind us");
+	return 0;
 }
 
 /*
- * Repeat the survey rather than report it once.
+ * Step 3. MCUboot to 0x0. ~1.5 s, and the board is unbootable throughout.
  *
- * The report is longer than this board's CDC ACM buffer, which holds about
- * 1 KB, so a console attached after boot sees it truncated mid-line and then
- * nothing -- the board has already said everything it intends to say.
- * Observed on 86F0 on the first run, and not recoverable by resetting,
- * because a reset re-enumerates USB and drops whatever console was attached.
- *
- * Reprinting makes the result readable whenever a console is attached, which
- * is the entire value of a build whose only output is a report. It costs
- * nothing: this application has nothing else to do, and a later milestone
- * that actually writes flash will not survey in a loop.
+ * The CRC is checked BEFORE the erase, so a corrupt payload costs nothing; what
+ * remains after it passes is power loss alone.
  */
-#define SURVEY_PERIOD_S 15
+static int step3_write_mcuboot(void)
+{
+	uint32_t crc = crc32_ieee(mcuboot_blob, sizeof(mcuboot_blob));
+
+	LOG_INF("step 3: MCUboot blob CRC32 0x%08x (expected 0x%08x)", crc,
+		(uint32_t)SOPHON_MCUBOOT_CRC32);
+	if (crc != (uint32_t)SOPHON_MCUBOOT_CRC32) {
+		LOG_ERR("  CRC MISMATCH -- refusing to write a corrupt bootloader.");
+		LOG_ERR("  The trailer page is already erased, so this board now needs");
+		LOG_ERR("  SWD recovery. That is the one ordering cost of probing first.");
+		return -EINVAL;
+	}
+
+	LOG_INF("  erasing 0x%06X-0x%06X", (unsigned int)MCUBOOT_DEST,
+		(unsigned int)MCUBOOT_REGION);
+	int rc = flash_erase(flash_dev, MCUBOOT_DEST, MCUBOOT_REGION);
+
+	if (rc) {
+		LOG_ERR("  erase returned %d -- BOARD IS NOW UNBOOTABLE, recover over SWD", rc);
+		return rc;
+	}
+
+	LOG_INF("  writing %u B", (unsigned int)sizeof(mcuboot_blob));
+	rc = flash_write(flash_dev, MCUBOOT_DEST, mcuboot_blob, sizeof(mcuboot_blob));
+	if (rc) {
+		LOG_ERR("  write returned %d -- BOARD IS NOW UNBOOTABLE, recover over SWD", rc);
+		return rc;
+	}
+
+	if (!flash_matches(MCUBOOT_DEST, mcuboot_blob, sizeof(mcuboot_blob))) {
+		LOG_ERR("  READ-BACK MISMATCH -- recover over SWD");
+		return -EIO;
+	}
+
+	LOG_INF("  MCUboot written and verified");
+	return 0;
+}
+
+/*
+ * Step 4. The trailer: magic GOOD, image_ok SET, copy_done left UNSET.
+ *
+ * That combination is the PERM row of the swap table -- it tells MCUboot the
+ * staged image is to be installed permanently rather than tried once. The
+ * primary slot does not participate in that decision, which is what makes this
+ * work at all: slot0 currently holds the old UF2-era application and is not a
+ * valid MCUboot image.
+ */
+static int step4_write_trailer(void)
+{
+	uint8_t flag[BOOT_MAX_ALIGN];
+
+	LOG_INF("step 4: trailer at 0x%06X", (unsigned int)(SLOT1_BASE + BOOT_MAGIC_OFF));
+
+	int rc =
+		flash_write(flash_dev, SLOT1_BASE + BOOT_MAGIC_OFF, boot_magic, sizeof(boot_magic));
+
+	if (rc) {
+		LOG_ERR("  magic write returned %d", rc);
+		return rc;
+	}
+
+	/* Pad with the erased value: 0xFF writes nothing, 0x00 would clear bits. */
+	memset(flag, 0xFF, sizeof(flag));
+	flag[0] = BOOT_FLAG_SET;
+	rc = flash_write(flash_dev, SLOT1_BASE + BOOT_IMAGE_OK_OFF, flag, sizeof(flag));
+	if (rc) {
+		LOG_ERR("  image_ok write returned %d", rc);
+		return rc;
+	}
+
+	if (!flash_matches(SLOT1_BASE + BOOT_MAGIC_OFF, boot_magic, sizeof(boot_magic))) {
+		LOG_ERR("  magic read-back MISMATCH");
+		return -EIO;
+	}
+
+	LOG_INF("  magic GOOD, image_ok SET, copy_done left UNSET");
+	return 0;
+}
+
+/*
+ * Step 4b. The storage partition, which nothing currently uses.
+ *
+ * Not required. It is erased anyway because the first time settings storage is
+ * enabled it would otherwise meet flash that is neither erased nor a valid
+ * structure -- a latent trap, for about 0.4 s now.
+ */
+static void step4b_erase_storage(void)
+{
+	uint32_t len = 0x100000U - STORAGE_BASE;
+
+	LOG_INF("step 4b: erase storage 0x%06X-0x100000 (optional)", (unsigned int)STORAGE_BASE);
+
+	int rc = flash_erase(flash_dev, STORAGE_BASE, len);
+
+	if (rc) {
+		LOG_WRN("  returned %d -- harmless, nothing uses it yet", rc);
+	}
+}
+
+static void migrate(void)
+{
+	if (step2_erase_trailer_page() != 0) {
+		return;
+	}
+	if (step3_write_mcuboot() != 0) {
+		return;
+	}
+	if (step4_write_trailer() != 0) {
+		return;
+	}
+	step4b_erase_storage();
+
+	LOG_INF("");
+	LOG_INF("MIGRATION COMPLETE. Resetting; MCUboot swaps slot1 into slot0,");
+	LOG_INF("which takes about 20 s and is restartable if interrupted.");
+	k_sleep(K_MSEC(500)); /* let the console drain before the reset */
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
+#define COUNTDOWN_S 10
 
 int main(void)
 {
+	/*
+	 * A failed survey is not a reason to retry -- nothing about the board
+	 * will change on its own -- so report it forever rather than acting on
+	 * a payload that is not there. Reprinting matters because the report is
+	 * longer than this board's CDC ACM buffer, which holds about 1 KB: a
+	 * console attached after boot sees it truncated mid-line and then
+	 * nothing, and a reset to retry re-enumerates USB and drops the console.
+	 */
+	while (!survey()) {
+		LOG_ERR("--- refusing to migrate; retrying the survey in %d s ---", COUNTDOWN_S);
+		k_sleep(K_SECONDS(COUNTDOWN_S));
+	}
+
+	LOG_INF("");
+	LOG_WRN("MIGRATING in %d s. This REPLACES the bootloader.", COUNTDOWN_S);
+	LOG_WRN("Remove power now to abort -- after this, only SWD recovers it.");
+	for (int i = COUNTDOWN_S; i > 0; i--) {
+		LOG_WRN("  %d", i);
+		k_sleep(K_SECONDS(1));
+	}
+
+	migrate();
+
+	/* Only reached if a step failed; migrate() reboots on success. */
 	for (;;) {
-		survey();
-		LOG_INF("--- repeating in %d s ---", SURVEY_PERIOD_S);
-		LOG_INF("");
-		k_sleep(K_SECONDS(SURVEY_PERIOD_S));
+		LOG_ERR("migration did not complete -- see above. Recover over SWD.");
+		k_sleep(K_SECONDS(30));
 	}
 	return 0;
 }

@@ -1,7 +1,15 @@
 # Migrating a board from UF2 to MCUboot without a probe
 
-**Status: design, not built.** Nothing here has run on hardware. Figures are
-marked as measured or derived throughout.
+**Status: built, run on hardware, and the central mechanism does not work.**
+Tried on `Sophon-86F0`, 2026-10-06. The delivery half works end to end and the
+installer does everything this document says it should. **MCUboot then refuses
+to swap**, because it will not install into a primary slot that holds no valid
+image header — a requirement this design did not know about. *What hardware
+established* below has the evidence.
+
+The rest of the document is left standing rather than rewritten. Everything
+except the swap survived contact with the board, and the parts that were right
+are worth as much as the part that was wrong.
 
 **#294 implements the design in this document and not the simpler alternative
 below**, which needs a direct-XIP MCUboot and therefore a decision belonging to
@@ -167,6 +175,9 @@ The full sequence, with the recovery position at each point:
 | 4b. erase storage `0xFC000–0x100000` *(optional)* | installer | ~0.4 s | same as 4 |
 | 5. reset; MCUboot swaps slot1 into slot0 | MCUboot | ~20 s | **resumable** — an interrupted swap is restartable by design |
 
+**Step 5 does not happen.** Steps 1–4b were all confirmed on hardware; the swap
+was not. See *What hardware established*.
+
 **The installer never copies 190 KB.** The application arrives through the UF2
 bootloader's own proven path in step 1, and the one large move — step 5 — is
 performed by MCUboot's swap code rather than by one-off installer code.
@@ -188,7 +199,110 @@ Derived: write time at the datasheet's 41 µs per 32-bit word. Step 3 is 12 page
 erases plus 40 KB. Nothing is radio-synchronised because the installer runs no
 BLE, so these are full-speed figures rather than the sliced ones an OTA sees.
 
+## What hardware established
+
+Run on `Sophon-86F0`, restored to the UF2 era over SWD for the purpose. The
+board was never at risk: both backups are verified and the probe stayed
+attached.
+
+**What worked, and is now measured rather than argued:**
+
+| Claim | Result |
+|---|---|
+| A UF2 can carry two disjoint regions | installer at `0x27000`, image at `0x085000`, both landed |
+| The installer may erase the bootloader's own region | **yes — no ACL lock.** The erase took and read back `0xFF` |
+| That page is live bootloader code | **4063/4096 non-erased bytes**, matching the backup exactly |
+| Erasing the MBR is safe | **`VTOR` reads `0x27000` on the running board** — the vector table is the installer's own, not the MBR's |
+| The trailer geometry and flag combination | MCUboot's own console: `Swap type: perm` |
+| MCUboot written to `0x0` | verified by read-back; it runs |
+
+Every address derived in this document was confirmed by the installer computing
+it independently on the board and printing it.
+
+**What failed.** MCUboot, on its own console:
+
+```
+I: Image index: 0, Swap type: perm
+I: Primary image:   magic=unset, swap_type=0x1, copy_done=0x3, image_ok=0x3
+I: Secondary image: magic=good,  swap_type=0x1, copy_done=0x3, image_ok=0x1
+W: Failed reading image headers; Image=0
+E: Image in the primary slot is not valid!
+E: Unable to find bootable image
+```
+
+The gate is in `loader.c`, and it runs **after** the swap type is chosen and
+**before** it is acted on:
+
+```c
+rc = boot_read_image_headers(state, !boot_status_is_reset(bs), bs);
+if (rc != 0) {
+    BOOT_LOG_WRN("Failed reading image headers; Image=%u", ...);
+    BOOT_SWAP_TYPE(state) = BOOT_SWAP_TYPE_NONE;   /* swap abandoned */
+    return;
+}
+```
+
+`boot_read_image_header()` in `swap_offset.c` returns `-1` for any slot whose
+`ih_magic` is not `IMAGE_MAGIC` once a boot status is in play. Slot0 holds the
+old SoftDevice and application, so it has no magic, so the swap is abandoned —
+and MCUboot falls through to booting a primary slot it has just declared
+invalid.
+
+**The self-overwrite problem was hidden, not dissolved.** The installer cannot
+simply erase slot0 to fix this: slot0 is `0xC000–0x84000` and the installer runs
+at `0x27000`, *inside it*. That is the same constraint this design claimed to
+have removed by handing the move to MCUboot.
+
+### A header in slot0 gets further, and is still not enough
+
+Tried on the board: copy the staged image's 512-byte header from `0x085000` to
+`0x0C000` — which the installer *can* do, that sector being nowhere near
+`0x27000`.
+
+`Failed reading image headers` disappears and MCUboot commits to the swap. It
+then calls `abort()` inside `swap_offset.c`, which carries 25 assertions. The
+header advertises a 189,672-byte image over a body that is erased, so the swap
+is working on a slot whose contents contradict its own header.
+
+**What the swap needs is coherence, not a magic number.** It exchanges the two
+slots' sectors, reading the primary as a real image — because for every other
+caller, it is one.
+
+### The route that remains
+
+`CONFIG_BOOT_BOOTSTRAP` exists for this exact situation — *"allows an erased
+primary slot to be initialized from a valid image in the secondary slot"* — and
+is **not** set in this project's bootloader. With it, a primary whose header
+reads erased is accepted, and MCUboot *overwrites* rather than swaps:
+
+```c
+#ifdef MCUBOOT_BOOTSTRAP
+    /* When bootstrapping it's OK to not have image magic in the primary slot */
+    if (rc != 0 && !boot_check_header_erased(state, BOOT_SLOT_PRIMARY)) {
+```
+
+What adopting it would change, none of it free:
+
+- The **shipped bootloader** gains a Kconfig, so the blob is rebuilt and every
+  board carries it afterwards. Bootstrap only affects the empty-primary case, so
+  #271's rollback *should* be unaffected — should be, not verified.
+- The installer erases slot0's **first sector only**, `0xC000–0xD000`, which it
+  may safely do from `0x27000`. `boot_check_header_erased()` tests `ih_magic`
+  alone, so one sector is enough.
+- The installer writes **no trailer**: the bootstrap branch fires only when the
+  swap type is `NONE`, and a trailer makes it `PERM`.
+- The staged image probably moves to **`0x084000`**, because bootstrap sets
+  `REVERT`, and under `MCUBOOT_SWAP_USING_OFFSET` a revert reads the secondary at
+  offset 0 rather than one sector in. **Unverified**, and exactly the kind of
+  detail that costs a board.
+
 ## What MCUboot does on its first boot
+
+> **This section's conclusion is wrong, and hardware is what showed it.** The
+> reading of the decision table is correct as far as it goes — MCUboot really
+> does choose `perm` from the secondary trailer alone, and said so on its own
+> console. What it missed is the gate above, which runs before the decision is
+> acted on and requires a valid header in *both* slots.
 
 The installer does **not** copy the application into slot0. It stages it in slot1
 and sets the trailer, and MCUboot performs the move on its first boot using the
@@ -196,8 +310,8 @@ same swap code every OTA uses. That is the point: the 190 KB move is done by cod
 that is already proven, rather than by a one-off installer.
 
 The obvious objection is that **slot0 holds no bootable image at that moment** —
-it is whatever the old SoftDevice and application left behind. It turns out not
-to matter, and the reason is in MCUboot's decision table.
+it is whatever the old SoftDevice and application left behind. The decision table
+says that does not matter. The decision table is not the whole story.
 
 ### The primary slot does not participate in the decision
 
