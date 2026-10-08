@@ -2,6 +2,13 @@
 
 ## 2026-10-07
 
+### chore: both boards on MCUboot 2.8.0, migrated without a probe (#294, #297)
+
+- **`Sophon-4D88` is on MCUboot**, having never run it before. The board #270 has been blocked on, and the one the probe-free migration was built for, took the whole path with no probe attached at any point: backed up via #297's dumper, migrated by `sophon-migrate.uf2` staging `2.7.0`, updated to `2.8.0` by `flash-ota.sh`, run on trial, and confirmed by the iOS app delivering a frame. `Sophon-86F0` the same.
+- **The first OTA is what repairs the gap migration leaves.** Straight after migration slot1 holds the swapped-out junk -- SoftDevice remnants and the installer -- so there is no valid revert target, which is why the installer sets `PERM` and not `TEST`. The first OTA swap puts the previously-working image there and rollback behaves normally from then on. Both boards passed through that state and out the other side.
+- `VERSION` to 2.8 so the repo matches what both boards run. The same reasoning as the last bump: `CONFIG_MCUBOOT_DOWNGRADE_PREVENTION` is not set, so a stale `VERSION` means the next build OTAs a *lower* version successfully while `flash-ota.sh` -- which compares versions to tell an update from a revert -- reports success.
+
+
 ### feat: probe-free flash backup via a UF2 dumper (#297)
 
 - **#294 migrates a board without a probe, and its first requirement was "take a backup", which needed one.** New `zephyr/sophon-dumper/`: a UF2 that reads the whole chip out over the CDC ACM console. It writes nothing, and `CONFIG_FLASH` is absent so that is a property of the binary. nRF52840 flash and UICR are memory mapped, so a read is a pointer dereference.
