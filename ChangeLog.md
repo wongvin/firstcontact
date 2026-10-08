@@ -2,6 +2,14 @@
 
 ## 2026-10-07
 
+### fix: flash-swd.sh's SoftDevice guard failed open (#301)
+
+- **The guard over a one-way door was permitting the thing it exists to prevent.** `flash-swd.sh` blanket-erases `0x0-0xFC000`, which on a UF2-era board destroys the SoftDevice and the Adafruit bootloader together, so it reads the SoftDevice magic at `0x3004` and refuses when it finds one (#253). It read that magic and, **if it could not parse it, carried on and erased** -- printing `<unreadable>` first and then doing the destructive thing anyway. An empty value failed the equality test, and `MAGIC` is referenced nowhere else.
+- **An unreadable value is not evidence of absence.** The target had already answered -- the `Cortex-M4` check above it passed -- so probe and wiring were fine and something else had gone wrong with the read, which is exactly when not to proceed. Now refuses unless `--force`, with the error saying how to read it by hand and what each answer means.
+- **Verified on hardware, including that the bug was real.** The pre-fix script, same stub, reached the erase; the fixed one refuses; `--force` still overrides and says it is proceeding blind. Tested with the erase replaced by a sentinel so a guard failure could not destroy anything -- the technique #277 used for its own OpenOCD-failure guard.
+- **#277 hardened this same file and walked past this.** Its premise was that a check which cannot detect its own failure is useless, in its own words: *"BOTH signals are needed. OpenOCD has historically exited 0 after printing an error."* Filed separately rather than reopening it, so the gap stays visible.
+
+
 ### chore: both boards on MCUboot 2.8.0, migrated without a probe (#294, #297)
 
 - **`Sophon-4D88` is on MCUboot**, having never run it before. The board #270 has been blocked on, and the one the probe-free migration was built for, took the whole path with no probe attached at any point: backed up via #297's dumper, migrated by `sophon-migrate.uf2` staging `2.7.0`, updated to `2.8.0` by `flash-ota.sh`, run on trial, and confirmed by the iOS app delivering a frame. `Sophon-86F0` the same.

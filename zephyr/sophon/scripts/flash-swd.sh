@@ -125,6 +125,39 @@ fi
 # macOS ships bash 3.2, so no ${var,,} -- lowercase with tr.
 MAGIC="$(sed -n 's/^MAGIC \(.*\)$/\1/p' <<<"$PROBE" | tr -d ' \r' | tr '[:upper:]' '[:lower:]')"
 echo "    SoftDevice magic @0x3004: ${MAGIC:-<unreadable>}  (0x51b1e5db = UF2 board)"
+
+# A GUARD OVER A ONE-WAY DOOR HAS TO FAIL CLOSED.
+#
+# This used to read the magic, and if it could not, carry on and erase. An
+# unreadable value is not evidence of absence -- it is no evidence at all, and
+# the next thing the script does is blanket-erase 0x0-0xFC000. On a UF2 board
+# that is the SoftDevice AND the Adafruit bootloader, with no way back except a
+# full backup.
+#
+# The same shape as #277's OpenOCD defect: a check whose failure mode was to
+# permit the thing it existed to prevent. Here the target answered (the
+# Cortex-M4 check above passed), so the probe and wiring are fine and something
+# else went wrong with the read -- which is precisely when not to proceed.
+if [[ -z "$MAGIC" ]]; then
+  if [[ "$FORCE" -eq 0 ]]; then
+    echo "error: the target answered but its SoftDevice magic at 0x3004 could" >&2
+    echo "       not be read, so this script cannot tell a UF2 board from an" >&2
+    echo "       MCUboot one. Refusing: the next step erases 0x0-0xFC000, and on" >&2
+    echo "       a UF2 board that destroys the SoftDevice and the Adafruit" >&2
+    echo "       bootloader together." >&2
+    echo >&2
+    echo "       Read it by hand before deciding:" >&2
+    echo "         openocd ... -c 'init; mdw 0x3004 1; exit'" >&2
+    echo "       0x51b1e5db means UF2 -- use scripts/flash.sh instead." >&2
+    echo "       Anything else means MCUboot -- re-run with --force." >&2
+    # shellcheck disable=SC2001  # same reason as the probe failure above:
+    # ${v//s/r} cannot prefix EVERY line of a multi-line string.
+    sed 's/^/       /' <<<"$PROBE" >&2
+    exit 1
+  fi
+  echo "    warning: magic unreadable and --force given; proceeding blind" >&2
+fi
+
 if [[ "$MAGIC" == "1370606555" || "$MAGIC" == "0x51b1e5db" ]]; then
   if [[ "$FORCE" -eq 0 ]]; then
     echo "error: this board still has a Nordic SoftDevice at 0x3000, so it is on" >&2
