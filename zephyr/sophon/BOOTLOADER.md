@@ -209,6 +209,20 @@ openocd ... -c "init;
    exit"
 ```
 
+**Or with no probe at all (#297):**
+
+```bash
+cd ../sophon-dumper && scripts/build.sh
+# double-tap reset, copy build/zephyr/zephyr.uf2 onto the volume, then:
+uv run --with pyserial scripts/capture.py
+```
+
+~20 s, writes the same pair here, CRC-checked per chunk and per region. It costs
+the board's **application**, which the dumper overwrites and which this repo can
+rebuild; MBR, SoftDevice, storage, bootloader and UICR all come through
+byte-perfect, verified against this SWD path on `86F0` before being trusted on a
+board with no backup. Preparation only — restoring still needs the probe.
+
 **No `halt`, and therefore no `reset run` (#275).** Both used to be here and neither
 is needed: `dump_image` reads through the debug access port without stopping the
 core, so there is nothing to resume, and the `reset run` only existed to undo the
@@ -265,6 +279,35 @@ Restoring the `uf2-sdv7` pair produces a board that boots — **on the Adafruit 
 bootloader, with the migration undone**. A genuine recovery from a brick, and not
 a way back to a working MCUboot board. It differs from the MCUboot pairs in
 **371,718 bytes, 35.4% of flash**.
+
+### The backup *is* portable between boards (#297)
+
+Measured 2026-10-08, `Sophon-86F0`'s SWD backup against `Sophon-4D88`'s UF2 dump:
+
+| Region | |
+|---|---|
+| MBR | **identical** |
+| SoftDevice | **identical** |
+| application | differs — see below |
+| storage | **identical** |
+| UF2 bootloader | **identical** |
+| UICR | **identical** |
+
+**Every region that matters for recovery is byte-identical between two different
+boards.** Nothing per-device lives in flash or UICR; board identity comes from
+FICR, which is neither backed up nor writable — which is also why a board
+restored from a sibling's image keeps its own name. Both carry the same
+bootloader build, `0.9.2-29-g6a9a6a3` with S140 7.3.0.
+
+**The application difference tells you nothing.** `86F0`'s backup holds its
+September firmware and `4D88`'s dump holds the dumper that overwrote its
+application, so they differ by construction. Whether two boards running the
+*same* image would match there is still unmeasured, and does not matter: the
+application is the one part this repo can regenerate.
+
+So one board's backup is a usable recovery image for another. **Take each
+board's own anyway** — it costs 20 seconds through the probe-free path and a
+sibling's image silently substitutes that board's firmware for this one's.
 
 **The UICR halves are byte-identical across both eras** — the migration never
 touched UICR. `NRFFW[0]` still reads `0x000F4000`, pointing at a region that is now
@@ -799,10 +842,6 @@ that cannot be held — which is the part of #270 that does not scale.
 
 ## Not established
 
-- **Whether the backup is portable between boards.** The SoftDevice and
-  bootloader are identical binaries, UICR holds the same values, and BLE identity
-  comes from FICR rather than flash — so it probably is. Untested. Back up each
-  board anyway.
 - **Whether UF2 flashing works without the SoftDevice.** The restore test put
   everything back at once.
 - **Whether iOS backs off reconnection after a long absence.** Suspected as a
