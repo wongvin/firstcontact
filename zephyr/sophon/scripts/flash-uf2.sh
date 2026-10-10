@@ -9,11 +9,21 @@
 # runner does not know, it fails to find the volume -- this script then falls
 # back to a plain copy, which is all the runner does anyway.
 #
-# This is the UF2 path, for boards still running the Adafruit bootloader.
-# Boards migrated to MCUboot are flashed with scripts/flash-swd.sh instead --
-# they have no UF2 volume at all, so this script simply will not find one.
+# This is the UF2 path, for boards still running the Adafruit bootloader. Every
+# board in use runs MCUboot (#270) and is flashed with flash-ota.sh or
+# flash-swd.sh instead -- they have no UF2 volume at all.
 #
-# Usage: scripts/flash.sh
+# It needs a UF2 build, which is no longer the default:
+#   SOPHON_BOOT=uf2 scripts/build.sh
+# That build is currently broken (#306), so until it is fixed this script has
+# nothing to flash.
+#
+# Never copy build-mcuboot/sophon/zephyr/zephyr.uf2 onto a UF2 board by hand.
+# The MCUboot build emits that file too, but it is linked for slot0 at 0xC000,
+# which on a UF2 board is inside the SoftDevice. That the Adafruit bootloader
+# drops such blocks is believed, not verified (UF2-MIGRATION.md).
+#
+# Usage: scripts/flash-uf2.sh
 
 set -euo pipefail
 
@@ -24,9 +34,10 @@ sophon_common_init
 UF2="$APP_DIR/build/zephyr/zephyr.uf2"
 
 if [[ ! -f "$UF2" ]]; then
-  echo "error: $UF2 not found -- run scripts/build.sh first" >&2
+  echo "error: $UF2 not found -- run SOPHON_BOOT=uf2 scripts/build.sh first" >&2
   if [[ -d "$APP_DIR/build-mcuboot" ]]; then
-    echo "       (an MCUboot build exists -- did you mean scripts/flash-swd.sh?)" >&2
+    echo "       (an MCUboot build exists -- for an MCUboot board use" >&2
+    echo "       scripts/flash-ota.sh or scripts/flash-swd.sh)" >&2
   fi
   exit 1
 fi
@@ -38,13 +49,14 @@ NEWER="$(find "$APP_DIR/src" "$APP_DIR/prj.conf" "$APP_DIR/CMakeLists.txt" \
            -newer "$UF2" -print -quit 2>/dev/null || true)"
 if [[ -n "$NEWER" ]]; then
   echo "error: $UF2 is older than $NEWER" >&2
-  echo "       run scripts/build.sh before flashing" >&2
+  echo "       run SOPHON_BOOT=uf2 scripts/build.sh before flashing" >&2
   exit 1
 fi
 if [[ -d "$APP_DIR/build-mcuboot" && "$APP_DIR/build-mcuboot" -nt "$UF2" ]]; then
   echo "error: the MCUboot build is newer than this UF2 image." >&2
-  echo "       This board is on the UF2 path; if you meant the MCUboot board," >&2
-  echo "       use scripts/flash-swd.sh. Otherwise rebuild: scripts/build.sh" >&2
+  echo "       This script is for a board on the UF2 path; for an MCUboot board" >&2
+  echo "       use scripts/flash-ota.sh or scripts/flash-swd.sh. Otherwise" >&2
+  echo "       rebuild: SOPHON_BOOT=uf2 scripts/build.sh" >&2
   exit 1
 fi
 

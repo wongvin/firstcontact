@@ -15,7 +15,7 @@
 # freestanding app buildable from here -- that is the documented cost of this
 # app layout, not a workaround. See zephyr/CLAUDE.md.
 #
-# Extracted because build.sh and flash.sh already carried identical copies of
+# Extracted because build.sh and flash-uf2.sh already carried identical copies of
 # this, and flash-swd.sh would have made three. The `.west` error message in
 # particular is the kind of text that drifts once it exists twice.
 
@@ -39,9 +39,10 @@ sophon_activate_west() {
   export ZEPHYR_BASE="$WORKSPACE/zephyr"
 }
 
-# Which boot path a build targets. See build.sh for the transition plan.
+# Which boot path a build targets. MCUboot by default since every board runs it
+# (#270); uf2 is kept for boards that still have the Adafruit bootloader.
 sophon_boot_mode() {
-  local mode="${SOPHON_BOOT:-uf2}"
+  local mode="${SOPHON_BOOT:-mcuboot}"
   case "$mode" in
     uf2|mcuboot) echo "$mode" ;;
     *) echo "error: SOPHON_BOOT must be 'uf2' or 'mcuboot', got '$mode'" >&2; exit 1 ;;

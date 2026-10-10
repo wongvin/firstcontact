@@ -5,7 +5,7 @@
 #   SOPHON_BOOT=mcuboot scripts/build.sh
 #   scripts/flash-swd.sh
 #
-# For the UF2 boot path use scripts/flash.sh instead -- and note this script
+# For the UF2 boot path use scripts/flash-uf2.sh instead -- and note this script
 # REFUSES to run against a board that still has the UF2 bootloader, because
 # overwriting it destroys both that bootloader and the S140 SoftDevice, and
 # neither is recoverable without a prior full-flash backup. Pass --force only
@@ -43,7 +43,7 @@ done
 
 # --- refuse a stale build (#277) ---------------------------------------------
 #
-# flash.sh has had this since #253; this script had only an existence check, so
+# flash-uf2.sh has had this since #253; this script had only an existence check, so
 # it would cheerfully write an image built before the edit you are testing. That
 # matters more here than on the UF2 path, because this script is what #274 uses
 # to change the signing key -- and a stale pair is exactly how a bootloader and
@@ -148,7 +148,7 @@ if [[ -z "$MAGIC" ]]; then
     echo >&2
     echo "       Read it by hand before deciding:" >&2
     echo "         openocd ... -c 'init; mdw 0x3004 1; exit'" >&2
-    echo "       0x51b1e5db means UF2 -- use scripts/flash.sh instead." >&2
+    echo "       0x51b1e5db means UF2 -- use scripts/flash-uf2.sh instead." >&2
     echo "       Anything else means MCUboot -- re-run with --force." >&2
     # shellcheck disable=SC2001  # same reason as the probe failure above:
     # ${v//s/r} cannot prefix EVERY line of a multi-line string.
@@ -164,7 +164,7 @@ if [[ "$MAGIC" == "1370606555" || "$MAGIC" == "0x51b1e5db" ]]; then
     echo "       the UF2 boot path. Flashing MCUboot would destroy the SoftDevice" >&2
     echo "       AND the Adafruit bootloader, with no way back without a full" >&2
     echo "       flash + UICR backup." >&2
-    echo "       Use scripts/flash.sh, or re-run with --force if that is intended." >&2
+    echo "       Use scripts/flash-uf2.sh, or re-run with --force if that is intended." >&2
     exit 1
   fi
   echo "    warning: SoftDevice present and --force given; proceeding" >&2

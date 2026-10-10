@@ -60,16 +60,26 @@ both yourself.
 Board names are hierarchical (hardware model v2): `xiao_ble/nrf52840/sense`, not
 the older `xiao_ble_sense`. `west boards` lists them.
 
+`sophon/scripts/build.sh` builds for **MCUboot by default** (#270); every board
+runs it. `SOPHON_BOOT=uf2` builds a UF2 instead, for a board still on the
+Adafruit bootloader. An MCUboot build needs the signing key in
+`~/.sophon/keys/` (see `sophon/README.md`).
+
 ## Flashing and the console
 
 ```bash
-zephyr/sophon/scripts/flash.sh
+zephyr/sophon/scripts/flash-ota.sh      # MCUboot boards, over BLE (the usual path)
+zephyr/sophon/scripts/flash-swd.sh      # MCUboot boards, bootloader + app, by probe
 ```
 
-Double-tap reset first — the Adafruit UF2 bootloader mounts a volume. The script
-tries `west flash -r uf2` and falls back to a plain `cp` of
-`build/zephyr/zephyr.uf2`, because the uf2 runner matches on a board-id string
-that a given board revision may not report.
+Procedures, hazards and recovery are in
+[`sophon/BOOTLOADER.md`](sophon/BOOTLOADER.md).
+
+**A board still on the Adafruit UF2 bootloader** builds with `SOPHON_BOOT=uf2`
+and flashes with `zephyr/sophon/scripts/flash-uf2.sh`. Double-tap reset first; the
+bootloader mounts a volume. The script tries `west flash -r uf2` and falls back
+to a plain `cp` of `build/zephyr/zephyr.uf2`, because the uf2 runner matches on a
+board-id string that a given board revision may not report.
 
 **The XIAO has no UART-to-USB bridge**, so USB CDC ACM is the only console:
 
@@ -100,7 +110,10 @@ advertising payload fits in 31 bytes, or a peripheral is readable by a central.
 Any firmware change is verified **on the physical board** before its issue moves
 to In review:
 
-1. Build clean, confirm `build/zephyr/zephyr.uf2` exists.
+1. Build clean, and confirm the artefacts exist:
+   `build-mcuboot/mcuboot/zephyr/zephyr.hex` and
+   `build-mcuboot/sophon/zephyr/zephyr.signed.{hex,bin}`, or
+   `build/zephyr/zephyr.uf2` for a UF2 build.
 2. Flash, then read the console for the boot banner and init errors.
 3. For BLE work, confirm in **nRF Connect** (or any scanner) that the device
    appears with the expected name and service UUID. Several advertising mistakes

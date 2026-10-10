@@ -2,6 +2,23 @@
 
 ## 2026-10-09
 
+### chore: build.sh builds for MCUboot by default (#270)
+
+- **`scripts/build.sh` now builds for MCUboot unless told otherwise.** The condition the old comment named, "every board has migrated", is met: `86F0`, `4D88` and `01A7` all run MCUboot. `SOPHON_BOOT=uf2` still builds a UF2, for a board that arrives on the Adafruit bootloader. Build folders are unchanged (`build-mcuboot/`, `build/`), so `flash-swd.sh`, `flash-ota.sh` and `sophon-installer` are unaffected, and a probe-free migration no longer needs the variable.
+- **`flash.sh` is renamed `flash-uf2.sh`**, matching `flash-swd.sh` and `flash-ota.sh` now that UF2 is the exception. Its messages say `SOPHON_BOOT=uf2`. Plain `build.sh` no longer produces what it flashes, so its "run `scripts/build.sh`" advice would have pointed at the wrong build. It still refuses rather than flashing anything stale.
+- **Found: the UF2 build has been broken since #271**, which made the MCUmgr image manager unconditional; it needs a `slot0_partition` only the MCUboot overlay defines. The fix is tracked in #306, and the README, BOOTLOADER.md and `flash-uf2.sh` say so meanwhile.
+- **The transition wording is gone** from `build.sh`, `common.sh`, the README, BOOTLOADER.md and `zephyr/CLAUDE.md`, rather than surviving as folklore. BOOTLOADER.md gains the sysbuild artefact paths (#270's last docs item) and a warning not to copy the MCUboot build's `zephyr.uf2` onto a UF2 board. The README notes that an MCUboot build needs the signing key.
+
+
+### docs: Sophon-01A7 MCUboot-era backup (#270)
+
+- **01A7 now has one backup per era**, the rule #270 set after 86F0. The new SWD pair (1 MB + 4 KB), taken after the migration to MCUboot 2.8.0, is byte-identical to a second dump. Its contents check out: no SoftDevice, a valid image header in slot0, matching the flashed `.hex`. Its UICR is unchanged from the factory pair.
+- **No MCUboot-era backup for 4D88, by decision.** The probe-free dumper needs a UF2 bootloader, which 4D88 no longer has, and the board has no probe. Its recovery image is a sibling's `mcuboot-projectkey` pair (86F0's or 01A7's), which is enough because backups are portable between boards.
+- **Backups stay in `~/.sophon/`, replicated by Time Machine** (decision for #270). `~/.sophon`, `backups/` and `keys/` are all included. A new backup is only replicated after the next Time Machine run with its disk attached.
+- **Swap-and-revert over SWD: skipped, by decision.** #271 already showed swap and revert over the air, including a broken image reverting on its own.
+- BOOTLOADER.md notes why slot0 differs from `zephyr.signed.bin` in the last 256 bytes: the `.bin` and `.hex` are signed in separate runs, and RSA signing is randomised.
+
+
 ### docs: SoftDevice guard verified; kit board migrated (#301)
 
 - **The SoftDevice guard is verified on hardware.** It was the last one in BOOTLOADER.md § Guards still marked unverified. I tested it on an untouched board, the plain XIAO nRF52840 from the Wio-SX1262 kit (now `Sophon-01A7`). `flash-swd.sh` without `--force` read `0x51b1e5db`, refused and exited 1. A dump taken straight afterwards matched the backup byte for byte.
