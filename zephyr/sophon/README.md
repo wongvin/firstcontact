@@ -54,8 +54,13 @@ The wrapper activates `~/zephyrproject/.venv` and exports `ZEPHYR_BASE`, because
 
 ```bash
 SOPHON_ZEPHYR_WORKSPACE=~/other-zephyr scripts/build.sh
-SOPHON_BOARD=xiao_ble/nrf52840 scripts/build.sh
+SOPHON_BOARD=xiao_ble/nrf52840/sense scripts/build.sh   # the default
 ```
+
+The plain `xiao_ble/nrf52840` target **does not build**: `src/imu.c` needs the
+Sense devicetree's LSM6DSL node. The Sense image runs on a plain XIAO nRF52840
+anyway. The IMU fails to initialise and the board sends zero-axis frames, as
+`Sophon-01A7` does (#301).
 
 Requires Zephyr **>= 4.4**; `CMakeLists.txt` fails at configure time otherwise.
 

@@ -23,12 +23,19 @@ plausible result rather than an error.
 | Also present | Nordic MBR + SoftDevice S140 v7.3.0 | neither — overwritten |
 | Update path | UF2, or BLE OTA via the SoftDevice | dual-slot with rollback, **MCUmgr SMP over BLE** (#271) |
 
-The boards have diverged and both paths are supported during the transition:
+Every board now runs MCUboot. The UF2 path stays supported, for boards that
+haven't been migrated yet:
 
-| Board | Path |
-|---|---|
-| `Sophon-86F0` | MCUboot / SWD |
-| `Sophon-4D88` | UF2 (not migrated) |
+| Board | Hardware | Path | Migrated |
+|---|---|---|---|
+| `Sophon-86F0` | XIAO nRF52840 Sense Plus | MCUboot | by SWD probe |
+| `Sophon-4D88` | XIAO nRF52840 Sense Plus | MCUboot | by UF2, with no probe (#294, #297) |
+| `Sophon-01A7` | plain XIAO nRF52840, from the Wio-SX1262 kit | MCUboot | by SWD probe, from factory Meshtastic (#301) |
+
+`Sophon-01A7` has **no IMU**: it runs the Sense image, the LSM6DSL fails to
+initialise, and it sends the zero-axis fallback frames. Its bootloader identified
+itself as a Sense (`XIAO-SENSE`, `Seeed_XIAO_nRF52840_Sense`) all the same, so
+the bootloader is no way to tell the two models apart. Look for the IMU.
 
 ## Memory maps
 
@@ -270,6 +277,15 @@ uf2-sdv7          @0x3004 = 0x51b1e5db (SoftDevice)   @0xC000 = not an image hea
 mcuboot-demokey   @0x3004 = 0xf3bf8811 (absent)       slot0 KEYHASH fc5701dc…
 mcuboot-projectkey                                    slot0 KEYHASH 2133b06f…
 ```
+
+**`Sophon-01A7` has one backup: the board as it shipped**, taken before anything
+was written (#301). It is the only copy of that factory state. A UF2 dumper can't
+capture a factory application, because it overwrites that region to run.
+
+| Backup | What restoring it gives you |
+|---|---|
+| `Sophon-01A7_20261010T033822Z_uf2-sdv7-meshtastic_flash-1MB.bin` + `_uicr-4KB.bin` | the factory board: UF2 bootloader 0.6.1, S140 7.3.0, Meshtastic |
+| `…_CURRENT.UF2` (+ `INFO_UF2.TXT`, `INDEX.HTM`) | the Meshtastic application only, copied off the bootloader drive; reinstalls by UF2 once the bootloader is back |
 
 The `uf2-sdv7` and `mcuboot-demokey` pairs are kept rather than deleted: both are
 genuine recoveries from a brick, and the demo-key pair is the only route back if a
@@ -789,11 +805,13 @@ date.
 | `flash-swd.sh` refuses a stale build (#277) | verified — caught a **true positive** on first use: `sysbuild/mcuboot.conf` had been edited 13 minutes after the build |
 | `flash-swd.sh` reads both images back and compares before reporting success (#277) | verified — full run 33 s, both `MATCH` |
 | `flash-swd.sh` catches an OpenOCD failure that prints no error text (#277) | verified against a stub; the previous `grep … && exit 1` did not |
-| `flash-swd.sh` refuses a board with a SoftDevice at `0x3004` | **not verified** — needs a UF2 board attached |
+| `flash-swd.sh` refuses a board with a SoftDevice at `0x3004` | verified (#301) on an untouched `Sophon-01A7`: it read `0x51b1e5db`, refused and exited 1, and a dump taken straight afterwards matched the backup byte for byte, so nothing was written |
+| `flash-swd.sh` refuses when the SoftDevice magic can't be read (#301) | verified against a stub, with the erase replaced by a sentinel. The pre-fix script really did reach the erase. |
 
-That last one is the important one and the one still untested: flashing MCUboot
-onto `4D88` would destroy its bootloader *and* its SoftDevice, and there is no
-backup of that board.
+The SoftDevice guard is the important one: flashing MCUboot onto a UF2 board
+destroys its bootloader *and* its SoftDevice. It was the last one left unverified,
+and it was tested on a board whose factory image had already been backed up
+over SWD.
 
 ### Migrating a board
 

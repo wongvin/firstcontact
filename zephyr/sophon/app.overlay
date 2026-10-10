@@ -7,8 +7,8 @@
  *
  * `app.overlay` rather than `boards/xiao_ble_nrf52840_sense.overlay` because
  * the divider is on the XIAO nRF52840 module itself, shared by the Sense and
- * the plain variant, and README.md documents building for
- * SOPHON_BOARD=xiao_ble/nrf52840.
+ * the plain variant -- and the Sense image runs on a plain board too
+ * (Sophon-01A7, #301).
  */
 
 #include <zephyr/dt-bindings/adc/adc.h>
