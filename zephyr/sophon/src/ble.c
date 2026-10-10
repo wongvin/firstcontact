@@ -10,9 +10,15 @@
 
 #include <sophon_build_time.h>
 
+#if defined(CONFIG_MCUMGR_TRANSPORT_BT)
+#include <zephyr/mgmt/mcumgr/transport/smp_bt.h>
+#endif
+
 #include "battery.h"
 #include "ble.h"
 #include "ident.h"
+#include "lora_link.h"
+#include "role.h"
 #include "version.h"
 
 #if defined(CONFIG_MCUBOOT_IMG_MANAGER)
@@ -31,6 +37,26 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
  *   Link Params: C6560004-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  */
+/*
+ * Whose battery the Battery characteristic reports. A gateway has a pack of its
+ * own, but the one the app needs to see is the sensor's, out on the LoRa link
+ * (#303), so it serves the relayed reading -- with the age grown by the time
+ * since the packet arrived. Before any status has arrived it reports 0 mV,
+ * which the app renders as Not reported.
+ */
+static void read_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
+{
+	if (sophon_role() == SOPHON_ROLE_GATEWAY) {
+		if (!lora_link_battery(mv, age_s, flags)) {
+			*mv = 0;
+			*age_s = 0;
+			*flags = 0;
+		}
+		return;
+	}
+	sophon_battery_read(mv, age_s, flags);
+}
+
 #define SOPHON_UUID_SERVICE BT_UUID_128_ENCODE(0xC6560001, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_MOTION  BT_UUID_128_ENCODE(0xC6560002, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_STATS   BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
@@ -131,7 +157,7 @@ static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *att
 	 * would park the Bluetooth RX thread for the duration. The age field is
 	 * what makes returning a cached value honest rather than merely cheap.
 	 */
-	sophon_battery_read(&mv, &age_s, &flags);
+	read_battery(&mv, &age_s, &flags);
 	sophon_battery_pack(mv, age_s, flags, wire);
 
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
@@ -182,6 +208,20 @@ BT_GATT_SERVICE_DEFINE(
 static const struct bt_data adv_data[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SOPHON_UUID_SERVICE),
+};
+
+/*
+ * A LoRa sensor (#303) leaves the Sophon service UUID out. The iOS app scans
+ * for that UUID only, so it never sees -- and never auto-connects to -- a
+ * sensor that should be talking to its gateway instead. The name stays in the
+ * scan response, which is what flash-ota.sh matches on, and the SMP UUID says
+ * what the board is reachable for. The GATT table itself is unchanged.
+ */
+static const struct bt_data sensor_adv_data[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+#if defined(CONFIG_MCUMGR_TRANSPORT_BT)
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, SMP_BT_SVC_UUID_VAL),
+#endif
 };
 
 /*
@@ -243,7 +283,10 @@ static int start_advertising(void)
 	};
 	int err;
 
-	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, adv_data, ARRAY_SIZE(adv_data), scan_rsp,
+	bool sensor = sophon_role() == SOPHON_ROLE_SENSOR;
+
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, sensor ? sensor_adv_data : adv_data,
+			      sensor ? ARRAY_SIZE(sensor_adv_data) : ARRAY_SIZE(adv_data), scan_rsp,
 			      ARRAY_SIZE(scan_rsp));
 	if (err) {
 		LOG_ERR("bt_le_adv_start failed (%d) -- if -22/-EINVAL, the "
@@ -252,8 +295,9 @@ static int start_advertising(void)
 		return err;
 	}
 
-	LOG_INF("advertising as %s (scan rsp %zu B of %d)", device_name,
-		bt_data_get_len(scan_rsp, ARRAY_SIZE(scan_rsp)), BT_GAP_ADV_MAX_ADV_DATA_LEN);
+	LOG_INF("advertising as %s%s (scan rsp %zu B of %d)", device_name,
+		sensor ? ", SMP only" : "", bt_data_get_len(scan_rsp, ARRAY_SIZE(scan_rsp)),
+		BT_GAP_ADV_MAX_ADV_DATA_LEN);
 	return 0;
 }
 
@@ -315,6 +359,21 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	 */
 	LOG_INF("connected, ATT MTU %u", bt_gatt_get_mtu(conn));
 	log_link_params(conn, "granted");
+
+	/*
+	 * A gateway (#303) asks for 15 ms: it delivers each LoRa packet's samples
+	 * as a burst, and a shorter interval drains the burst sooner. min = max =
+	 * 15 ms is inside Apple's accessory rules. Gateway only -- a direct board
+	 * keeps what iOS chooses, and the image is shared, so this cannot be a
+	 * Kconfig default. le_param_updated() logs what iOS actually grants.
+	 */
+	if (sophon_role() == SOPHON_ROLE_GATEWAY) {
+		int perr = bt_conn_le_param_update(conn, BT_LE_CONN_PARAM(12, 12, 0, 400));
+
+		if (perr) {
+			LOG_WRN("15 ms interval request failed (%d)", perr);
+		}
+	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -445,7 +504,7 @@ static inline void maybe_confirm_image(void)
 }
 #endif /* CONFIG_MCUBOOT_IMG_MANAGER */
 
-int sophon_ble_notify(const struct sophon_frame *frame)
+static int notify_frame(const struct sophon_frame *frame, bool count_no_mem)
 {
 	int err;
 
@@ -472,7 +531,9 @@ int sophon_ble_notify(const struct sophon_frame *frame)
 		maybe_confirm_image();
 		break;
 	case -ENOMEM:
-		tx_stats.no_mem++;
+		if (count_no_mem) {
+			tx_stats.no_mem++;
+		}
 		break;
 	case -ENOTCONN:
 		tx_stats.no_conn++;
@@ -483,6 +544,35 @@ int sophon_ble_notify(const struct sophon_frame *frame)
 	}
 
 	return err;
+}
+
+int sophon_ble_notify(const struct sophon_frame *frame)
+{
+	return notify_frame(frame, true);
+}
+
+int sophon_ble_notify_relay(const struct sophon_frame *frame)
+{
+	/*
+	 * The gateway keeps a frame the stack refused for lack of buffers and
+	 * tries again, so that refusal is not a loss and is not counted. What it
+	 * does count as no_mem is its own queue overflowing -- see
+	 * sophon_ble_count_refused() -- which keeps the app's "TX buffer full"
+	 * meaning "the board dropped it" behind a gateway too.
+	 */
+	return notify_frame(frame, false);
+}
+
+void sophon_ble_count_refused(void)
+{
+	k_sched_lock();
+	tx_stats.no_mem++;
+	k_sched_unlock();
+}
+
+void sophon_image_confirm_once(void)
+{
+	maybe_confirm_image();
 }
 
 void sophon_stats_pack(const struct sophon_tx_stats *in, uint8_t out[SOPHON_STATS_SIZE])
@@ -508,7 +598,7 @@ void sophon_ble_battery_notify(void)
 	uint16_t age_s;
 	uint8_t flags;
 
-	sophon_battery_read(&mv, &age_s, &flags);
+	read_battery(&mv, &age_s, &flags);
 	sophon_battery_pack(mv, age_s, flags, wire);
 
 	if (!current_conn) {

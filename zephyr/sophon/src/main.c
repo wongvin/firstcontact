@@ -22,6 +22,7 @@
 #include "ble.h"
 #include "frame.h"
 #include "imu.h"
+#include "lora_link.h"
 #include "role.h"
 #include "version.h"
 
@@ -79,11 +80,14 @@ static uint16_t seq;
  * counter was structurally unreachable from the sensor thread, which is why it
  * read zero through a stall.
  *
- * Depth 8 is ~150 ms of slack at 54 Hz. Overflowing it drops the frame, which
- * is correct: seq has already advanced, so the receiver sees the hole rather
- * than a stream that silently skipped an interval.
+ * Depth 32. A direct board drains it every sample, so depth rarely matters
+ * there; a gateway (#303) receives each LoRa packet's k samples in one burst
+ * and needs room for a packet and a half while it paces them out. Overflowing
+ * it drops the frame, which is correct: seq has already advanced, so the
+ * receiver sees the hole rather than a stream that silently skipped an
+ * interval.
  */
-#define TX_QUEUE_DEPTH 8
+#define TX_QUEUE_DEPTH 32
 
 K_MSGQ_DEFINE(tx_queue, sizeof(struct sophon_frame), TX_QUEUE_DEPTH, 4);
 
@@ -110,11 +114,15 @@ static int led_init(void)
  */
 static bool build_frame(struct sophon_frame *out, const struct sophon_imu_sample *sample)
 {
-	if (!sophon_ble_subscribed()) {
+	if (sophon_role() != SOPHON_ROLE_SENSOR && !sophon_ble_subscribed()) {
 		/*
 		 * seq deliberately does not advance while nobody is subscribed:
 		 * no data was expected, so the gap it would create on the next
 		 * subscribe is not a dropped frame. See PROTOCOL.md.
+		 *
+		 * A LoRa sensor (#303) is the exception: it cannot know whether
+		 * its gateway has a subscriber, so it produces every sample and
+		 * the gateway drops what nobody is listening for.
 		 */
 		return false;
 	}
@@ -137,11 +145,59 @@ static bool build_frame(struct sophon_frame *out, const struct sophon_imu_sample
  * with K_NO_WAIT, so a full ATT pool returns -ENOMEM and is counted rather than
  * parking the caller.
  */
+static void tx_work_handler(struct k_work *work);
+static K_WORK_DEFINE(tx_work, tx_work_handler);
+
+/*
+ * Gateway delivery (#303). Frames arrive k at a time from each LoRa packet,
+ * faster than one BLE connection event drains them, so a frame the stack
+ * refuses for lack of buffers is kept and retried after RETRY_MS rather than
+ * dropped. Only a full tx_queue loses a frame, and that is what is counted.
+ */
+#define RELAY_RETRY_MS 10
+
+static void tx_retry_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	k_work_submit(&tx_work);
+}
+
+static K_WORK_DELAYABLE_DEFINE(tx_retry_work, tx_retry_handler);
+
+static void relay_drain(void)
+{
+	struct sophon_frame frame;
+
+	while (k_msgq_peek(&tx_queue, &frame) == 0) {
+		if (sophon_ble_notify_relay(&frame) == -ENOMEM) {
+			(void)k_work_schedule(&tx_retry_work, K_MSEC(RELAY_RETRY_MS));
+			return;
+		}
+		/* Sent, or dropped and counted (nobody subscribed, or an error). */
+		(void)k_msgq_get(&tx_queue, &frame, K_NO_WAIT);
+	}
+}
+
+/* Called by lora_link.c on the system work queue, once per rebuilt frame. */
+static void gateway_frame(const struct sophon_frame *frame)
+{
+	if (k_msgq_put(&tx_queue, frame, K_NO_WAIT) != 0) {
+		sophon_ble_count_refused();
+		return;
+	}
+	k_work_submit(&tx_work);
+}
+
 static void tx_work_handler(struct k_work *work)
 {
 	struct sophon_frame frame;
 
 	ARG_UNUSED(work);
+
+	if (sophon_role() == SOPHON_ROLE_GATEWAY) {
+		relay_drain();
+		return;
+	}
 
 	while (k_msgq_get(&tx_queue, &frame, K_NO_WAIT) == 0) {
 		/*
@@ -155,8 +211,6 @@ static void tx_work_handler(struct k_work *work)
 		(void)sophon_ble_notify(&frame);
 	}
 }
-
-static K_WORK_DEFINE(tx_work, tx_work_handler);
 
 /*
  * Data-ready callback, on the LSM6DSL driver's own trigger thread. This is what
@@ -175,6 +229,11 @@ static void imu_sample(const struct sophon_imu_sample *sample)
 	struct sophon_frame frame;
 
 	if (!build_frame(&frame, sample)) {
+		return;
+	}
+
+	if (sophon_role() == SOPHON_ROLE_SENSOR) {
+		lora_link_submit(&frame); /* never blocks; counts its own drops */
 		return;
 	}
 
@@ -277,7 +336,9 @@ static K_TIMER_DEFINE(stats_timer, stats_timer_expiry, NULL);
 
 int main(void)
 {
+	enum sophon_role role;
 	uint32_t tick = 0;
+	int imu_err;
 	int err;
 
 	/*
@@ -290,6 +351,30 @@ int main(void)
 		SOPHON_BUILD_TIME);
 
 	(void)led_init();
+
+	/*
+	 * Battery, IMU and role come BEFORE Bluetooth (#303): the role decides
+	 * how the board advertises -- a LoRa sensor leaves the Sophon service UUID
+	 * out -- so it has to be known when advertising starts. Nothing here needs
+	 * Bluetooth: an IMU sample that arrives first is dropped by build_frame(),
+	 * as it is whenever nobody is subscribed.
+	 *
+	 * Battery before the IMU so a board with no sensor still reports its pack,
+	 * and non-fatal for the same reason: a missing divider is worth surviving,
+	 * and the app renders it as Not reported rather than as a fault (#268). The
+	 * first reading is logged by battery.c itself -- sampling is queued work,
+	 * so reading it straight after init would log the not-yet-sampled
+	 * sentinel. Caught on hardware.
+	 */
+	(void)sophon_battery_init();
+
+	/*
+	 * A missing IMU is explicitly not fatal. The radio, the GATT table and the
+	 * transmit counters are all still worth having on a board whose sensor did
+	 * not come up.
+	 */
+	imu_err = sophon_imu_init(imu_sample);
+	role = sophon_role_detect(imu_err == 0);
 
 	err = sophon_ble_init();
 	if (err) {
@@ -304,39 +389,23 @@ int main(void)
 		}
 	}
 
-	/*
-	 * A missing IMU is explicitly not fatal. The radio, the GATT table and
-	 * the transmit counters are all still worth having on a board whose
-	 * sensor did not come up -- and the zero-axis fallback is what makes the
-	 * difference visible from the phone rather than looking like a dead link.
-	 */
-	/*
-	 * Before the IMU so a board with no sensor still reports its pack, and
-	 * non-fatal for the same reason: a missing divider is worth surviving,
-	 * and the app renders it as Not reported rather than as a fault (#268).
-	 *
-	 * The first reading is logged by battery.c itself, not here. Sampling is
-	 * queued work that sleeps between conversions, so reading it on the line
-	 * after init returns the not-yet-sampled sentinel and logs a confident
-	 * `battery 0 mV` -- which is exactly the "reports what it has not
-	 * measured" failure this feature is about. Caught on hardware.
-	 */
-	(void)sophon_battery_init();
-
-	err = sophon_imu_init(imu_sample);
-	if (err) {
-		LOG_WRN("no IMU (%d); falling back to %d ms zero-filled frames", err,
+	if (imu_err && role == SOPHON_ROLE_DIRECT) {
+		/*
+		 * The zero-axis fallback makes a sensorless direct board visible from
+		 * the phone rather than looking like a dead link. Not on a gateway:
+		 * its stream is the sensor's, and zero frames would be mixed into it.
+		 */
+		LOG_WRN("no IMU (%d); falling back to %d ms zero-filled frames", imu_err,
 			FALLBACK_NOTIFY_PERIOD_MS);
 		k_timer_start(&fallback_timer, K_MSEC(FALLBACK_NOTIFY_PERIOD_MS),
 			      K_MSEC(FALLBACK_NOTIFY_PERIOD_MS));
 	}
 
-	/*
-	 * After the IMU, because the role depends on it (#303). Logged only for
-	 * now: every role still runs as a direct board until the sensor and
-	 * gateway paths exist.
-	 */
-	(void)sophon_role_detect(err == 0);
+	err = lora_link_start(role, gateway_frame);
+	if (err) {
+		LOG_ERR("LoRa link failed to start (%d); the %s will not relay", err,
+			sophon_role_name(role));
+	}
 
 	k_timer_start(&led_timer, K_MSEC(LED_TICK_MS), K_MSEC(LED_TICK_MS));
 	k_timer_start(&stats_timer, K_MSEC(STATS_PERIOD_MS), K_MSEC(STATS_PERIOD_MS));

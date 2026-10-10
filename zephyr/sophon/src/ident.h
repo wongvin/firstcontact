@@ -7,6 +7,7 @@
 #define SOPHON_IDENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* "Sophon-A3F2" + NUL */
 #define SOPHON_NAME_MAX 12
@@ -18,5 +19,11 @@
  * fit (in which case buf is untouched).
  */
 int sophon_device_name(char *buf, size_t len);
+
+/*
+ * The 16-bit tag in that name -- the low half of the FICR device id -- as a
+ * number, for the LoRa status trailer (#303). -ENODATA without hwinfo.
+ */
+int sophon_device_tag(uint16_t *tag);
 
 #endif /* SOPHON_IDENT_H */

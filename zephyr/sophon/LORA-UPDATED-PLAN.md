@@ -12,6 +12,8 @@
 |---|---|---|
 | 2026-10-09 | **SX1262 driver: Semtech's loramac-node, chosen over Zephyr's native driver.** The original plan assumed loramac-node without knowing there was a choice. | § Firmware → Driver selection |
 | 2026-10-09 | **Gateway board migrated.** `Sophon-01A7` was backed up as shipped and then flashed with MCUboot 2.8.0 by SWD probe, which also verified `flash-swd.sh`'s SoftDevice guard (#301, #305). It runs the Sense image in IMU fallback with no ill effect, so one image for both boards works in practice. The KiCad pin check is still open. | § Gateway board migration |
+| 2026-10-10 | **The gateway configures TX before RX.** loramac-node's `lora_airtime()` uses the last TX configuration only. A gateway that never configured TX divided by zero inside `RadioGetLoRaTimeOnAirNumerator()`, a UsageFault at boot, found on hardware. `lora_link_start()` now configures TX, logs the airtime, then switches the gateway to RX. | § Firmware |
+| 2026-10-10 | **Stage 3 verified end to end:** 86F0 (sensor) → 01A7 (gateway) → iPhone at preset V3. LQ 100.0%, 53.6 Hz, RSSI −6 dBm and SNR +12 dB at desk range; iOS granted the gateway's 15 ms interval. | § Verification |
 | 2026-10-09 | **Build modes.** `build.sh` builds for MCUboot by default and `flash.sh` is now `flash-uf2.sh` (#270). MCUboot-only Kconfig lives in `swd/app-mcuboot.conf` (#306). The LoRa settings go in `prj.conf`, because both boot paths must compile. | § Firmware → Build changes |
 
 ## Context

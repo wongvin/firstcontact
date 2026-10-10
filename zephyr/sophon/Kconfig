@@ -1,0 +1,34 @@
+# Sophon application options. Zephyr picks this file up from the application
+# directory by itself; it must end by sourcing Kconfig.zephyr.
+
+menu "Sophon LoRa relay (#303)"
+
+config SOPHON_LORA_PRESET
+	int "LoRa air-rate preset id"
+	range 0 8
+	default 2
+	help
+	  Index into src/lora_presets.c, the same ids LORA-PROTOCOL.md § Presets
+	  lists: 0 V0, 1 V1, 2 V3, 3 V3b, 4 V4, 5 V5, 6 V5b, 7 V6, 8 V6b.
+	  Both ends are built from one image, so they always agree. V3 is the
+	  provisional default until the walk test chooses one.
+
+config SOPHON_LORA_FREQ_HZ
+	int "LoRa carrier frequency (Hz)"
+	default 915000000
+	help
+	  A single fixed channel. At 500 kHz bandwidth that needs no frequency
+	  hopping under FCC 15.247 (LORA-UPDATED-PLAN.md § Radio parameters).
+
+config SOPHON_LORA_PEER_ID
+	hex "Sensor id the gateway accepts (0 = lock onto the first heard)"
+	range 0x0 0xffff
+	default 0x0
+	help
+	  The low 16 bits of the sensor's FICR id -- the XXXX of its
+	  Sophon-XXXX name. The id travels only in status trailers, so the
+	  filter is applied to those; see LORA-PROTOCOL.md.
+
+endmenu
+
+source "Kconfig.zephyr"

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-10
+
+### feat: LoRa relay works end to end (#303)
+
+- **The sensor sends and the gateway relays** (`src/lora_link.c`). The sensor's IMU thread queues each frame without blocking. A `lora_tx` thread packs frames into v2 packets under the packing rules (k samples, a seq break, a dt over 255 ms, or a W + 20 ms flush), adds a status trailer about once a second, and sends with `lora_send()`. The gateway's async receive decodes each packet, locks onto the first sensor heard (or `SOPHON_LORA_PEER_ID`), counts seq gaps, keeps the sensor's battery, and hands the rebuilt 18-byte frames to the BLE queue. Both roles log their link stats every 10 s, including LQ, RSSI and SNR.
+- **Air-rate presets** (`src/lora_presets.c`, app `Kconfig`): V0–V6b, as LORA-PROTOCOL.md § Presets, selected by `SOPHON_LORA_PRESET` (default V3), plus `SOPHON_LORA_FREQ_HZ` and `SOPHON_LORA_PEER_ID`.
+- **Per-role behaviour:**
+  - **Sensor:** produces every sample whether or not anyone is subscribed, advertises its name with SMP only (the app never lists it), and confirms a trial image after its first completed transmission.
+  - **Gateway:** delivers through a 32-deep queue and retries frames the BLE stack refuses rather than dropping them; serves the sensor's relayed battery; requests a 15 ms interval; runs no zero-axis fallback.
+  - The role is now decided before Bluetooth starts, so advertising matches it from the first packet.
+- **Found on hardware:** loramac-node computes airtime from the last TX configuration, so a gateway that only ever configured RX divided by zero at boot. The gateway now configures TX first.
+- **Verified end to end at 2.10.0 (V3):**
+  - Link: 86F0 → 01A7 → iPhone at LQ 100.0%, 53.6 Hz, 0 bad packets, RSSI −6 dBm and SNR +12 dB at desk range.
+  - BLE: iOS granted 15 ms, with no delivery refusals.
+  - App: shows only 01A7, motion follows 86F0, and uptime and battery are 86F0's.
+  - Images: 86F0's confirmed itself on its first transmission.
+
+
 ## 2026-10-09
 
 ### feat: LoRa codec, radio presence check and runtime roles (#303)
