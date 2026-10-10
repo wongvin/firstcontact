@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-09
+
+### docs: SoftDevice guard verified; kit board migrated (#301)
+
+- **The SoftDevice guard is verified on hardware.** It was the last one in BOOTLOADER.md § Guards still marked unverified. I tested it on an untouched board, the plain XIAO nRF52840 from the Wio-SX1262 kit (now `Sophon-01A7`). `flash-swd.sh` without `--force` read `0x51b1e5db`, refused and exited 1. A dump taken straight afterwards matched the backup byte for byte.
+- **Backed up as shipped, then migrated to MCUboot 2.8.0 by SWD probe.** The backups are the bootloader drive's `CURRENT.UF2` plus a 1 MB + 4 KB SWD pair verified with `cmp`; they are the only copy of the factory Meshtastic setup. The flash took 35 s, both images read back `MATCH`, and a central then connected and subscribed.
+- **Third portability data point.** Against 4D88's `uf2-sdv7` backup, the MBR, the SoftDevice, the bootloader settings, and the bootloader's address and size are identical, even though this board's bootloader is four years older (0.6.1 vs 0.9.2).
+- **BOOTLOADER.md's board table** now lists all three boards on MCUboot (4D88's row was stale). **README no longer claims** that the plain `xiao_ble/nrf52840` target builds: `imu.c` needs the Sense IMU node, and the Sense image runs on a plain board in IMU fallback.
+
+
 ## 2026-10-07
 
 ### fix: flash-swd.sh's SoftDevice guard failed open (#301)
