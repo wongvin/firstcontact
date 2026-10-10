@@ -260,6 +260,13 @@ bricked, lose the key and no image can ever be signed for the bootloader a board
 already carries. Its own `README.md` explains the contents to someone who finds it
 without this repo (#287).
 
+**Decided (#270): backups stay in `~/.sophon/`, and Time Machine replicates
+them.** `tmutil isexcluded` reports `~/.sophon`, `backups/` and `keys/` all
+**included**, so no second copy is kept by hand. The catch is timing: a new
+backup is replicated only after the next Time Machine run with the destination
+disk attached. **After taking a backup, run Time Machine**, or the newest era of
+a board exists in one place until then.
+
 **There are three backups of `Sophon-86F0`, one per era, and restoring the wrong
 one undoes something silently.** The era is in the filename for exactly this
 reason, and after #274 the key matters as much as the layout:
@@ -278,14 +285,28 @@ mcuboot-demokey   @0x3004 = 0xf3bf8811 (absent)       slot0 KEYHASH fc5701dc…
 mcuboot-projectkey                                    slot0 KEYHASH 2133b06f…
 ```
 
-**`Sophon-01A7` has one backup: the board as it shipped**, taken before anything
-was written (#301). It is the only copy of that factory state. A UF2 dumper can't
-capture a factory application, because it overwrites that region to run.
+**`Sophon-01A7` has two backups, one per era.** The first is the board as it
+shipped, taken before anything was written (#301). It is the only copy of that
+factory state: a UF2 dumper can't capture a factory application, because it
+overwrites that region to run. The second was taken after the migration (#270).
 
 | Backup | What restoring it gives you |
 |---|---|
 | `Sophon-01A7_20261010T033822Z_uf2-sdv7-meshtastic_flash-1MB.bin` + `_uicr-4KB.bin` | the factory board: UF2 bootloader 0.6.1, S140 7.3.0, Meshtastic |
 | `…_CURRENT.UF2` (+ `INFO_UF2.TXT`, `INDEX.HTM`) | the Meshtastic application only, copied off the bootloader drive; reinstalls by UF2 once the bootloader is back |
+| `Sophon-01A7_20261010T040327Z_mcuboot-projectkey_flash-1MB.bin` + `_uicr-4KB.bin` | current state: MCUboot trusting `2133b06f…`, slot0 holding 2.8.0+0 |
+
+The MCUboot-era pair was checked against its contents, not just its name:
+`0xf3bf8811` at `0x3004` (no SoftDevice), and a valid image header in slot0 that
+matches the flashed `zephyr.signed.hex` byte for byte. **Its UICR is identical
+to the factory pair's**, as with `86F0`'s two eras, which confirms again that
+migrating doesn't touch UICR.
+
+Compare slot0 with the `.hex`, not the `.bin`. The build signs the two in
+separate runs, and RSA signing is randomised, so they carry different but
+equally valid signatures: the last 256 bytes of the image. A board flashed by
+`flash-swd.sh` from the `.hex` therefore differs from the `.bin` in exactly
+those bytes, which is expected, not corruption.
 
 The `uf2-sdv7` and `mcuboot-demokey` pairs are kept rather than deleted: both are
 genuine recoveries from a brick, and the demo-key pair is the only route back if a
@@ -324,6 +345,15 @@ application is the one part this repo can regenerate.
 So one board's backup is a usable recovery image for another. **Take each
 board's own anyway** — it costs 20 seconds through the probe-free path and a
 sibling's image silently substitutes that board's firmware for this one's.
+
+**The one exception, by decision (#270): `Sophon-4D88` has no MCUboot-era
+backup.** That 20-second probe-free path only exists while a board still has
+its UF2 bootloader; `sophon-dumper` is a UF2 application, and 4D88 now runs
+MCUboot. 4D88 has no probe attached, so its MCUboot-era recovery image is a
+sibling's `mcuboot-projectkey` pair: `86F0`'s, or `01A7`'s, which is newer and
+holds 2.8.0. Restoring either gives 4D88 the same MCUboot and the same key,
+with that sibling's application. 4D88 keeps its own name, because identity
+comes from FICR. An OTA then puts the current application back.
 
 **The UICR halves are byte-identical across both eras** — the migration never
 touched UICR. `NRFFW[0]` still reads `0x000F4000`, pointing at a region that is now
@@ -777,31 +807,55 @@ From #268, but it bites here: runtime PM is a global policy. Enabling it changed
 every device's lifecycle and stopped the LSM6DS3TR-C data-ready trigger firing,
 while init still reported success. See [HARDWARE.md](HARDWARE.md).
 
-## The transition
+## Building for each boot path
 
-Both paths are supported until every board has migrated.
+**MCUboot is the default** (#270). The default changed when the last board
+migrated, which was the condition this section used to state.
 
 ```bash
-scripts/build.sh                      # UF2 — the current default
-SOPHON_BOOT=mcuboot scripts/build.sh  # MCUboot via sysbuild
-scripts/flash.sh                      # UF2 boards
+scripts/build.sh                      # MCUboot via sysbuild (default)
+SOPHON_BOOT=uf2 scripts/build.sh      # UF2, only for a board not yet migrated
 scripts/flash-swd.sh                  # MCUboot boards, bootloader + app, by probe
 scripts/flash-ota.sh                  # MCUboot boards, app only, over the air
+scripts/flash-uf2.sh                  # UF2 boards (UF2 build broken, #306)
 ```
 
 Separate build directories per mode (`build/`, `build-mcuboot/`) so both
 artefacts coexist and neither reuses the other's CMake cache.
 
-**Flip the default when the last board migrates** — that is the condition, not a
-date.
+**The UF2 build doesn't currently compile** (#306). #271 made the MCUmgr image
+manager unconditional in `prj.conf`, and it needs a `slot0_partition` that only
+the MCUboot partition overlay defines. Migrating a new board is unaffected:
+`sophon-installer` and `flash-swd.sh` consume the MCUboot build.
+
+### What an MCUboot build produces
+
+Sysbuild writes one directory per image. Anyone flashing by hand needs exactly
+these:
+
+| File | What it is | Used by |
+|---|---|---|
+| `build-mcuboot/mcuboot/zephyr/zephyr.hex` | MCUboot, linked at `0x0` | `flash-swd.sh` |
+| `build-mcuboot/sophon/zephyr/zephyr.signed.hex` | the application, signed, linked at slot0 `0xC000` | `flash-swd.sh` |
+| `build-mcuboot/sophon/zephyr/zephyr.signed.bin` | the same application as a raw image, for upload | `flash-ota.sh`, `sophon-installer` |
+| `build-mcuboot/mcuboot/zephyr/zephyr.bin` | MCUboot as a raw image | `sophon-installer` |
+
+The `.hex` and `.bin` of the application differ in their last 256 bytes. That's
+the signature: they are signed in separate runs, and RSA signing is randomised.
+Compare a board's slot0 with the `.hex` it was flashed from (§ Backup and
+recovery, `Sophon-01A7`).
+
+**Don't use `build-mcuboot/sophon/zephyr/zephyr.uf2`.** Sysbuild emits it, but
+it is linked for slot0 at `0xC000`. Copied onto a board that still has the UF2
+bootloader, that address is inside the SoftDevice. `flash-uf2.sh` never picks it up.
 
 ### Guards, and which are proven
 
 | Guard | Status |
 |---|---|
 | Invalid `SOPHON_BOOT` rejected | verified |
-| `flash.sh` refuses a UF2 image older than sources | verified |
-| `flash.sh` refuses when the MCUboot build is newer, and names `flash-swd.sh` | verified |
+| `flash-uf2.sh` refuses a UF2 image older than sources | verified |
+| `flash-uf2.sh` refuses when the MCUboot build is newer, and names `flash-swd.sh` | verified |
 | `flash-swd.sh` refuses a stale build (#277) | verified — caught a **true positive** on first use: `sysbuild/mcuboot.conf` had been edited 13 minutes after the build |
 | `flash-swd.sh` reads both images back and compares before reporting success (#277) | verified — full run 33 s, both `MATCH` |
 | `flash-swd.sh` catches an OpenOCD failure that prints no error text (#277) | verified against a stub; the previous `grep … && exit 1` did not |

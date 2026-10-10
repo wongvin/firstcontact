@@ -608,7 +608,7 @@ zephyr/
     │   └── frame.h            packed 18-byte struct + pack helper
     └── scripts/
         ├── build.sh           venv + ZEPHYR_BASE + west build wrapper
-        └── flash.sh           west flash -r uf2, with the manual-cp fallback
+        └── flash-uf2.sh       west flash -r uf2, with the manual-cp fallback
 ```
 
 **`CMakeLists.txt`** — standard freestanding app. `find_package(Zephyr)` resolves
@@ -958,7 +958,7 @@ connecting is what proves the firmware advertises).
 Firmware, on the real board:
 
 1. `zephyr/sophon/scripts/build.sh` → clean build, `build/zephyr/zephyr.uf2` exists.
-2. Double-tap reset → volume mounts → `scripts/flash.sh`. If the uf2 runner can't
+2. Double-tap reset → volume mounts → `scripts/flash-uf2.sh`. If the uf2 runner can't
    match the board-id, fall back to `cp` and **record the real board-id** in
    `zephyr/sophon/README.md`.
 3. `minicom -D /dev/tty.usbmodem* -b 115200` → boot banner, `bt_enable` success,

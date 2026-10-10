@@ -10,8 +10,8 @@ Zephyr RTOS applications, built against the shared toolchain at `~/zephyrproject
 ## Quick start
 
 ```bash
-zephyr/sophon/scripts/build.sh     # venv + ZEPHYR_BASE + west build
-zephyr/sophon/scripts/flash.sh     # double-tap reset first
+zephyr/sophon/scripts/build.sh       # venv + ZEPHYR_BASE + west build (MCUboot)
+zephyr/sophon/scripts/flash-ota.sh   # over BLE; flash-swd.sh with a probe
 minicom -D /dev/cu.usbmodem* -b 115200   # cu, NOT tty — see CLAUDE.md
 ```
 

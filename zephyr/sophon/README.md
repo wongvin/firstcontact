@@ -106,21 +106,31 @@ reach codegen, which is worth knowing before reformatting firmware again.
 
 ## Flash
 
-Double-tap the reset button — a UF2 volume mounts — then:
-
 ```bash
-scripts/build.sh                      # UF2 (default during the transition)
-SOPHON_BOOT=mcuboot scripts/build.sh  # MCUboot via sysbuild
+scripts/build.sh                      # MCUboot via sysbuild (the default, #270)
+scripts/flash-ota.sh                  # app only, over the air (#271)
+scripts/flash-swd.sh                  # bootloader + app, over a CMSIS-DAP probe
 
-scripts/flash.sh                      # UF2 boards
-scripts/flash-swd.sh                  # MCUboot boards, over a CMSIS-DAP probe
-scripts/flash-ota.sh                  # MCUboot boards, over the air (#271)
+SOPHON_BOOT=uf2 scripts/build.sh      # UF2, only for a board not yet migrated
+scripts/flash-uf2.sh                  #   double-tap reset first; a volume mounts
 ```
 
-**The boards have diverged**: `Sophon-86F0` runs MCUboot and is flashed over
-SWD; `Sophon-4D88` still runs the Adafruit UF2 bootloader. Which path a board
-takes, the memory maps, the backup and recovery procedure, and the hazards of
-working over SWD are all in [BOOTLOADER.md](BOOTLOADER.md).
+> **The UF2 build is currently broken** (#306): since #271, `prj.conf` enables
+> the MCUmgr image manager unconditionally, and it needs a `slot0_partition`
+> that only the MCUboot overlay defines. Migrating a new board is unaffected,
+> because it uses the MCUboot build.
+
+**Every board runs MCUboot**: `Sophon-86F0`, `Sophon-4D88` and `Sophon-01A7`.
+The UF2 build is there for a board that arrives on the Adafruit bootloader, which
+then migrates by `sophon-installer` or `flash-swd.sh`. Both of those consume the
+MCUboot build.
+
+**An MCUboot build needs the signing key**: `~/.sophon/keys/sophon-fw-rsa-2048.pem`,
+or an absolute path in `SOPHON_SIGNING_KEY`. Without it the build stops with an
+error. A UF2 build needs no key.
+
+Which path a board takes, the memory maps, the backup and recovery procedure, and
+the hazards of working over SWD are all in [BOOTLOADER.md](BOOTLOADER.md).
 
 The one worth knowing before you touch a probe: **never end an SWD session with
 `resume` — always `reset run`.** Resuming after a halt leaves the BLE stack
@@ -142,7 +152,7 @@ works, record the id the board actually reports here:
 > `could not copy extended attributes ... Device not configured` — the bootloader
 > reboots the moment it has a complete image, so the volume disappears before the
 > attributes can be written. The copy has already succeeded; the volume ejecting
-> is the success signal. `flash.sh` passes `cp -X` and checks for the unmount
+> is the success signal. `flash-uf2.sh` passes `cp -X` and checks for the unmount
 > rather than trusting `cp`'s exit status.
 
 ## Console
