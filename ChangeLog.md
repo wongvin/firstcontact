@@ -35,6 +35,13 @@
 - **BOOTLOADER.md's board table** now lists all three boards on MCUboot (4D88's row was stale). **README no longer claims** that the plain `xiao_ble/nrf52840` target builds: `imu.c` needs the Sense IMU node, and the Sense image runs on a plain board in IMU fallback.
 
 
+### docs: LoRa relay design record and link protocol (#303)
+
+- **`zephyr/sophon/LORA-PLAN.md`**: the approved plan for putting a 915 MHz LoRa hop (SX1262 on a Seeed Wio-SX1262) between the motion sensor and the gateway that serves the unchanged iOS app. It covers the throughput and airtime arithmetic, the ideas taken from ExpressLRS and the variants that test them (V0–V6b), the levers for range and latency, and the walk-test method. It is frozen as written.
+- **`zephyr/sophon/LORA-PROTOCOL.md`**: the live contract between the sensor and gateway roles: how the role is detected, the radio parameters, the preset ids, the v1 and lossless compact v2 packet formats, what `seq` means over LoRa, and how the gateway maps onto PROTOCOL.md. It is marked as specified but not yet implemented, and the walk-test results are still pending.
+- Docs only, written ahead of the code. Follow-up for frequency hopping and a downlink: #304.
+
+
 ## 2026-10-07
 
 ### fix: flash-swd.sh's SoftDevice guard failed open (#301)
