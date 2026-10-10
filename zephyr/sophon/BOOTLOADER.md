@@ -817,16 +817,20 @@ scripts/build.sh                      # MCUboot via sysbuild (default)
 SOPHON_BOOT=uf2 scripts/build.sh      # UF2, only for a board not yet migrated
 scripts/flash-swd.sh                  # MCUboot boards, bootloader + app, by probe
 scripts/flash-ota.sh                  # MCUboot boards, app only, over the air
-scripts/flash-uf2.sh                  # UF2 boards (UF2 build broken, #306)
+scripts/flash-uf2.sh                  # UF2 boards
 ```
 
 Separate build directories per mode (`build/`, `build-mcuboot/`) so both
 artefacts coexist and neither reuses the other's CMake cache.
 
-**The UF2 build doesn't currently compile** (#306). #271 made the MCUmgr image
-manager unconditional in `prj.conf`, and it needs a `slot0_partition` that only
-the MCUboot partition overlay defines. Migrating a new board is unaffected:
-`sophon-installer` and `flash-swd.sh` consume the MCUboot build.
+**MCUboot-only settings live in `swd/app-mcuboot.conf`, not `prj.conf`.** That
+file holds MCUmgr/SMP, the image manager and the flash write path, and
+`build.sh` adds it to MCUboot builds only. The image manager needs a
+`slot0_partition`, which only the MCUboot partition overlay defines. From #271
+until #306 those settings sat in `prj.conf`, and **every UF2 build failed to
+compile**. Nobody noticed, because every board had migrated. Anything that only
+makes sense under MCUboot goes in that file. **Build both modes before calling a
+change verified** (§ Guards).
 
 ### What an MCUboot build produces
 
@@ -859,6 +863,7 @@ bootloader, that address is inside the SoftDevice. `flash-uf2.sh` never picks it
 | `flash-swd.sh` refuses a stale build (#277) | verified — caught a **true positive** on first use: `sysbuild/mcuboot.conf` had been edited 13 minutes after the build |
 | `flash-swd.sh` reads both images back and compares before reporting success (#277) | verified — full run 33 s, both `MATCH` |
 | `flash-swd.sh` catches an OpenOCD failure that prints no error text (#277) | verified against a stub; the previous `grep … && exit 1` did not |
+| Both boot paths compile (#306): `scripts/build.sh` and `SOPHON_BOOT=uf2 scripts/build.sh` | verified, and part of `zephyr/CLAUDE.md`'s verification step, because the UF2 build broke silently from #271 to #306 |
 | `flash-swd.sh` refuses a board with a SoftDevice at `0x3004` | verified (#301) on an untouched `Sophon-01A7`: it read `0x51b1e5db`, refused and exited 1, and a dump taken straight afterwards matched the backup byte for byte, so nothing was written |
 | `flash-swd.sh` refuses when the SoftDevice magic can't be read (#301) | verified against a stub, with the erase replaced by a sentinel. The pre-fix script really did reach the erase. |
 

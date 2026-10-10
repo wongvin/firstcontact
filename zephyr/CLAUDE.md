@@ -110,10 +110,13 @@ advertising payload fits in 31 bytes, or a peripheral is readable by a central.
 Any firmware change is verified **on the physical board** before its issue moves
 to In review:
 
-1. Build clean, and confirm the artefacts exist:
-   `build-mcuboot/mcuboot/zephyr/zephyr.hex` and
-   `build-mcuboot/sophon/zephyr/zephyr.signed.{hex,bin}`, or
-   `build/zephyr/zephyr.uf2` for a UF2 build.
+1. Build clean **in both modes**, and confirm the artefacts exist:
+   `scripts/build.sh` → `build-mcuboot/mcuboot/zephyr/zephyr.hex` and
+   `build-mcuboot/sophon/zephyr/zephyr.signed.{hex,bin}`;
+   `SOPHON_BOOT=uf2 scripts/build.sh` → `build/zephyr/zephyr.uf2`. No board
+   uses the UF2 build day to day, so it can only stay working if every change
+   builds it. It broke silently from #271 to #306. MCUboot-only Kconfig goes in
+   `sophon/swd/app-mcuboot.conf`, never `prj.conf`.
 2. Flash, then read the console for the boot banner and init errors.
 3. For BLE work, confirm in **nRF Connect** (or any scanner) that the device
    appears with the expected name and service UUID. Several advertising mistakes

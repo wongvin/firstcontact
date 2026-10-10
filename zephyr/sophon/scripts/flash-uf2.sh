@@ -15,8 +15,6 @@
 #
 # It needs a UF2 build, which is no longer the default:
 #   SOPHON_BOOT=uf2 scripts/build.sh
-# That build is currently broken (#306), so until it is fixed this script has
-# nothing to flash.
 #
 # Never copy build-mcuboot/sophon/zephyr/zephyr.uf2 onto a UF2 board by hand.
 # The MCUboot build emits that file too, but it is linked for slot0 at 0xC000,

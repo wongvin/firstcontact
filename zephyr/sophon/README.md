@@ -115,11 +115,6 @@ SOPHON_BOOT=uf2 scripts/build.sh      # UF2, only for a board not yet migrated
 scripts/flash-uf2.sh                  #   double-tap reset first; a volume mounts
 ```
 
-> **The UF2 build is currently broken** (#306): since #271, `prj.conf` enables
-> the MCUmgr image manager unconditionally, and it needs a `slot0_partition`
-> that only the MCUboot overlay defines. Migrating a new board is unaffected,
-> because it uses the MCUboot build.
-
 **Every board runs MCUboot**: `Sophon-86F0`, `Sophon-4D88` and `Sophon-01A7`.
 The UF2 build is there for a board that arrives on the Adafruit bootloader, which
 then migrates by `sophon-installer` or `flash-swd.sh`. Both of those consume the

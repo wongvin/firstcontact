@@ -48,12 +48,15 @@ fi
 # bootloader that expects to run from slot 0. See swd/app-slot0.overlay.
 PARTITIONS="$APP_DIR/swd/mcuboot-partitions.overlay"
 APP_SLOT0="$APP_DIR/swd/app-slot0.overlay"
+# The application's MCUboot-only Kconfig: MCUmgr/SMP and the image manager
+# (#271). Kept out of prj.conf so the UF2 build still compiles (#306).
+APP_MCUBOOT_CONF="$APP_DIR/swd/app-mcuboot.conf"
 # MCUboot only: its console goes to uart0, since it has no USB stack for
 # the board's default CDC ACM console.
 BOOT_CONSOLE="$APP_DIR/swd/mcuboot-console.overlay"
 
-for f in "$PARTITIONS" "$APP_SLOT0" "$BOOT_CONSOLE"; do
-  [[ -f "$f" ]] || { echo "error: missing overlay $f" >&2; exit 1; }
+for f in "$PARTITIONS" "$APP_SLOT0" "$BOOT_CONSOLE" "$APP_MCUBOOT_CONF"; do
+  [[ -f "$f" ]] || { echo "error: missing MCUboot build file $f" >&2; exit 1; }
 done
 
 # --- signing key (#274) ------------------------------------------------------
@@ -106,4 +109,5 @@ exec west build -p always -b "$BOARD" --sysbuild -d "$BUILD_DIR" "$APP_DIR" "$@"
   -- -DSB_CONFIG_BOOTLOADER_MCUBOOT=y \
      -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\"$SIGNING_KEY\"" \
      -DEXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$APP_SLOT0" \
+     -DEXTRA_CONF_FILE="$APP_MCUBOOT_CONF" \
      -Dmcuboot_EXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$BOOT_CONSOLE"
