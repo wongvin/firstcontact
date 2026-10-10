@@ -2,6 +2,14 @@
 
 ## 2026-10-09
 
+### fix: the UF2 build compiles again (#306)
+
+- **`SOPHON_BOOT=uf2 scripts/build.sh` had been failing since #271** with `slot0_partition ... undeclared`. #271 put MCUmgr and the image manager in `prj.conf`, and the image manager needs a `slot0_partition` that only the MCUboot partition overlay defines. No board had built a UF2 since migrating, so nothing noticed.
+- **The MCUboot-only block moved from `prj.conf` to the new `swd/app-mcuboot.conf`**: MCUmgr/SMP, the image manager, the flash write path, partial erase, connection-parameter control and the SMP stack sizes. `build.sh` adds it with `-DEXTRA_CONF_FILE` in its MCUboot branch, next to `swd/app-slot0.overlay`. No code changed; `ble.c`'s confirm path was already under `CONFIG_MCUBOOT_IMG_MANAGER`.
+- **The MCUboot build is unchanged.** The application's and MCUboot's merged `.config` are identical to before the move, and the image size is the same (190,184 B). The UF2 build is 168 KB and runs on the default stacks, as every UF2 build did before #271; nothing added since then is compiled into it.
+- **So it can't break silently again,** building both modes is now part of `zephyr/CLAUDE.md`'s verification step and a row in BOOTLOADER.md § Guards. The "UF2 build broken" notes added in #270 are removed.
+
+
 ### chore: build.sh builds for MCUboot by default (#270)
 
 - **`scripts/build.sh` now builds for MCUboot unless told otherwise.** The condition the old comment named, "every board has migrated", is met: `86F0`, `4D88` and `01A7` all run MCUboot. `SOPHON_BOOT=uf2` still builds a UF2, for a board that arrives on the Adafruit bootloader. Build folders are unchanged (`build-mcuboot/`, `build/`), so `flash-swd.sh`, `flash-ota.sh` and `sophon-installer` are unaffected, and a probe-free migration no longer needs the variable.
