@@ -363,13 +363,13 @@ radio path.
 - **RX boost** on the gateway is on for SF pairs 1 and 3 of each 4-minute stop and
   off for pairs 2 and 4.
 - V0 (v1) carries no test trailer; its LQ comes from `seq` gaps among V0 packets.
-- **Gateway output**, one CSV line per variant every 10 s on the USB console:
+- **Gateway output**, one record per variant every 10 s: to the iOS app over the gateway's LoRa Link characteristic (#309), which records it with GPS, and as a CSV line on the USB console as a fallback:
 
 ```
 uptime_s, sf_block, boost, variant, expected, received, LQ%, rssi_avg, rssi_min, snr_avg, snr_min, crc_err
 ```
 
-Procedure: LORA-PLAN.md § Walk-test procedure.
+Procedure: LORA-UPDATED-PLAN.md § Walk-test procedure. The sensor stays at base, and the walker carries the gateway and phone.
 
 ## Walk-test results
 

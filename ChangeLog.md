@@ -2,6 +2,12 @@
 
 ## 2026-10-10
 
+### docs: LoRa walk test turned around; antenna gain limits (#303)
+
+- **The walk test carries the gateway and phone; the sensor stays at base.** BLE ties the phone to the gateway, so this is the only way to see the link live, and a radio link loses the same both ways. The app records link stats with GPS (#309, filed), replacing the laptop log and the waypoint timing. `walktest-log.sh` is dropped, and `walktest-report.py` will read the app's CSV. The walk test now depends on #309.
+- **Antenna gain and the FCC limit** (LORA-UPDATED-PLAN.md): EIRP ≤ 36 dBm caps the transmitting sensor at 14 dBi with +22 dBm. The gateway only receives, so its antenna has no FCC gain limit and is the cheapest place to add range. The levers table and takeaways are updated.
+
+
 ### feat: LoRa relay works end to end (#303)
 
 - **The sensor sends and the gateway relays** (`src/lora_link.c`). The sensor's IMU thread queues each frame without blocking. A `lora_tx` thread packs frames into v2 packets under the packing rules (k samples, a seq break, a dt over 255 ms, or a W + 20 ms flush), adds a status trailer about once a second, and sends with `lora_send()`. The gateway's async receive decodes each packet, locks onto the first sensor heard (or `SOPHON_LORA_PEER_ID`), counts seq gaps, keeps the sensor's battery, and hands the rebuilt 18-byte frames to the BLE queue. Both roles log their link stats every 10 s, including LQ, RSSI and SNR.

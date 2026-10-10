@@ -13,6 +13,8 @@
 | 2026-10-09 | **SX1262 driver: Semtech's loramac-node, chosen over Zephyr's native driver.** The original plan assumed loramac-node without knowing there was a choice. | § Firmware → Driver selection |
 | 2026-10-09 | **Gateway board migrated.** `Sophon-01A7` was backed up as shipped and then flashed with MCUboot 2.8.0 by SWD probe, which also verified `flash-swd.sh`'s SoftDevice guard (#301, #305). It runs the Sense image in IMU fallback with no ill effect, so one image for both boards works in practice. The KiCad pin check is still open. | § Gateway board migration |
 | 2026-10-10 | **The gateway configures TX before RX.** loramac-node's `lora_airtime()` uses the last TX configuration only. A gateway that never configured TX divided by zero inside `RadioGetLoRaTimeOnAirNumerator()`, a UsageFault at boot, found on hardware. `lora_link_start()` now configures TX, logs the airtime, then switches the gateway to RX. | § Firmware |
+| 2026-10-10 | **The walk test is turned around:** the sensor stays at base, and the walker carries the gateway and phone. The app shows live link stats and records them with GPS (#309), replacing the laptop log and the waypoint timing. `walktest-log.sh` is dropped, and `walktest-report.py` reads the app's CSV. The walk test now **depends on #309**. | § Walk-test mode, § Walk-test procedure, § Verification |
+| 2026-10-10 | **Antenna gain and the FCC limit.** The levers table now separates the gateway's antenna (receive only, no FCC gain limit, best range per dollar) from the sensor's (≤ 14 dBi at +22 dBm, from EIRP ≤ 36 dBm). The original said only "plenty of margin". New § Antenna gain and the FCC limit. | § Levers for range and latency |
 | 2026-10-10 | **Stage 3 verified end to end:** 86F0 (sensor) → 01A7 (gateway) → iPhone at preset V3. LQ 100.0%, 53.6 Hz, RSSI −6 dBm and SNR +12 dB at desk range; iOS granted the gateway's 15 ms interval. | § Verification |
 | 2026-10-09 | **Build modes.** `build.sh` builds for MCUboot by default and `flash.sh` is now `flash-uf2.sh` (#270). MCUboot-only Kconfig lives in `swd/app-mcuboot.conf` (#306). The LoRa settings go in `prj.conf`, because both boot paths must compile. | § Firmware → Build changes |
 
@@ -158,8 +160,9 @@ Every knob that moves range or latency, what it buys, what it costs, and where i
 | **TX power** 14 → 22 dBm | **+8 dB** | none | Sensor TX current ~45 → ~118 mA (radio-share average 17 → 45 mA at V3). Within FCC §15.247's 30 dBm conducted limit. | ✓ variant **V6 / V6b** |
 | **SF** 7 → 8 | **+3 dB** (−117 → −120 dBm) | **+44 ms** at k=10 (airtime 56 → 100 ms) | Radio busy 31% → 54%; about 1.8× the TX energy | ✓ variant **V5 / V5b** |
 | **RX boosted mode** on the gateway (`rx-boosted` in DT) | **≈ +2–3 dB** (per the Zephyr binding) | none | About +2 mA in RX, on the USB-powered gateway. The sensor never receives, so it pays nothing. | ✓ **adopt**; A/B tested in the walk test (below) |
-| **Antenna height** at the gateway, 1 m → about 3 m | Often the **largest real-world gain**: it clears the Fresnel zone and gets above people and cars | none | None in firmware; a mast or upstairs window | ✓ walk-test step: one comparison at the farthest passing waypoint |
-| **Antenna gain** (stock antenna → 3–6 dBi on the gateway) | **+gain dB** on that end | none | Hardware only. FCC allows up to 6 dBi at 30 dBm, so there is plenty of margin at 22 dBm. | ✗ hardware option, noted |
+| **Antenna height** at the fixed end, 1 m → about 3 m | Often the **largest real-world gain**: it clears the Fresnel zone and gets above people and cars | none | None in firmware; a mast or upstairs window | ✓ walk-test step: one comparison at the farthest passing waypoint |
+| **Antenna gain**, **gateway end** (receive only) | **+gain dB**; a 9 dBi gateway antenna ≈ V6's +8 dB of TX power | none | Hardware only, and **no FCC gain limit**: the gateway never transmits. Costs the sensor no battery. See § Antenna gain and the FCC limit below. | ✗ hardware option, **best range per dollar** |
+| **Antenna gain**, **sensor end** (transmits) | **+gain dB** | none | Capped by EIRP ≤ 36 dBm: **≤ 14 dBi at +22 dBm**, ≤ 22 dBi at +14 dBm. High-gain omnis have narrow vertical beams, which suit a fixed mast but not a carried or tilted sensor. | ✗ hardware option; 2–5 dBi is usually best on a moving sensor |
 | **Antenna orientation** (both vertical, same polarization) | Up to ~20 dB lost if crossed | none | None | ✓ walk-test setup rule |
 | **BW** 500 → 250/125 kHz | +3 dB per halving | **Can't carry 54 Hz**: SF7/250 is 82% busy; SF7/125 is 164% | Below 500 kHz, a fixed channel isn't allowed under §15.247, so it needs hopping | ✗ follow-up (needs FHSS and a lower sample rate) |
 | **Coding rate** 4/5 → 4/7 | ≈ 0 dB of sensitivity; helps only with **bursty interference** | +9 ms at k=4 | Busy 38% → 51% | ✓ variant **V4** |
@@ -184,8 +187,38 @@ Where latency comes from (worst case, oldest sample in a batch):
 | **Gateway notify pacing** | A burst of k frames drains across ATT buffers within about 1 connection interval | none | Already planned (`-ENOMEM` → retry in 10 ms) | ✓ |
 | **Send as soon as k is reached** (event-driven, not a fixed timer) | Avoids up to 1 slot of extra wait | none | Packet times jitter with the IMU clock, which makes hopping harder later | ✓ phase 1; the follow-up may switch to a fixed interval for FHSS |
 
+### Antenna gain and the FCC limit
+
+FCC §15.247(b), 902–928 MHz with digital modulation (this link at 500 kHz): up
+to **30 dBm conducted** with an antenna of up to **6 dBi**. Above 6 dBi, conducted
+power drops dB for dB, which together caps **EIRP at 36 dBm**. The 900 MHz band
+gets no point-to-point relaxation; that applies to 2.4 GHz only.
+
+| Sensor conducted power | Max sensor antenna gain |
+|---|---|
+| 30 dBm (the rule's reference point) | 6 dBi |
+| **+22 dBm (SX1262 maximum; V6, V6b)** | **14 dBi** |
+| +14 dBm (V0–V5) | 22 dBi |
+
+- **Cable loss counts in our favour.** 1 dB of coax between the radio and the
+  antenna allows 1 dB more gain.
+- **Only the sensor is limited.** The link is one-way, and EIRP rules apply to
+  transmitters. A receive antenna's gain adds to the link budget exactly as much
+  as the same gain at the transmitter. **The gateway is the cheapest place for
+  gain**, and usually the easiest to mount high.
+- **Antenna substitution (§15.204).** Under the Wio-SX1262's FCC module grant,
+  only antennas of the same type and equal or lower gain than those the grant
+  lists are covered. Larger ones fall back on the home-built exemption for a
+  few units for personal use (§15.23). Check the grant (its FCC ID) before
+  fitting a high-gain antenna.
+- **The assumption under all of this:** the 30 dBm allowance assumes the
+  transmission's 6 dB bandwidth really is ≥ 500 kHz. LoRa at 500 kHz is designed
+  for that.
+
+This is a reading of the rule text, not legal advice.
+
 **Takeaways:**
-- **For range**, the order is: antenna height and orientation (free) → RX boost (free) → TX power (+8 dB, costs battery) → SF8 (+3 dB, costs latency). Hopping and ARQ come in the follow-up.
+- **For range**, the order is: antenna height and orientation (free) → RX boost (free) → **gain on the gateway antenna** (hardware only, no FCC limit, no battery cost) → TX power (+8 dB, costs battery) → SF8 (+3 dB, costs latency). Hopping and ARQ come in the follow-up.
 - **For latency**, the order is: k → compact samples → BLE interval. SF6 and implicit header save less than 15 ms between them, and each costs range or a new driver.
 
 ## Variants vs the current design
@@ -458,34 +491,40 @@ driver (for implicit header and frequency hopping) replaces both.
 
 **Alternating between SFs.** The gateway can only demodulate one SF at a time, so the sensor alternates **30 s SF7 blocks** with **30 s SF8 blocks** (V5 → V5b → V6b interleaved). Every packet carries the seconds left before the next switch (`sf_switch_s`), and both ends switch on that count. If the gateway hears nothing for 1 s, it listens on SF7 and SF8 alternately for 1 s each until it locks again, as an ExpressLRS receiver searches its rates.
 
-**Gateway output:** one CSV line per variant every 10 s on the USB console:
+**Gateway output.** One record per variant every 10 s, in two places:
+- **To the iOS app** over the gateway's **LoRa Link** characteristic (#309). The app logs each record with the phone's GPS position and distance from the base, and exports a CSV. **This is the walk test's primary record.**
+- **To the USB console** as a CSV line, the same fields, kept as a bench-side fallback:
 
 ```
 uptime_s, sf_block, boost, variant, expected, received, LQ%, rssi_avg, rssi_min, snr_avg, snr_min, crc_err
 ```
 
-Expected packets come from `vcount` gaps. The app keeps working during the test, so the samples stay real.
+Expected packets come from `vcount` gaps. The app keeps receiving motion during the test, so the samples stay real.
 
-**New host scripts:**
-- `scripts/walktest-log.sh`: captures `/dev/cu.*` to a file with host timestamps.
-- `scripts/walktest-report.py`: takes waypoint times, outputs a per-waypoint × per-variant table of LQ, RSSI and SNR, and marks which variants pass LQ ≥ 99%.
+**Host script:** `scripts/walktest-report.py` reads the app's CSV (#309). It outputs per distance band and variant: LQ, margin (SNR − SNRlim), RSSI, and pass/fail at LQ ≥ 99%. There is no `walktest-log.sh` and no waypoint timing: GPS distance replaces both.
 
 ## Walk-test procedure
 
+**The sensor stays at base, and the walker carries the gateway and the phone.**
+BLE ties the phone to the gateway, so this is the only way the walker sees the
+link live. A radio link loses the same in both directions, and both ends are the
+same Wio-SX1262 hardware, so the measurement is equivalent to carrying the
+sensor. **Depends on #309**, which puts the gateway's link stats in the app and
+records them with GPS.
+
 1. **Setup:**
-   - Gateway at the base: a laptop on USB, antenna vertical, about 1 m high, by a window or outdoors.
-   - Sensor carried on its LiPo, antenna vertical, about 1 m high, held still at each stop.
-   - Phone and laptop clocks are both on NTP.
+   - **Base (sensor, 86F0):** fixed in place, about 1 m high, antenna vertical, by a window or outdoors. Powered from USB or its LiPo, and left still, so the motion stream is a quiet baseline.
+   - **Carried (gateway, 01A7):** on a LiPo on its battery pads, held about 1 m high with the antenna vertical, and still at each stop. The gateway only receives, so its draw is the radio in RX plus BLE.
+   - **Phone:** connected to the gateway, with the app's walk-test recording started and a **pin dropped at the base**. Distances are measured from that pin.
 2. **Routes:**
-   - **(a) Line of sight:** waypoints at 25, 50, 100, 200, 400 and 800 m, then doubling until every variant falls below 50% LQ.
-   - **(b) Obstructed:** through or around buildings, waypoints every block.
-   - Get distances from phone GPS or a map.
-3. **At each waypoint:** stay **4 minutes** (four SF7 + SF8 pairs). The gateway switches **RX boost on for pairs 1 and 3 and off for pairs 2 and 4**, and logs it in a `boost` CSV column, so every waypoint gets an A/B of boost. Note the arrival and departure times on the phone.
-   - **Antenna height check:** at the farthest waypoint where V3 still passes, do one extra 4-minute stop with the gateway antenna raised to about 3 m (upstairs window or mast).
+   - **(a) Line of sight:** stops at 25, 50, 100, 200, 400 and 800 m from the base, then doubling until every variant falls below 50% LQ.
+   - **(b) Obstructed:** through or around buildings, a stop every block.
+3. **At each stop:** stay **4 minutes** (four SF7 + SF8 pairs). The gateway switches **RX boost on for pairs 1 and 3 and off for pairs 2 and 4** and reports it in each record's `boost` field, so every stop gets an A/B of boost. The app's live margin readout shows when the link is near its edge, which is where the stops matter most.
+   - **Antenna height check:** at the farthest stop where V3 still passes, do one extra 4-minute stop with the **base** antenna raised to about 3 m (upstairs window or mast).
    - **Orientation rule:** both antennas vertical at all times.
 4. **Walk each route out and back** to check repeatability. Record the weather and any visible interference sources.
-5. **Results:** run `walktest-report.py`. Paste the table into `LORA-PROTOCOL.md` § Walk-test results, apply the "How to choose" rule above, and set the default `SOPHON_LORA_PRESET`.
-6. **Sensor-side cost:** after a test, read the sensor's battery drop from the relayed battery (mV over time) as a rough check of the current column.
+5. **Results:** export the app's CSV and run `walktest-report.py` on it. Paste the table into `LORA-PROTOCOL.md` § Walk-test results, apply the "How to choose" rule above, and set the default `SOPHON_LORA_PRESET`.
+6. **Sensor-side cost:** the sensor's relayed battery is in the same records. Its drop over the test (mV over time) is a rough check of the current column.
 
 ## Bench latency test
 
@@ -546,6 +585,6 @@ Computed latency (W + Tpacket) only bounds the worst case, so it is also measure
    - Power off the sensor: "Stalled" after 5 s.
    - Power it back on: "Restarts without disconnect" increments.
    - Unsubscribe and subscribe again: no false gaps.
-9. **Bench latency test**, then the **walk test (routes a and b)**. Record the chosen preset and the reason in LORA-PROTOCOL.md.
+9. **Bench latency test**, then, once #309 has landed, the **walk test (routes a and b)**, with the gateway and phone carried and the sensor at base. Record the chosen preset and the reason in LORA-PROTOCOL.md.
 10. **OTA both nodes** with `flash-ota.sh`, back to `WALKTEST=n` with the chosen preset. Each image confirms by its role's rule and survives a reset.
 11. **Review:** post the implementation summary on the issue, set Status to In review, and pause for commit consent.
