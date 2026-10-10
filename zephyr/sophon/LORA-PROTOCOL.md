@@ -6,8 +6,10 @@ means changing one codebase; it still has two ends, and both must follow it.
 
 The *reasoning* behind these choices — the throughput and airtime arithmetic,
 the ExpressLRS comparison, the levers for range and latency, the walk-test
-method — lives in the frozen [LORA-PLAN.md](LORA-PLAN.md). This file is the live
-contract and is kept current. The BLE side, which the gateway serves to the iOS
+method — lives in [LORA-UPDATED-PLAN.md](LORA-UPDATED-PLAN.md), the current
+design record. Its frozen pre-implementation counterpart, [LORA-PLAN.md](LORA-PLAN.md),
+sits beside it, and where they disagree the updated one is right. This file is
+the live contract and is kept current. The BLE side, which the gateway serves to the iOS
 app unchanged, stays in [PROTOCOL.md](PROTOCOL.md).
 
 > **Status: specified, not yet implemented.** Written ahead of #303's code.

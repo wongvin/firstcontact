@@ -22,6 +22,7 @@
 #include "ble.h"
 #include "frame.h"
 #include "imu.h"
+#include "role.h"
 #include "version.h"
 
 LOG_MODULE_REGISTER(sophon, LOG_LEVEL_INF);
@@ -329,6 +330,13 @@ int main(void)
 		k_timer_start(&fallback_timer, K_MSEC(FALLBACK_NOTIFY_PERIOD_MS),
 			      K_MSEC(FALLBACK_NOTIFY_PERIOD_MS));
 	}
+
+	/*
+	 * After the IMU, because the role depends on it (#303). Logged only for
+	 * now: every role still runs as a direct board until the sensor and
+	 * gateway paths exist.
+	 */
+	(void)sophon_role_detect(err == 0);
 
 	k_timer_start(&led_timer, K_MSEC(LED_TICK_MS), K_MSEC(LED_TICK_MS));
 	k_timer_start(&stats_timer, K_MSEC(STATS_PERIOD_MS), K_MSEC(STATS_PERIOD_MS));

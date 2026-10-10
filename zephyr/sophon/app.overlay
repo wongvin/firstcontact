@@ -14,6 +14,7 @@
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/lora/sx126x.h>
 
 / {
 	vbatt: vbatt {
@@ -115,5 +116,45 @@
 		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
 		zephyr,resolution = <12>;
 		zephyr,input-positive = <NRF_SAADC_AIN7>;
+	};
+};
+
+/*
+ * Seeed Wio-SX1262 for XIAO (#303). Same pins on the sensor and the gateway;
+ * from Meshtastic's seeed_xiao_nrf52840_kit/variant.h, checked against
+ * seeed_xiao_connector.dtsi. See LORA-PLAN.md § Hardware / wiring.
+ *
+ *   NSS D4 P0.04   DIO1 D1 P0.03   RESET D2 P0.28   BUSY D3 P0.29   RXEN D5 P0.05
+ *   SCK/MISO/MOSI D8/D9/D10 = xiao_spi (spi2)
+ *
+ * D4/D5 are xiao_i2c's pins, and Sophon puts nothing on that bus -- the Sense
+ * IMU is on the internal i2c0 -- so i2c1 is disabled to free them.
+ *
+ * zephyr,deferred-init: the loramac-node driver's SX126xWaitOnBusy() has no
+ * timeout, and on a board with no Wio fitted BUSY floats. src/role.c checks
+ * the radio is really there (it reads the sync-word register over raw SPI)
+ * before calling device_init(); a board without one never runs the driver.
+ */
+&i2c1 {
+	status = "disabled";
+};
+
+&spi2 {
+	status = "okay";
+	cs-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+
+	lora0: lora@0 {
+		compatible = "semtech,sx1262";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+		reset-gpios = <&gpio0 28 GPIO_ACTIVE_LOW>;
+		busy-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+		dio1-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+		rx-enable-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+		dio2-tx-enable;
+		dio3-tcxo-voltage = <SX126X_DIO3_TCXO_1V8>;
+		tcxo-power-startup-delay-ms = <5>;
+		rx-boosted;
+		zephyr,deferred-init;
 	};
 };

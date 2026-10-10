@@ -2,6 +2,14 @@
 
 ## 2026-10-09
 
+### feat: LoRa codec, radio presence check and runtime roles (#303)
+
+- **Packet codec** (`src/lora_codec.c`): v1 and the lossless compact v2 from LORA-PROTOCOL.md, plain C99 with no Zephyr headers. `scripts/test-codec.sh` runs 91 host checks under the address and undefined-behaviour sanitizers: the documented worked example byte for byte, every length-table row, the seq and t_ms wraps, the packing rules, and every case the spec says to drop. Injecting four bugs one at a time made the test fail each time.
+- **Wio-SX1262 on `spi2`** (`app.overlay`): `semtech,sx1262` on the Meshtastic kit pins with RX boost, `i2c1` disabled to free D4/D5, and the Semtech loramac-node backend named explicitly in `prj.conf`. LORA-UPDATED-PLAN.md § Driver selection explains why it was chosen over Zephyr's experimental native driver.
+- **Radio presence check and runtime role** (`src/role.c`): the driver's BUSY wait has no timeout, so the node is deferred-init and the driver starts only after the chip answers a raw SPI read of its sync-word register. Radio + IMU → sensor, radio alone → gateway, no radio → direct. The role is logged again 10 s after boot, because the startup log burst loses its tail on the USB console. Nothing behaves differently yet.
+- **Verified on all three boards with 2.9.0**: `01A7` gateway and `86F0` sensor (both read live over SWD); `4D88`, with no Wio, direct (sync word `0xffff`, role reached 49 ms after boot, no hang). The image confirmed on all three, 86F0 and 4D88 over the air. Both build modes compile. LORA-UPDATED-PLAN.md starts as the current design record.
+
+
 ### fix: the UF2 build compiles again (#306)
 
 - **`SOPHON_BOOT=uf2 scripts/build.sh` had been failing since #271** with `slot0_partition ... undeclared`. #271 put MCUmgr and the image manager in `prj.conf`, and the image manager needs a `slot0_partition` that only the MCUboot partition overlay defines. No board had built a UF2 since migrating, so nothing noticed.
