@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### docs: README covers the LoRa roles (#303)
+
+- **New § Roles: direct, sensor, gateway.** It covers how each role is detected, the radio presence check, what each role does and advertises, the image-confirm rule per role, and the one-connection gotcha with several devices.
+- **Also:** the radio presets and Kconfig options, the console lines to expect (including `DIO1 recoveries`), and what is not built yet (walk-test mode #313, latency #314, hopping #304). It maps the LoRa documents and how to run the codec test.
+- The intro and § The board mention the relay and the base XIAO and Wio-SX1262 boards. § Layout lists the new files.
+
+
 ### docs: the Wio-SX1262 LoRa board in HARDWARE.md (#303)
 
 - **New section on the Seeed Wio-SX1262 for XIAO**, from Seeed's carrier schematic (V1.0) and the module datasheet.
