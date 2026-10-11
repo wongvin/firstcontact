@@ -35,6 +35,12 @@ nonisolated enum SophonProtocol {
     static let linkParamsCharacteristicUUID = CBUUID(string: "C6560004-84D5-4DC2-8C1E-4B4EB2337CE4")
     static let batteryCharacteristicUUID = CBUUID(string: "C6560005-84D5-4DC2-8C1E-4B4EB2337CE4")
 
+    /// The sensor → gateway LoRa link, served by a LoRa gateway (#303, #309).
+    ///
+    /// Present on every board but filled only on a gateway: a read off-gateway
+    /// returns zero bytes and nothing is notified. See ``LoRaLinkRecord``.
+    static let loraLinkCharacteristicUUID = CBUUID(string: "C6560006-84D5-4DC2-8C1E-4B4EB2337CE4")
+
     /// Manufacturer Specific Data company ID, mirroring `SOPHON_COMPANY_ID` in
     /// `zephyr/sophon/src/version.h`.
     ///
@@ -217,6 +223,118 @@ nonisolated struct BatteryReading: Equatable, Sendable {
         usbPowered = data.count >= 5 ? (data[data.startIndex + 4] & 0x01) != 0 : nil
     }
 
+}
+
+/// One 10 s window of a gateway's LoRa link statistics (#309).
+///
+/// Mirrors PROTOCOL.md § LoRa Link frame: 20 bytes, little-endian. It describes
+/// the **sensor → gateway LoRa link**, the leg this app cannot otherwise see. The
+/// RSSI and Link Params rows describe the phone ↔ gateway BLE link instead.
+///
+/// Exact length, unlike ``BatteryReading``: the record already fills one notify
+/// at ATT MTU 23, so it cannot grow without a version bump. A zero-length read is
+/// the board saying it is not a gateway, and is handled before this is built.
+nonisolated struct LoRaLinkRecord: Equatable, Sendable {
+    static let wireSize = 20
+    static let supportedVersion: UInt8 = 1
+
+    let preset: UInt8
+    let rxBoost: Bool
+    let isWalkTest: Bool
+    /// Any packet arrived in the window. RSSI and SNR mean nothing without it.
+    let heard: Bool
+    let spreadingFactor: UInt8
+    /// Rolling, +1 per record; a jump means a notify was missed.
+    let window: UInt8
+    /// Link quality in tenths of a percent, or nil when nothing was expected.
+    let linkQualityTenths: UInt16?
+    let rssiAvg: Int8
+    let rssiMin: Int8
+    let snrAvg: Int8
+    let snrMin: Int8
+    let samples: UInt16
+    let missing: UInt16
+    let badPackets: UInt8
+    let wrongPeerPackets: UInt8
+    let lastPacketMillis: UInt16
+    let sensorID: UInt16
+
+    init?(_ data: Data) {
+        guard data.count == Self.wireSize else { return nil }
+        var bytes = [UInt8](repeating: 0, count: Self.wireSize)
+        data.copyBytes(to: &bytes, count: Self.wireSize)
+        guard bytes[0] == Self.supportedVersion else { return nil }
+
+        func u16(_ offset: Int) -> UInt16 { UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8) }
+        func i8(_ offset: Int) -> Int8 { Int8(bitPattern: bytes[offset]) }
+
+        preset = bytes[1]
+        rxBoost = bytes[2] & 0x01 != 0
+        isWalkTest = bytes[2] & 0x02 != 0
+        heard = bytes[2] & 0x04 != 0
+        spreadingFactor = bytes[2] >> 4
+        window = bytes[3]
+        let lq = u16(4)
+        linkQualityTenths = lq == 0xFFFF ? nil : lq
+        rssiAvg = i8(6)
+        rssiMin = i8(7)
+        snrAvg = i8(8)
+        snrMin = i8(9)
+        samples = u16(10)
+        missing = u16(12)
+        badPackets = bytes[14]
+        wrongPeerPackets = bytes[15]
+        lastPacketMillis = u16(16)
+        sensorID = u16(18)
+    }
+
+    /// Link quality as a percentage, or nil when nothing was expected.
+    var linkQuality: Double? { linkQualityTenths.map { Double($0) / 10 } }
+
+    /// The SNR below which this spreading factor stops demodulating
+    /// (LORA-UPDATED-PLAN.md § LoRa variables).
+    static func snrLimit(spreadingFactor sf: UInt8) -> Double? {
+        guard (5...12).contains(sf) else { return nil }
+        return -2.5 * Double(Int(sf) - 4)
+    }
+
+    /// Link margin: average SNR above the demodulation floor. Shrinks steadily
+    /// with distance while LQ stays at 100%, so it is the early warning.
+    var marginDB: Double? {
+        guard heard, let limit = Self.snrLimit(spreadingFactor: spreadingFactor) else { return nil }
+        return Double(snrAvg) - limit
+    }
+
+    /// Margin at the window's worst packet. On a moving link the signal fades
+    /// 15-20 dB within a window, and packets are lost in the dips while the
+    /// average still looks healthy -- the first hardware walk lost 10-20 % of
+    /// samples at an average margin of +12 to +19 dB. This is the honest one.
+    var worstMarginDB: Double? {
+        guard heard, let limit = Self.snrLimit(spreadingFactor: spreadingFactor) else { return nil }
+        return Double(snrMin) - limit
+    }
+
+    /// Receiver sensitivity at 500 kHz for the presets' spreading factors,
+    /// as LORA-UPDATED-PLAN.md uses them (ExpressLRS's published figures).
+    var sensitivityDBm: Int? {
+        switch spreadingFactor {
+        case 7: -117
+        case 8: -120
+        default: nil
+        }
+    }
+
+    /// Preset names, by id (LORA-PROTOCOL.md § Presets).
+    static let presetNames = ["V0", "V1", "V3", "V3b", "V4", "V5", "V5b", "V6", "V6b"]
+
+    var presetName: String {
+        Int(preset) < Self.presetNames.count ? Self.presetNames[Int(preset)] : "preset \(preset)"
+    }
+
+    /// The sensor's name, as it advertises: the id is the XXXX of Sophon-XXXX.
+    var sensorName: String? {
+        sensorID == 0 ? nil : String(format: "Sophon-%04X", sensorID)
+    }
 }
 
 /// What a Sophon says about itself before you connect.
@@ -512,6 +630,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkTxStats()
         checkIdentity()
         checkLinkParams()
+        checkLoRaLink()
     }
 
     private static func checkMotionFrame() {
@@ -574,6 +693,59 @@ nonisolated enum SophonProtocolSelfCheck {
                "TxStats wire layout disagrees with PROTOCOL.md")
         assert(TxStats(expected) == stats,
                "TxStats does not decode its own PROTOCOL.md byte vector")
+    }
+
+    private static func checkLoRaLink() {
+        // Hand-transcribed from PROTOCOL.md § LoRa Link frame, every multi-byte
+        // field asymmetric so a byte swap cannot pass.
+        let wire = Data([
+            0x01,       // version            @0
+            0x02,       // preset V3          @1
+            0x75,       // boost, heard, SF7  @2
+            0x2A,       // window 42          @3
+            0xE4, 0x03, // lq_x10 996         @4
+            0xA0,       // rssi_avg -96       @6
+            0x9D,       // rssi_min -99       @7
+            0x05,       // snr_avg  +5        @8
+            0xFE,       // snr_min  -2        @9
+            0x12, 0x02, // samples 530        @10
+            0x03, 0x00, // missing 3          @12
+            0x04,       // bad 4              @14
+            0x00,       // wrong_peer 0       @15
+            0x2C, 0x01, // last_packet 300 ms @16
+            0xF0, 0x86, // sensor 0x86F0      @18
+        ])
+        guard let record = LoRaLinkRecord(wire) else {
+            assertionFailure("LoRaLinkRecord rejected a valid 20-byte record")
+            return
+        }
+        assert(record.preset == 2 && record.presetName == "V3", "preset misread")
+        assert(record.rxBoost && record.heard && !record.isWalkTest && record.spreadingFactor == 7, "flags misread")
+        assert(record.window == 42, "window misread")
+        assert(record.linkQualityTenths == 996 && record.linkQuality == 99.6, "lq decoded byte-swapped")
+        assert(record.rssiAvg == -96 && record.rssiMin == -99, "RSSI sign or offset wrong")
+        assert(record.snrAvg == 5 && record.snrMin == -2, "SNR sign or offset wrong")
+        assert(record.samples == 530 && record.missing == 3, "sample counts byte-swapped")
+        assert(record.badPackets == 4 && record.wrongPeerPackets == 0, "packet counts misread")
+        assert(record.lastPacketMillis == 300, "last packet age byte-swapped")
+        assert(record.sensorID == 0x86F0 && record.sensorName == "Sophon-86F0", "sensor id byte-swapped")
+        assert(record.marginDB == 12.5, "margin should be SNR 5 - SNRlim(SF7) -7.5")
+        assert(record.worstMarginDB == 5.5, "worst margin should be SNR min -2 - SNRlim(SF7) -7.5")
+        assert(LoRaLinkRecord(wire.dropLast()) == nil, "short record must be rejected")
+        assert(LoRaLinkRecord(wire + Data([0x00])) == nil, "long record must be rejected")
+        assert(LoRaLinkRecord(Data()) == nil, "zero bytes is 'not a gateway', not a record")
+        var nothing = wire
+        nothing[4] = 0xFF; nothing[5] = 0xFF; nothing[2] = 0x71
+        let quiet = LoRaLinkRecord(nothing)
+        assert(quiet?.linkQuality == nil && quiet?.marginDB == nil, "0xFFFF / unheard must read as no data")
+        var walk = wire
+        walk[2] = 0x77 // + walk-test bit
+        let walkRecord = LoRaLinkRecord(walk)
+        assert(walkRecord?.isWalkTest == true && walkRecord?.rxBoost == true && walkRecord?.heard == true,
+               "walk-test flag read from the wrong bit")
+        var v2 = wire
+        v2[0] = 0x02
+        assert(LoRaLinkRecord(v2) == nil, "an unknown version must be dropped")
     }
 
     private static func checkLinkParams() {

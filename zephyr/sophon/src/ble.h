@@ -163,4 +163,11 @@ void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,
  */
 void sophon_ble_battery_notify(void);
 
+/*
+ * Gateway: notify the latest LoRa Link record (#309) to a subscribed central.
+ * Best effort -- a refused notify is dropped, never retried, so link stats can
+ * never delay motion. A no-op with nobody connected.
+ */
+void sophon_ble_lora_link_notify(void);
+
 #endif /* SOPHON_BLE_H */

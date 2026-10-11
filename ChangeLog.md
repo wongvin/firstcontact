@@ -2,6 +2,25 @@
 
 ## 2026-10-10
 
+### feat: LoRa link stats in the iOS app, recorded with GPS (#309)
+
+- **Firmware (2.11.0):**
+  - A gateway serves a new **LoRa Link** characteristic (`C6560006-…`, read + notify): one 20-byte record per 10 s window, with LQ, RSSI and SNR (average and minimum), samples, missing, bad, last-packet age, preset and sensor id.
+  - It is in every board's GATT table. Off a gateway it reads zero bytes and never notifies, so a role change never leaves iOS a stale attribute table.
+  - Notifies are best effort and never delay motion.
+  - Checked on hardware with a Mac client: every field matched the gateway console window for window.
+- **iOS app:**
+  - A **LoRa link** section shows link quality, average and worst-packet margin (coloured by the worst), RSSI against sensitivity, SNR, last packet, preset, sensor, session counters and sparklines.
+  - It appears only once a gateway sends a record. Verdict rows dim when stale.
+  - A hub-owned **walk-test recorder** writes one CSV row per record, with GPS position and distance from a pin, or from the start position if none is dropped. Rows are appended to disk as they arrive. Recordings live in **Documents**, visible in the Files app as On My iPhone › Sophon, so one cut short by a force-quit is still reachable, and can be shared through the share sheet.
+  - Recording keeps running with the phone locked. The location permission string was rewritten, because it had promised location would never be recorded.
+- **`walktest-report.py`** turns a recording into LQ, average and worst margin, RSSI and pass/fail per distance band and preset. **PROTOCOL.md** documents the frame and its margin rules, and **TEST-PLAN.md §6** covers it.
+- **First hardware walk** (V3, sensor at base, gateway and phone carried about 140 m and back, obstructed):
+  - LQ ≈ 100% close in, then 82% at 50–100 m and 49% at 100–200 m.
+  - Losses start while the average margin is still +12 dB: fades take the worst packet below the floor. Hence the worst-packet margin.
+- Fixed before review (`swift-reviewer`): a duplicate CSV row after a reconnect, recording stopping when the phone locks, GPS redrawing the whole section, recorder controls vanishing during a reconnect, stale values staying green, and a self-check gap on the walk-test bit.
+
+
 ### fix: LoRa gateway recovers a lost radio interrupt (#303)
 
 - **The gateway went deaf after hours of relaying.** The sensor kept sending (134 packets per 10 s, 0 errors) while 01A7 reported "nothing heard". Read live over SWD: DIO1 (P0.03) high and steady, BUSY low, and GPIOTE armed for a rising edge with no event pending. Zephyr's loramac-node glue handles DIO1 one edge per work run and re-arms the edge with `gpio_pin_interrupt_configure_dt()` after every packet. An edge landing in that re-arm window is lost, DIO1 never falls, and no further edge ever comes.

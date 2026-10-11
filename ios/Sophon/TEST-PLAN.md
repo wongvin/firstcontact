@@ -530,3 +530,70 @@ pulls it to the full pack voltage.
 - **Behaviour below ~3.0 V.** Not exercised — deliberately not discharging a LiPo that far to test a display.
 - **Charge-current control.** `P0.13_HICHG` selects ~50 mA vs ~100 mA. Untouched by this issue.
 - **The `/CHG`-cycling heuristic** for detecting an absent pack under USB. Plausible — a standalone charger with no pack terminates and re-triggers periodically — but P0.17 does not expose charge status on this board, so there is nothing to observe.
+
+## 6. LoRa link stats (issue #309)
+
+Behind a LoRa gateway (#303) the app could not see the link that matters. Its
+RSSI row is the **phone ↔ gateway BLE** link. The gateway now serves a **LoRa
+Link** characteristic (`C6560006-…`): one 20-byte record per 10 s window with
+LQ, RSSI and SNR (average and minimum), sample and packet counts, the preset and
+the sensor. The app shows it in a **LoRa link** section and can record it
+against GPS for the walk test (LORA-UPDATED-PLAN.md § Walk-test procedure:
+sensor at base, gateway and phone carried). Contract: PROTOCOL.md § LoRa Link
+frame.
+
+Needs: a sensor (Sense Plus + Wio-SX1262) and a gateway (XIAO + Wio-SX1262) on
+firmware ≥ 2.11.0, plus a direct board for the negative cases.
+
+### 6a. What the section is, and is not
+
+- **It describes the sensor → gateway LoRa link, measured at the gateway.** The
+  rows above it (RSSI, Interval, Battery) describe this phone's Bluetooth link
+  to the gateway, and the section's footer says so.
+- **Average-SNR margin is optimistic on a moving link.** Fades of 15–20 dB
+  within a window lose packets while the average still looks healthy. The app
+  therefore shows the **worst** packet's margin too, and colours the row by it.
+  See 6.9.
+
+### 6b. Presence
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6.1 | Connect to a gateway. | The **LoRa link** section appears under the link section within one window (≤ 10 s; the read at discovery usually fills it at once). **Passed 2026-10-10** on 01A7 / 86F0. |
+| 6.2 | Connect to a direct board (no Wio). | No LoRa section, ever. Its read returns zero bytes, which is "not a gateway", and nothing is notified. **Passed 2026-10-10.** |
+| 6.3 | Connect to the simulator peripheral. | No LoRa section. The simulator does not offer the characteristic (PROTOCOL.md simulator table). **Passed 2026-10-10.** |
+
+### 6c. Values against the gateway console
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6.4 | With the gateway on USB, compare the app's rows with the console's `lora rx:` line for the same window. | LQ, RSSI avg/min, SNR avg/min and samples/missing match exactly. **Passed 2026-10-10** against a Mac `bleak` client: windows 4 and 5 matched the console byte for byte. |
+| 6.5 | Watch **Updated** for 30 s. | Counts up from 0 and resets about every 10 s. Over 15 s, the verdict rows dim and say `(stale)` instead of staying green. |
+| 6.6 | Unplug the sensor. | Within one window: LQ reads `Nothing heard` in **red**, margin `—`, "Last packet: None this window". |
+| 6.7 | Leave the detail view open for 5 minutes. | Two sparklines (LQ, margin) fill to 30 windows and then scroll. |
+
+### 6d. Reconnects and duplicates
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6.8 | While recording, walk out of BLE range of the gateway briefly and back within 10 s, or toggle Bluetooth. | The CSV has **no duplicate window numbers**. The record re-sent on the post-reconnect read is recognised and skipped (review finding 1). **Records missed** does not count the disconnect. **Partly passed 2026-10-10:** Bluetooth toggled off and on twice during a recording. No duplicates. After each reconnect, the read returned the gateway's latest window at once (151, 4 s before the next notify), and the outage windows (148–150, 154) are absent, as they should be. **The duplicate check itself was not exercised:** both outages (46 s, 21 s) were longer than a window, so each read brought a new window. To exercise it, toggle Bluetooth off and on right after **Updated** resets, so the reconnect lands inside the same window. |
+
+### 6e. Walk-test recording
+
+| ID | Steps | Expected |
+|---|---|---|
+| 6.9 | Start a recording, walk away from the sensor and back. | Rows every 10 s, window numbers consecutive. **Passed 2026-10-10:** 39 windows (56→94), no gaps, no duplicates, GPS on every row. That walk produced the margin finding in 6a: LQ 82% at 50–100 m with average margin +11.6 dB but worst margin −1.5 dB. |
+| 6.10 | Start recording **without** dropping a pin. | `From pin` reads `… m from the start position`. The CSV's `distance_m` is filled, measured from the first fix, and `pin_lat`/`pin_lon` show where that was. *The first hardware walk predates this and has no distances; `walktest-report.py` measures such files from their first fix.* **Passed 2026-10-10:** the recorded pin equals the first fix exactly, and all 20 rows have a distance. |
+| 6.11 | Tap **Drop pin here** mid-recording. | Distances re-zero from that point. Every row carries its pin's coordinates, so the change is visible in the CSV. **Partly passed 2026-10-10:** a pin dropped by hand at the start of a recording gave `distance_m` and the pin's coordinates on all 14 rows. A re-drop partway through has not been run. |
+| 6.11a | During a recording, read the **Distance** row after LoRa SNR. | `Distance from pin` (or `Distance from start` with no pin) reads the distance with its GPS accuracy, e.g. `87 m (±4 m)`, and follows you as you walk. Outside a recording it reads `Start a walk-test recording to measure`. **Passed 2026-10-10** with a hand-dropped pin: "distance sensible". |
+| 6.12 | Lock the phone for a minute while recording. | Rows keep accumulating while locked (background location keeps the app running; review finding 2). The screen does not auto-lock while recording. **Passed 2026-10-10** for about 30 s locked: rows kept arriving every 10 s. A full minute has not been run. |
+| 6.13 | Force-quit the app mid-recording, then open the **Files app › On My iPhone › Sophon**. | The recording is there with every row up to the quit, the last one complete. Rows are appended as they arrive, and recordings live in Documents, which the Files app shows. **Data side passed 2026-10-10:** 6 rows (windows 42–47), the file ending on a complete row. But it was in `tmp/` then, reachable only through the Mac's debug access, which is why recordings moved to Documents. **Files-app route passed 2026-10-10:** after a force-quit, the recording was in Files › On My iPhone › Sophon and ended on a complete row. |
+| 6.14 | Stop, then **Share last recording**, AirDrop to a Mac and run `zephyr/sophon/scripts/walktest-report.py FILE.csv`. | A per-distance, per-preset table of LQ, average margin, worst margin, RSSI and pass/fail at LQ ≥ 99%. **Passed 2026-10-10** on the first walk's CSV. |
+| 6.15 | Deny location, then start a recording. | Rows still record, without positions, and the section says location is off. **Passed 2026-10-10:** windows 89–91 recorded with no position. After location was turned back on partway through, positions resumed and the automatic pin took the first fix. **Known limit:** with location denied, nothing keeps the app awake in the background, so leaving the app (here, to turn location back on in Settings) lost one window (92), counted as a missed record. With location allowed, background recording works (6.12). Adding the `bluetooth-central` background mode would close this gap; **decided against, 2026-10-10**. The walk test runs with location on, which already keeps the app recording in the background. |
+| 6.16 | Disconnect the gateway while recording. | The recorder's controls stay on screen (review finding 4), and Stop still works. **Data side passed 2026-10-10:** the gateway was powered off for about 98 s mid-recording and back on. The recording continued and logged the first record after the reboot (window 0). The reset counter was neither counted as missed records nor taken for a duplicate. Whether the controls stayed on screen was not observed. |
+
+### 6f. Not covered
+
+- **Walk-test mode's per-variant records** (`walk_test = 1`, one record per variant per window). These depend on #303's walk-test firmware, which doesn't exist yet. The parser and the CSV already carry the fields.
+- **Long recordings.** Battery use over an hour of background GPS is not measured.
+- **Absolute RSSI accuracy.** The SX1262's packet RSSI is taken as reported. The floor near −104 dBm seen on the first walk is not explained here.

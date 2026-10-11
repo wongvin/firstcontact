@@ -38,14 +38,29 @@
 	<key>NSMotionUsageDescription</key>
 	<string>Reads this device's accelerometer and gyroscope so it can act as a simulated Sophon motion sensor.</string>
 
-	<!-- Location is used ONLY to keep the app scheduled while it is streaming in
-	     the background. No location is read, stored or transmitted.
-	     See Simulator/BackgroundKeepAlive.swift for why a keep-alive is needed
-	     at all: bluetooth-peripheral keeps a peripheral wakeable for incoming
-	     events, but this one is push-driven, so once suspended nothing arrives
-	     to wake it and the stream stops. -->
+	<!-- Location has two uses, and the string must describe both truthfully.
+	     1. Simulator keep-alive: keeps the app scheduled while it streams in the
+	        background. No location is read. See Simulator/BackgroundKeepAlive.swift
+	        for why a keep-alive is needed at all: bluetooth-peripheral keeps a
+	        peripheral wakeable for incoming events, but this one is push-driven,
+	        so once suspended nothing arrives to wake it and the stream stops.
+	     2. LoRa walk-test recording (#309, BLE/WalkTestRecorder.swift): while a
+	        recording runs, each LoRa Link record is stored with the phone's
+	        position, on the phone only (Documents, visible in the Files app),
+	        until the user shares or copies it.
+	     Until #309 this said location was never recorded; recording made that
+	     untrue, so it was rewritten rather than left as a broken promise. -->
+	<!-- Walk-test recordings (#309) are saved in Documents, and these two keys
+	     make that folder visible in the Files app as On My iPhone > Sophon, so a
+	     recording is reachable even after a force-quit or crash, when the app no
+	     longer offers to share it. Nothing else is stored in Documents. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Keeps Sophon running while it streams motion in the background. Your location is never recorded or sent anywhere.</string>
+	<string>Keeps Sophon running while it streams motion in the background. During a LoRa walk-test recording, saves your position with each link reading on this iPhone, so range can be measured against distance. Nothing is sent anywhere unless you share the recording.</string>
 
 	<!-- bluetooth-peripheral keeps the GATT server registered while backgrounded.
 	     location is the keep-alive that keeps the process scheduled so CoreMotion
