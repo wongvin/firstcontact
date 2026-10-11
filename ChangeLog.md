@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-10
+
+### feat: Sophon uptime shown as hh:mm:ss (#311)
+
+- The viewer's **Sophon uptime** row and the simulator's **Uptime** row show `hh:mm:ss` instead of raw milliseconds (`03:17:23`, not `11843072 ms`). Hours keep counting past 24 and are never truncated: `t_ms` is a u32 that wraps at about 49.7 days, where hours reach `1193`.
+- One shared formatter, `UptimeFormat.text(millis:)` in `SophonProtocol.swift`, with a DEBUG self-check: 0, 59 999 ms (truncates, doesn't round), 1 h, 27 h and `UInt32.max` → `1193:02:47`. Display only: restart detection still compares raw `t_ms`.
+- Verified on devices, in the viewer and in simulator mode.
+
+
 ## 2026-10-09
 
 ### fix: the UF2 build compiles again (#306)
