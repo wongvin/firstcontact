@@ -145,7 +145,7 @@ fi
 
 if [ "${MATCH_COUNT}" -gt 1 ] && [ "${DEPLOY_ALL}" -eq 0 ]; then
   echo "error: ${MATCH_COUNT} usable devices — choose one, or use --all:" >&2
-  while IFS="$(printf '\t')" read -r id name tunnel; do
+  while IFS="$(printf '\t')" read -r _ name tunnel; do
     printf "  %s '%s'   (tunnel %s)\n" "$(basename "${BASH_SOURCE[0]}")" "${name}" "${tunnel}" >&2
   done < "${DEVICE_TABLE}"
   echo "  $(basename "${BASH_SOURCE[0]}") --all" >&2
@@ -153,7 +153,7 @@ if [ "${MATCH_COUNT}" -gt 1 ] && [ "${DEPLOY_ALL}" -eq 0 ]; then
 fi
 
 echo "==> Deploying to ${MATCH_COUNT} device(s):"
-while IFS="$(printf '\t')" read -r id name tunnel; do
+while IFS="$(printf '\t')" read -r _ name tunnel; do
   if [ "${tunnel}" = "connected" ]; then
     printf '    %-16s tunnel up\n' "${name}"
   else

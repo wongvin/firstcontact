@@ -827,61 +827,72 @@ extension SophonHub: CBPeripheralDelegate {
         }
         guard let data = characteristic.value else { return }
 
-        if characteristic.uuid == SophonProtocol.batteryCharacteristicUUID {
-            let byteCount = data.count
-            guard let reading = BatteryReading(data) else {
-                // Also the mv == 0 sentinel, which is not a malformed payload but
-                // the board saying it has no reading -- logged at info, not error,
-                // because a board whose divider failed to start is a normal state
-                // the UI renders as Not reported (#268).
-                MainActor.assumeIsolated {
-                    self.log.info("no battery reading (\(byteCount, privacy: .public) bytes)")
-                }
-                return
-            }
+        // One handler per characteristic, each owning its own parse and its own
+        // hop to the main actor.
+        let id = peripheral.identifier
+        switch characteristic.uuid {
+        case SophonProtocol.batteryCharacteristicUUID:
+            ingestBatteryValue(data, from: id)
+        case SophonProtocol.loraLinkCharacteristicUUID:
+            MainActor.assumeIsolated { self.ingestLoRaLinkValue(data, from: id) }
+        case SophonProtocol.statsCharacteristicUUID:
+            ingestStatsValue(data, from: id)
+        case SophonProtocol.linkParamsCharacteristicUUID:
+            ingestLinkParamsValue(data, from: id)
+        case SophonProtocol.motionCharacteristicUUID:
+            ingestMotionValue(data, from: id)
+        default:
+            break
+        }
+    }
+
+    nonisolated private func ingestBatteryValue(_ data: Data, from id: UUID) {
+        let byteCount = data.count
+        guard let reading = BatteryReading(data) else {
+            // Also the mv == 0 sentinel, which is not a malformed payload but
+            // the board saying it has no reading -- logged at info, not error,
+            // because a board whose divider failed to start is a normal state
+            // the UI renders as Not reported (#268).
             MainActor.assumeIsolated {
-                self.byID[peripheral.identifier]?.ingestBattery(reading)
+                self.log.info("no battery reading (\(byteCount, privacy: .public) bytes)")
             }
             return
         }
-
-        if characteristic.uuid == SophonProtocol.loraLinkCharacteristicUUID {
-            return MainActor.assumeIsolated { self.ingestLoRaLinkValue(data, from: peripheral.identifier) }
+        MainActor.assumeIsolated {
+            self.byID[id]?.ingestBattery(reading)
         }
+    }
 
-        if characteristic.uuid == SophonProtocol.statsCharacteristicUUID {
-            let byteCount = data.count
-            guard let stats = TxStats(data) else {
-                Task { @MainActor in
-                    self.log.error("bad stats: \(byteCount) bytes, expected \(TxStats.wireSize)")
-                }
-                return
-            }
+    nonisolated private func ingestStatsValue(_ data: Data, from id: UUID) {
+        let byteCount = data.count
+        guard let stats = TxStats(data) else {
             Task { @MainActor in
-                self.byID[peripheral.identifier]?.ingest(stats)
+                self.log.error("bad stats: \(byteCount) bytes, expected \(TxStats.wireSize)")
             }
             return
         }
+        Task { @MainActor in
+            self.byID[id]?.ingest(stats)
+        }
+    }
 
-        if characteristic.uuid == SophonProtocol.linkParamsCharacteristicUUID {
-            let byteCount = data.count
-            guard let params = LinkParams(data) else {
-                Task { @MainActor in
-                    self.log.error("bad link params: \(byteCount) bytes, expected \(LinkParams.wireSize)")
-                }
-                return
-            }
+    nonisolated private func ingestLinkParamsValue(_ data: Data, from id: UUID) {
+        let byteCount = data.count
+        guard let params = LinkParams(data) else {
             Task { @MainActor in
-                // Read every 2 s; the value changes very rarely.
-                if let device = self.byID[peripheral.identifier], device.linkParams != params {
-                    device.linkParams = params
-                }
+                self.log.error("bad link params: \(byteCount) bytes, expected \(LinkParams.wireSize)")
             }
             return
         }
+        Task { @MainActor in
+            // Read every 2 s; the value changes very rarely.
+            if let device = self.byID[id], device.linkParams != params {
+                device.linkParams = params
+            }
+        }
+    }
 
-        guard characteristic.uuid == SophonProtocol.motionCharacteristicUUID else { return }
-
+    nonisolated private func ingestMotionValue(_ data: Data, from id: UUID) {
         let byteCount = data.count
         guard let frame = MotionFrame(data) else {
             Task { @MainActor in
@@ -892,9 +903,8 @@ extension SophonHub: CBPeripheralDelegate {
             }
             return
         }
-
         Task { @MainActor in
-            self.byID[peripheral.identifier]?.ingest(frame)
+            self.byID[id]?.ingest(frame)
         }
     }
 }

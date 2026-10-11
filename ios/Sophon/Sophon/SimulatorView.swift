@@ -37,7 +37,10 @@ struct SimulatorView: View {
         } header: {
             Text("Identity")
         } footer: {
-            Text("Derived from this install's vendor id, the way a board derives its name from the nRF52840 FICR. Deliberately indistinguishable from real hardware — the viewer needs no special case.")
+            Text("""
+                Derived from this install's vendor id, the way a board derives its name from the nRF52840 \
+                FICR. Deliberately indistinguishable from real hardware — the viewer needs no special case.
+                """)
         }
     }
 
@@ -51,7 +54,11 @@ struct SimulatorView: View {
         } header: {
             Text("Link")
         } footer: {
-            Text("A real board accepts one connection and negotiates a 23-byte ATT MTU. This will serve several centrals and negotiates far more iPhone-to-iPad, so it is a stand-in for logic and timing, not for radio capacity.")
+            Text("""
+                A real board accepts one connection and negotiates a 23-byte ATT MTU. This will serve several \
+                centrals and negotiates far more iPhone-to-iPad, so it is a stand-in for logic and timing, \
+                not for radio capacity.
+                """)
         }
     }
 
@@ -63,7 +70,11 @@ struct SimulatorView: View {
         } header: {
             Text("Rate")
         } footer: {
-            Text("Nominal is what was requested; sensor is what CoreMotion delivers. They differ, exactly as the board's LSM6DSL delivers ~54 Hz when asked for 52 — which is why t_ms, not the nominal rate, is the timebase. Notify falls below sensor when frames are dropped.")
+            Text("""
+                Nominal is what was requested; sensor is what CoreMotion delivers. They differ, exactly as \
+                the board's LSM6DSL delivers ~54 Hz when asked for 52 — which is why t_ms, not the nominal \
+                rate, is the timebase. Notify falls below sensor when frames are dropped.
+                """)
         }
     }
 
@@ -77,7 +88,10 @@ struct SimulatorView: View {
             } header: {
                 Text("Motion")
             } footer: {
-                Text("These should read the same as the viewer's Motion section, value for value. That comparison is the end-to-end check on the frame encoder and decoder.")
+                Text("""
+                    These should read the same as the viewer's Motion section, value for value. That \
+                    comparison is the end-to-end check on the frame encoder and decoder.
+                    """)
             }
         } else {
             Section {
@@ -110,7 +124,15 @@ struct SimulatorView: View {
         } header: {
             Text("Transmit counters")
         } footer: {
-            Text("The same four counters a board exposes, readable by the viewer over the stats characteristic. A refused frame is dropped rather than retried, and seq is never rewound — so the hole stays visible.\n\nSend queue is this app's own buffer, matching the firmware's depth of 8. CoreMotion delivers in clumps, so frames are queued and paced out rather than fired at the radio as they arrive (#255). A drop here counts into TX buffer full, because from the viewer's side the frame simply was not sent — counting it anywhere else would make it read as loss on the air.")
+            Text("""
+                The same four counters a board exposes, readable by the viewer over the stats characteristic. \
+                A refused frame is dropped rather than retried, and seq is never rewound — so the hole stays \
+                visible.\n\nSend queue is this app's own buffer, matching the firmware's depth of 8. \
+                CoreMotion delivers in clumps, so frames are queued and paced out rather than fired at the \
+                radio as they arrive (#255). A drop here counts into TX buffer full, because from the \
+                viewer's side the frame simply was not sent — counting it anywhere else would make it read as \
+                loss on the air.
+                """)
         }
 
         Section {
@@ -153,7 +175,18 @@ struct SimulatorView: View {
         } header: {
             Text("Scheduling cadence")
         } footer: {
-            Text("Core Bluetooth cannot tell a peripheral its connection interval — no API exists — so this infers the cadence from when iOS drains the transmit queue (#248). It is only the connection interval while the queue stays saturated: then every connection event frees space and fires the callback. Judge that from the range, not the mean — 45–55 ms around a 50 ms mean is an interval, 8–400 ms is an artefact. Accepted per drain is then notifications placed per connection event, which is the figure #211's capacity table assumes.\n\nCoreMotion arrival is the other half: an even ~20 ms stream refused at 8.8% means the link is the limit, while a clumped one means the queue cannot absorb a burst the link could carry on average. The rate alone cannot tell these apart — bursts of five every 100 ms average to 50 Hz just like an even stream.")
+            Text("""
+                Core Bluetooth cannot tell a peripheral its connection interval — no API exists — so this \
+                infers the cadence from when iOS drains the transmit queue (#248). It is only the connection \
+                interval while the queue stays saturated: then every connection event frees space and fires \
+                the callback. Judge that from the range, not the mean — 45–55 ms around a 50 ms mean is an \
+                interval, 8–400 ms is an artefact. Accepted per drain is then notifications placed per \
+                connection event, which is the figure #211's capacity table assumes.\n\nCoreMotion arrival is \
+                the other half: an even ~20 ms stream refused at 8.8% means the link is the limit, while a \
+                clumped one means the queue cannot absorb a burst the link could carry on average. The rate \
+                alone cannot tell these apart — bursts of five every 100 ms average to 50 Hz just like an \
+                even stream.
+                """)
         }
     }
 
@@ -170,13 +203,28 @@ struct SimulatorView: View {
             Text("Bench")
         } footer: {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Reboot resets seq, uptime and the counters without dropping the link — the only way to exercise the viewer's board-restart detection, since switching modes disconnects and clears it first.")
-                Text("Dropping frames reproduces the firmware's out-of-buffers path with a known count. iOS refuses frames of its own accord too — measured at 5.27% — so this is for controlled experiments rather than to produce something otherwise unreachable. It can only fake \"taken but never sent\"; genuine loss on the air cannot be synthesised from this side.")
+                Text("""
+                    Reboot resets seq, uptime and the counters without dropping the link — the only way to \
+                    exercise the viewer's board-restart detection, since switching modes disconnects and \
+                    clears it first.
+                    """)
+                Text("""
+                    Dropping frames reproduces the firmware's out-of-buffers path with a known count. iOS \
+                    refuses frames of its own accord too — measured at 5.27% — so this is for controlled \
+                    experiments rather than to produce something otherwise unreachable. It can only fake \
+                    \"taken but never sent\"; genuine loss on the air cannot be synthesised from this side.
+                    """)
                 if !display.motionAvailable {
-                    Text("No motion hardware here, so frames carry zeroed axes at 1 Hz — the same fallback a board uses when its IMU will not start.")
+                    Text("""
+                        No motion hardware here, so frames carry zeroed axes at 1 Hz — the same fallback a \
+                        board uses when its IMU will not start.
+                        """)
                 }
                 if !display.keepAliveAuthorized {
-                    Text("Location permission has not been granted, so streaming will stop when the screen locks. Keep the screen awake, or allow it in Settings.")
+                    Text("""
+                        Location permission has not been granted, so streaming will stop when the screen \
+                        locks. Keep the screen awake, or allow it in Settings.
+                        """)
                         .foregroundStyle(.orange)
                 }
             }

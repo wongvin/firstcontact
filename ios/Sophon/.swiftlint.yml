@@ -43,9 +43,16 @@ line_length:
 # A SwiftUI view file legitimately runs long: ContentView is 742 lines and
 # SophonHub 892, and both are cohesive rather than grab-bags. 400 is written for
 # a different shape of code.
+#
+# Comment-only lines are not counted (#281). This codebase records its reasoning
+# beside the code on purpose: SophonDevice.swift was 1066 lines, 662 of them
+# comments, around one cohesive model. Splitting it to pass the rule would have
+# meant loosening `private` members so another file could reach them, which is
+# worse code. Counting only code keeps 900 meaningful for what it measures.
 file_length:
   warning: 900
   error: 1200
+  ignore_comment_only_lines: true
 
 type_body_length:
   warning: 500
