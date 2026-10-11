@@ -327,3 +327,83 @@ relayed battery reading, not its own (LORA-PROTOCOL.md § How the gateway maps
 onto the BLE protocol). It would matter only if a base board ran as a direct
 board on battery. The fix then is a per-board divider value, which Sophon has
 no mechanism for yet.
+
+## Seeed Wio-SX1262 for XIAO: the LoRa board (#303)
+
+The LoRa radio on both the sensor and the gateway. It is two things stacked: a
+**carrier board**, "Wio-SX1262 for XIAO" V1.0, which plugs under a XIAO; and on
+it, the **Wio-SX1262 module**, an SX1262 in a 12-pin SMT can. Both boards in
+the XIAO nRF52840 & Wio-SX1262 Kit carry the same pin assignment, which is why
+one image serves the sensor and the gateway.
+
+### Sources
+
+| Document | Contents |
+|---|---|
+| [Wio-SX1262 for XIAO V1.0 schematic](https://files.seeedstudio.com/products/113010003/Wio-SX1262%20for%20XIAO%20V1.0.pdf) | the carrier board: one sheet, KiCad 8. The kit wiki's "The Schematic Diagram of the SX1262 compatible with Xiao nRF52840" |
+| [Wio-SX1262 Module Datasheet](https://files.seeedstudio.com/products/SenseCAP/Wio_SX1262/Wio-SX1262_Module_Datasheet.pdf) | the module: pinout, internal RF switch and TCXO, electrical ratings |
+| [Kit wiki](https://wiki.seeedstudio.com/xiao_nrf52840&_wio_SX1262_kit_for_meshtastic/) | resources list, Meshtastic setup |
+
+### The carrier board
+
+| XIAO pin | nRF | Header | Net | Module pin | On the carrier |
+|---|---|---|---|---|---|
+| D0 | P0.02 | J1-1 | `D0` | — | footprints for a push button K1 to GND and a 10 kΩ pull-up R2, **not loaded on the kit**: see below |
+| D1 | P0.03 | J1-2 | `LORA_DIO1` | 12 DIO1 | direct |
+| D2 | P0.28 | J1-3 | `LORA_RST` | 5 NRST | **10 kΩ pull-up (R1)** |
+| D3 | P0.29 | J1-4 | `LORA_BUSY` | 11 BUSY | direct, **no pull** |
+| D4 | P0.04 | J1-5 | `LORA_SPI_NSS` | 6 NSS | 22 Ω series (R3) |
+| D5 | P0.05 | J1-6 | `LORA_RF_SW1` | 1 RF_SW | direct |
+| D6 | P1.11 | J1-7 | — | — | not connected |
+| D7 | P1.12 | J2-7 | — | — | not connected |
+| D8 | P1.13 | J2-6 | `LORA_SPI_SCK` | 4 SCK | 22 Ω series (R6) |
+| D9 | P1.14 | J2-5 | `LORA_SPI_MISO` | 2 MISO | 22 Ω series (R4) |
+| D10 | P1.15 | J2-4 | `LORA_SPI_MOSI` | 3 MOSI | 22 Ω series (R5) |
+| 3V3 | — | J2-3 | `+3V3` | 8 VCC | 100 nF (C1); **the module runs from the XIAO's 3.3 V** |
+| GND | — | J2-2 | `GND` | 7, 10 | |
+| 5V | — | J2-1 | `VIN` | — | label only, unused |
+
+This is the map `app.overlay`'s `lora0` node uses, taken from Meshtastic's
+`seeed_xiao_nrf52840_kit` variant and now confirmed against the carrier's own
+schematic. Two notes on it:
+
+- **BUSY has no pull resistor.** With no Wio fitted, D3 floats, which is why
+  the loramac-node driver's unbounded BUSY wait could hang a board with no radio.
+  `src/role.c`'s presence check pulls BUSY **down** and reads the sync word
+  first (LORA-PROTOCOL.md § Roles).
+- **D0 is free on the kit's carrier.** The schematic draws a user button K1
+  (to GND) and a 10 kΩ pull-up R2 on D0, but on carriers bought as the **XIAO
+  nRF52840 & Wio-SX1262 Kit** (SKU 102010710), **K1 and R2 are not loaded**.
+  That's from inspecting the kit boards (2026-10-11); the product page doesn't
+  say. So D0 is as unconnected as D6 and D7, and #314's D0↔D0 jumper stands.
+  **Check before driving D0 on a carrier from elsewhere:** one with K1 fitted
+  would short a D0 output to GND whenever the button is pressed.
+
+### The module
+
+From the datasheet, and why each fact matters to the firmware:
+
+| Fact | Value | In Sophon |
+|---|---|---|
+| Transceiver | Semtech SX1262, **DC-DC** regulator mode | the driver's default (`regulator-ldo` not set) |
+| Reference | active **TCXO powered from DIO3**; its voltage must be ≥ 200 mV below VCC | `dio3-tcxo-voltage = <SX126X_DIO3_TCXO_1V8>`, 5 ms start-up; 1.8 V against 3.3 V |
+| TX/RX switch | inside the module, **selected solely by DIO2**: high = transmit, low = receive | `dio2-tx-enable` |
+| `RF_SW` (pin 1, D5) | "external IO control internal gate RF switch" | driven as `rx-enable-gpios`: high while receiving, low otherwise, as Meshtastic's RXEN. The datasheet doesn't detail this gate beyond the line quoted; the TX/RX selection itself is DIO2's. |
+| Antenna | **U.FL (IPEX) on the module**, 50 Ω. The module's `ANT` pin is unconnected on the carrier | **attach the antenna before transmitting** |
+| Frequency | 862–930 MHz | 915.0 MHz |
+| TX power | 22 dBm max; **125 mA at 22 dBm** (typical) | presets use +14 dBm; V6/V6b use +22. The plan's ~118 mA figure is the bare-chip value; the module's is 125 |
+| RX current | 7.6 mA at 125 kHz (typical) | slightly more at 500 kHz and with `rx-boosted` (≈ +2 mA, Zephyr binding) |
+| Sleep | 1.62 µA | the loramac-node driver sleeps the radio after every completed send (`modem_release()` → `Radio.Sleep()`), so the sensor's radio sleeps between packets. The gateway's stays in continuous receive |
+| Sensitivity | −136.73 dBm at SF12/125 kHz, including line loss | not a mode Sophon uses: at 500 kHz, ≈ −117 (SF7) and −120 dBm (SF8) (LORA-UPDATED-PLAN.md) |
+| Supply | 1.8–3.6 V operating, 3.3 V typical | from the XIAO's 3V3 |
+| Size | 11.6 × 11 × 2.95 mm, 12-pin SMT | — |
+
+### Antenna and RF exposure
+
+- **Never transmit without an antenna on the U.FL connector.** At +22 dBm an
+  unterminated output reflects its power back into the PA.
+- Both antennas vertical: polarisation mismatch costs up to about 20 dB
+  (LORA-UPDATED-PLAN.md § Levers).
+- For antenna gain and the FCC EIRP limit, the sensor is capped at 14 dBi at
+  +22 dBm, and the receive-only gateway has no limit. See LORA-UPDATED-PLAN.md
+  § Antenna gain and the FCC limit.

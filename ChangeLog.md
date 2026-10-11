@@ -2,6 +2,16 @@
 
 ## 2026-10-11
 
+### docs: the Wio-SX1262 LoRa board in HARDWARE.md (#303)
+
+- **New section on the Seeed Wio-SX1262 for XIAO**, from Seeed's carrier schematic (V1.0) and the module datasheet.
+  - **Carrier:** the full header map, the 22 Ω SPI series resistors, the NRST pull-up, BUSY with no pull, and a user button on D0.
+  - **Module:** DC-DC regulator, TCXO from DIO3, TX/RX switching by DIO2 alone, `RF_SW` on D5, U.FL antenna, 22 dBm at 125 mA, 7.6 mA receiving, 1.62 µA asleep.
+  - Each fact is tied to the devicetree setting that depends on it.
+- **D0 is free on the kit's carrier.** The schematic draws a user button K1 and a 10 kΩ pull-up R2 on D0, but neither is loaded on carriers bought as the XIAO nRF52840 & Wio-SX1262 Kit (SKU 102010710). So #314's D0↔D0 jumper stands. Check before driving D0 on a carrier from elsewhere.
+- **An antenna warning:** never transmit without one on the module's U.FL connector.
+
+
 ### docs: the base XIAO nRF52840 in HARDWARE.md (#303)
 
 - **New section on the Seeed Studio XIAO nRF52840 (formerly XIAO BLE), the LoRa gateway board.** Checked against Seeed's V1.2 KiCad project: the Sense-only pins the shared image drives (P1.08, P0.07/P0.27, P0.11, P1.10) are harmless on it. The SWD test points match the Sense Plus.
