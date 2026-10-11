@@ -22,6 +22,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/spinlock.h>
+#include <zephyr/sys/byteorder.h>
 
 #include "battery.h"
 #include "ble.h"
@@ -220,6 +221,12 @@ static struct {
 	int64_t at_ms;
 } relay;
 
+static struct k_spinlock record_lock;
+static uint8_t record[LORA_LINK_RECORD_SIZE];
+static bool record_valid;
+static uint8_t record_window;
+static int64_t last_rx_ms = -1; /* any packet, good or bad */
+
 static uint16_t peer_id = CONFIG_SOPHON_LORA_PEER_ID;
 
 /*
@@ -263,7 +270,7 @@ static const struct gpio_dt_spec lora_dio1 = GPIO_DT_SPEC_GET(DT_NODELABEL(lora0
 static const struct gpio_dt_spec lora_busy = GPIO_DT_SPEC_GET(DT_NODELABEL(lora0), busy_gpios);
 static const struct spi_dt_spec lora_spi =
 	SPI_DT_SPEC_GET(DT_NODELABEL(lora0), SPI_WORD_SET(8) | SPI_TRANSFER_MSB);
-static int64_t last_rx_ms = -1; /* any packet, good or bad */
+/* last_rx_ms, the time of the last packet, is defined with the LoRa Link record above. */
 static int64_t dio1_high_since = -1;
 static uint32_t dio1_kicks;
 static bool have_last_seq;
@@ -356,6 +363,66 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 	}
 }
 
+static int8_t clamp_i8(int32_t v)
+{
+	return (int8_t)CLAMP(v, INT8_MIN, INT8_MAX);
+}
+
+static uint8_t sat_u8(uint32_t v)
+{
+	return (uint8_t)MIN(v, UINT8_MAX);
+}
+
+/*
+ * The LoRa Link record (#309): this window's stats, laid out as PROTOCOL.md
+ * § LoRa Link frame. Built on the system work queue, read from the Bluetooth
+ * RX thread, hence the lock.
+ */
+static void gateway_build_record(uint32_t rx, uint32_t expected)
+{
+	uint8_t r[LORA_LINK_RECORD_SIZE];
+	int64_t age = last_rx_ms < 0 ? INT64_MAX : k_uptime_get() - last_rx_ms;
+	uint16_t lq_x10 = expected ? (uint16_t)((gw_stats.samples * 1000U) / expected) : 0xFFFF;
+	k_spinlock_key_t key;
+
+	r[0] = 1; /* version */
+	r[1] = preset->id;
+	/* bit 0 RX boost (fixed on here; the walk test A/Bs it), bit 2 heard,
+	 * bits 4-7 SF. Bit 1, a walk-test record, is set only by walk-test mode. */
+	r[2] = BIT(0) | (rx ? BIT(2) : 0) | (uint8_t)(preset->sf << 4);
+	r[3] = record_window++;
+	sys_put_le16(lq_x10, &r[4]);
+	r[6] = rx ? clamp_i8(gw_stats.rssi_sum / (int32_t)rx) : 0;
+	r[7] = rx ? clamp_i8(gw_stats.rssi_min) : 0;
+	r[8] = rx ? clamp_i8(gw_stats.snr_sum / (int32_t)rx) : 0;
+	r[9] = rx ? clamp_i8(gw_stats.snr_min) : 0;
+	sys_put_le16((uint16_t)MIN(gw_stats.samples, UINT16_MAX), &r[10]);
+	sys_put_le16((uint16_t)MIN(gw_stats.missing, UINT16_MAX), &r[12]);
+	r[14] = sat_u8(gw_stats.bad);
+	r[15] = sat_u8(gw_stats.wrong_peer);
+	sys_put_le16((uint16_t)MIN(age, UINT16_MAX), &r[16]);
+	sys_put_le16(peer_id, &r[18]);
+
+	key = k_spin_lock(&record_lock);
+	memcpy(record, r, sizeof(record));
+	record_valid = true;
+	k_spin_unlock(&record_lock, key);
+
+	sophon_ble_lora_link_notify();
+}
+
+bool lora_link_record(uint8_t out[LORA_LINK_RECORD_SIZE])
+{
+	k_spinlock_key_t key = k_spin_lock(&record_lock);
+	bool valid = record_valid;
+
+	if (valid) {
+		memcpy(out, record, LORA_LINK_RECORD_SIZE);
+	}
+	k_spin_unlock(&record_lock, key);
+	return valid;
+}
+
 static int radio_clear_irq(void)
 {
 	/* SX126x ClearIrqStatus: opcode 0x02, then a 16-bit mask of all IRQs. */
@@ -407,6 +474,8 @@ static void gateway_stats_log(void)
 	uint32_t rx = gw_stats.packets + gw_stats.bad + gw_stats.wrong_peer;
 	uint32_t expected = gw_stats.samples + gw_stats.missing;
 	uint32_t lq_x10 = expected ? (gw_stats.samples * 1000U) / expected : 0;
+
+	gateway_build_record(rx, expected);
 
 	if (rx == 0) {
 		LOG_INF("lora rx: nothing heard");

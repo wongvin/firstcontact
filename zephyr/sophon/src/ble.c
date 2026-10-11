@@ -62,13 +62,15 @@ static void read_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
 #define SOPHON_UUID_STATS   BT_UUID_128_ENCODE(0xC6560003, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_LINK_PARAMS                                                                    \
 	BT_UUID_128_ENCODE(0xC6560004, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
-#define SOPHON_UUID_BATTERY BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_BATTERY   BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_LORA_LINK BT_UUID_128_ENCODE(0xC6560006, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
 static const struct bt_uuid_128 sophon_service_uuid = BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
 static const struct bt_uuid_128 sophon_motion_uuid = BT_UUID_INIT_128(SOPHON_UUID_MOTION);
 static const struct bt_uuid_128 sophon_stats_uuid = BT_UUID_INIT_128(SOPHON_UUID_STATS);
 static const struct bt_uuid_128 sophon_link_params_uuid = BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
 static const struct bt_uuid_128 sophon_battery_uuid = BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
+static const struct bt_uuid_128 sophon_lora_link_uuid = BT_UUID_INIT_128(SOPHON_UUID_LORA_LINK);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -163,6 +165,25 @@ static ssize_t battery_read(struct bt_conn *conn, const struct bt_gatt_attr *att
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
+/*
+ * LoRa Link (#309). Present on every board, because the GATT table is static and
+ * a board's role depends on what is plugged in: a characteristic that came and
+ * went with the Wio would leave iOS holding a cached attribute table for the
+ * wrong role. Off-gateway, and on a gateway before its first 10 s window
+ * closes, a read returns zero bytes and nothing is ever notified; the app shows
+ * its LoRa section only once a full record arrives.
+ */
+static ssize_t lora_link_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			      uint16_t len, uint16_t offset)
+{
+	uint8_t wire[LORA_LINK_RECORD_SIZE];
+
+	if (sophon_role() != SOPHON_ROLE_GATEWAY || !lora_link_record(wire)) {
+		return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, 0);
+	}
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
+}
+
 BT_GATT_SERVICE_DEFINE(
 	sophon_svc, BT_GATT_PRIMARY_SERVICE(&sophon_service_uuid),
 	BT_GATT_CHARACTERISTIC(&sophon_motion_uuid.uuid, BT_GATT_CHRC_NOTIFY,
@@ -189,6 +210,10 @@ BT_GATT_SERVICE_DEFINE(
 	 */
 	BT_GATT_CHARACTERISTIC(&sophon_battery_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
 			       BT_GATT_PERM_READ, battery_read, NULL, NULL),
+	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	/* Notify once per 10 s window; read for the latest on (re)connect. */
+	BT_GATT_CHARACTERISTIC(&sophon_lora_link_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ, lora_link_read, NULL, NULL),
 	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 
 /*
@@ -619,6 +644,24 @@ void sophon_ble_battery_notify(void)
 	 * nobody subscribed is the normal state of a board.
 	 */
 	(void)bt_gatt_notify_uuid(current_conn, &sophon_battery_uuid.uuid, sophon_svc.attrs, wire,
+				  sizeof(wire));
+}
+
+void sophon_ble_lora_link_notify(void)
+{
+	uint8_t wire[LORA_LINK_RECORD_SIZE];
+
+	if (!current_conn || !lora_link_record(wire)) {
+		return;
+	}
+
+	/*
+	 * Like the battery notify: by UUID, result discarded, nothing counted.
+	 * K_NO_WAIT on the system work queue, so a full ATT pool drops this record
+	 * rather than delaying the motion frames queued behind it -- the next
+	 * window brings a fresh one 10 s later.
+	 */
+	(void)bt_gatt_notify_uuid(current_conn, &sophon_lora_link_uuid.uuid, sophon_svc.attrs, wire,
 				  sizeof(wire));
 }
 

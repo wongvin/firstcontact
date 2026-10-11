@@ -94,6 +94,7 @@ private struct ViewerView: View {
                 NavigationLink {
                     DeviceDetailView(
                         device: device,
+                        walkTest: hub.walkTest,
                         onRefresh: { hub.refreshStats(device) },
                         onToggleConnection: {
                             if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
@@ -229,6 +230,8 @@ private struct StateDot: View {
 
 private struct DeviceDetailView: View {
     let device: SophonDevice
+    /// Hub-owned, so a recording survives leaving this screen (#309).
+    let walkTest: WalkTestRecorder
     let onRefresh: () -> Void
     let onToggleConnection: () -> Void
     let onScreen: (Bool) -> Void
@@ -276,6 +279,7 @@ private struct DeviceDetailView: View {
                 HStack(alignment: .top, spacing: 0) {
                     List {
                         linkSection
+                        LoRaLinkSection(device: device, recorder: walkTest)
                         framesSection
                     }
                     Divider()
@@ -287,6 +291,7 @@ private struct DeviceDetailView: View {
             } else {
                 List {
                     linkSection
+                    LoRaLinkSection(device: device, recorder: walkTest)
                     framesSection
                     countersSection
                     motionSection

@@ -23,6 +23,7 @@ following the Nordic UART convention.
 | TX Stats characteristic (read) | `C6560003-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Link Params characteristic (read) | `C6560004-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Battery characteristic (read) | `C6560005-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| LoRa Link characteristic (read, notify) | `C6560006-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -330,6 +331,77 @@ The reading is good to a few tens of millivolts, not to the millivolt.
 The wire format carries millivolts because that is the natural unit for a `u16`
 covering 0–4.2 V, **not** because the measurement is accurate to 1 mV. Consumers
 should present it to about two decimal places in volts and no further.
+
+## LoRa Link frame
+
+**20 bytes, little-endian**, from the LoRa Link characteristic (#309). Only a
+**LoRa gateway** (#303) fills it. It describes the **sensor → gateway LoRa
+link**: the leg the app cannot otherwise see. The phone ↔ gateway BLE link is
+still the RSSI and Link Params rows. One record per 10 s window, the same window
+as the gateway's console line. It is notified when the window closes and can be
+read for the latest on reconnect.
+
+| Offset | Size | Type | Field | Meaning |
+|---|---|---|---|---|
+| 0 | 1 | `u8` | `version` | `1`. Parsers drop any other value |
+| 1 | 1 | `u8` | `preset` | air-rate preset id (LORA-PROTOCOL.md § Presets). In a walk-test record, the variant |
+| 2 | 1 | `u8` | `flags` | bit 0 RX boost on · bit 1 walk-test record · bit 2 **heard** (any packet this window) · bits 4–7 spreading factor |
+| 3 | 1 | `u8` | `window` | rolling counter, +1 per record, so a missed notify is visible |
+| 4 | 2 | `u16` | `lq_x10` | link quality ×10: samples received ÷ expected. **`0xFFFF` = nothing expected** (nothing heard) |
+| 6 | 1 | `i8` | `rssi_avg` | dBm, over the window's packets |
+| 7 | 1 | `i8` | `rssi_min` | dBm |
+| 8 | 1 | `i8` | `snr_avg` | dB |
+| 9 | 1 | `i8` | `snr_min` | dB |
+| 10 | 2 | `u16` | `samples` | samples received |
+| 12 | 2 | `u16` | `missing` | samples lost, from `seq` gaps between packets |
+| 14 | 1 | `u8` | `bad` | packets that failed to decode, saturating at 255 |
+| 15 | 1 | `u8` | `wrong_peer` | packets from another sensor, saturating at 255 |
+| 16 | 2 | `u16` | `last_packet_ms` | ms since the last packet, at the record's close, saturating |
+| 18 | 2 | `u16` | `sensor_id` | the sensor's id: the `XXXX` of its `Sophon-XXXX` name. 0 before one is locked |
+
+**RSSI and SNR are meaningful only when `heard` is set**; they read 0 otherwise.
+
+**On a direct or sensor board, a read returns zero bytes and nothing is ever
+notified.** The same is true on a gateway until its first window closes, about
+10 s after boot. The characteristic is still in every board's GATT table, because
+a board's role depends on whether a Wio is plugged in, and a characteristic that
+came and went with it would leave iOS's cached attribute table describing the
+wrong role. **An app shows LoRa information only after a full 20-byte record
+arrives.**
+
+Parsers require **exactly 20 bytes**: a zero-length read is the defined
+"not a gateway" answer, and anything else is malformed. Unlike Battery this is
+an exact length. The record already uses all 20 bytes of one notify at ATT MTU
+23, so it cannot grow without a version change.
+
+### Margin, the number to watch
+
+`snr_avg` against the spreading factor's demodulation floor, SNRlim, gives the
+**link margin**: how much more path loss the link can take before it fails.
+
+| SF | SNRlim | Example: SNR +12 dB gives a margin of |
+|---|---|---|
+| 7 | −7.5 dB | 19.5 dB |
+| 8 | −10 dB | 22 dB |
+
+Margin falls steadily as distance grows, while LQ stays at 100% until the margin
+is nearly gone. That makes margin the early warning, and LQ the verdict.
+
+**On a moving link, use `snr_min`, not `snr_avg`.** The first hardware walk
+(sensor at base, gateway and phone carried to about 140 m and back, preset V3)
+lost 10–20% of samples at 15–60 m while the average margin still read +12 to
++19 dB. In those windows `snr_min` fell to −5 to −10 dB, at or below SF7's
+floor: the signal fades 15–20 dB within a window as the carrier walks, and
+packets are lost in the dips. The app therefore shows both margins and colours
+the row by the **worst** packet's margin (`snr_min` − SNRlim), and the walk-test
+CSV carries it as `margin_min_db`.
+
+| Distance | LQ | Margin, average | Margin, worst packet |
+|---|---|---|---|
+| 0–25 m | 96.9% | +19.7 dB | +2.5 dB |
+| 25–50 m | 83.6% | +16.5 dB | +4.5 dB |
+| 50–100 m | 81.9% | +11.6 dB | −1.5 dB |
+| 100–200 m | 48.6% | +4.8 dB | −2.5 dB |
 
 ## Rates
 
@@ -668,12 +740,13 @@ The simulator honours the parts of this document that matter — frame layout, t
 | Manufacturer data | device type, hw and fw versions | **absent — an iOS peripheral cannot advertise manufacturer data at all.** `startAdvertising` honours only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`, and the scan response's extra space "can be used only for the local name". This is why connection policy must fail open |
 | TX power | ours, from `CONFIG_BT_CTLR_TX_PWR_DBM` | **present, and iOS's own — measured at 12 dBm.** Not manufacturer data: it is the standard AD type `0x0A`, which iOS emits without being asked. The viewer labels it *device radio*, because the value is real but is the phone's, and `TX power − RSSI` therefore means something different than it does for a board (#246) |
 | Link Params | reported from `bt_conn_get_info()` | **absent — the characteristic is not offered.** `CBPeripheralManager` has no API for connection parameters either, so an iOS peripheral cannot see what it was granted any more than an iOS central can. The rows simply do not appear |
+| LoRa Link | a gateway's sensor → gateway link stats (#309) | **absent — not offered.** The simulator has no LoRa radio and is never a gateway |
 | Battery | terminal millivolts from the on-module divider, plus the reading's age | **absent — reports the `mv == 0` sentinel.** An iOS peripheral has no battery divider, and `UIDevice.batteryLevel` would be the *phone's* charge, a different quantity wearing the same label. The row reads `Not reported` |
 | `t_ms` | since board boot | since simulator start |
 | Rate, generated | 52 Hz nominal, **~54.3** measured | 52 Hz requested, **50.0** measured — CoreMotion quantises the 19.23 ms interval up to 20 ms |
 | Rate, delivered | ~54.3 — refusals are near zero | **~47.4 measured.** Generation and delivery are the same number on the board and are *not* on a simulator, which is why they are now separate rows |
 | Sample arrival | hardware DRDY, even | **clumped: 0.2 – 55.3 ms around a 20 ms mean.** The average is exactly right for 50 Hz and says nothing about the distribution |
-| Transmit queue | 8-deep `k_msgq`, drained on the system work queue | 8-deep, **paced** at one to two frames per ~20 ms tick (#255). Depth matches deliberately. The pacing does not: the firmware's drain empties the queue in one `while` loop, which is safe only because DRDY is even |
+| Transmit queue | 32-deep `k_msgq` (8 before #303), drained on the system work queue | 8-deep, **paced** at one to two frames per ~20 ms tick (#255). Depth matched the board's 8 until #303 deepened the board's queue for gateway bursts. The pacing never matched: the firmware's drain empties the queue in one `while` loop, which is safe only because DRDY is even |
 
 ### What a simulator can and cannot put on the air
 
