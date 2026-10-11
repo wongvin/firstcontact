@@ -31,9 +31,10 @@ haven't been migrated yet:
 | `Sophon-86F0` | XIAO nRF52840 Sense Plus | MCUboot | by SWD probe |
 | `Sophon-4D88` | XIAO nRF52840 Sense Plus | MCUboot | by UF2, with no probe (#294, #297) |
 | `Sophon-01A7` | plain XIAO nRF52840, from the Wio-SX1262 kit | MCUboot | by SWD probe, from factory Meshtastic (#301) |
+| `Sophon-0FAA` | plain XIAO nRF52840, from a second Wio-SX1262 kit | MCUboot | by UF2, with no probe, from factory Meshtastic (#303) |
 
-`Sophon-01A7` has **no IMU**: it runs the Sense image, the LSM6DSL fails to
-initialise, and it sends the zero-axis fallback frames. Its bootloader identified
+`Sophon-01A7` and `Sophon-0FAA` have **no IMU**: they run the Sense image, the LSM6DSL fails to
+initialise, and they send the zero-axis fallback frames. 01A7's bootloader identified
 itself as a Sense (`XIAO-SENSE`, `Seeed_XIAO_nRF52840_Sense`) all the same, so
 the bootloader is no way to tell the two models apart. Look for the IMU.
 
@@ -301,6 +302,16 @@ The MCUboot-era pair was checked against its contents, not just its name:
 matches the flashed `zephyr.signed.hex` byte for byte. **Its UICR is identical
 to the factory pair's**, as with `86F0`'s two eras, which confirms again that
 migrating doesn't touch UICR.
+
+**`Sophon-0FAA` has only its `CURRENT.UF2`**
+(`Sophon-0FAA_20261011T193526Z_uf2-sdv7-meshtastic_CURRENT.UF2`, with
+`INFO_UF2.TXT` and `INDEX.HTM`). It was migrated with the UF2 installer on
+2026-10-11 straight to 2.12.0, with no SWD dump taken. Its `CURRENT.UF2` is
+byte-identical to 01A7's (sha256 `557b567d…`), so the kits shipped the same
+factory image, and **01A7's factory pair is 0FAA's recovery image**. Restore
+only its flash dump, not its UICR: migrating never touched 0FAA's own UICR. The
+dump's storage region is 01A7's, so any Meshtastic settings in it come across
+too; a Meshtastic factory reset clears them.
 
 Compare slot0 with the `.hex`, not the `.bin`. The build signs the two in
 separate runs, and RSA signing is randomised, so they carry different but

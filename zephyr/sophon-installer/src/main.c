@@ -1,11 +1,10 @@
 /*
- * Sophon UF2 -> MCUboot installer (#294) -- SURVEY ONLY.
+ * Sophon UF2 -> MCUboot installer (#294).
  *
- * THIS BUILD WRITES NOTHING. It is the third item of UF2-MIGRATION.md's
- * "Before any code": confirm the merged UF2 flashes and the installer runs
- * before it is allowed to touch flash. Everything below reads, computes and
- * reports; CONFIG_FLASH is not even enabled, so the absence of writes is a
- * property of the binary rather than a promise in a comment.
+ * THIS BUILD WRITES FLASH. It surveys the board first and refuses to migrate
+ * if anything is off; once the survey passes and the countdown in main()
+ * ends, migrate() writes MCUboot, slot1's trailer and the slot0 stub, then
+ * resets into MCUboot. The survey reads, computes and reports only.
  *
  * What it is checking, and why each one can fail silently later:
  *
@@ -214,7 +213,7 @@ static bool survey_staged_image(void)
 static bool survey(void)
 {
 	LOG_INF("Sophon UF2 -> MCUboot installer (#294)");
-	LOG_INF("*** SURVEY BUILD -- WRITES NOTHING ***");
+	LOG_INF("*** MIGRATES AFTER THE SURVEY -- WRITES FLASH ***");
 	LOG_INF("");
 
 	LOG_INF("installer running from 0x%06X, inside slot0 0x%06X-0x%06X", INSTALLER_BASE,

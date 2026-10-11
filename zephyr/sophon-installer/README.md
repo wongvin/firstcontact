@@ -7,21 +7,27 @@ The design, the memory maps and the whole safety argument are in
 [`../sophon/UF2-MIGRATION.md`](../sophon/UF2-MIGRATION.md). This README covers
 only how to build and what the current build does.
 
-## Status: survey only — this build writes nothing
+## Status: migrates — this build writes flash
 
-**`CONFIG_FLASH` is not enabled**, so the absence of writes is a property of the
-binary rather than a promise in a comment. The driver arrives with the first
-milestone that actually erases something.
+**It replaces the bootloader.** After the survey below passes, it counts down
+10 s on the console (remove power to abort), then writes three small things:
+MCUboot to `0x0`, slot1's trailer so MCUboot treats the staged image as a
+pending upgrade, and a stub that makes slot0 readable. Then it resets, and
+MCUboot does the move. It takes about 45 s end to end. After the countdown,
+only SWD recovers a failed run, so take the backups in
+[BOOTLOADER.md](../sophon/BOOTLOADER.md) first.
 
-This is the third item of *Before any code*: confirm the merged UF2 flashes and
-the installer **runs** before it is allowed to touch flash. What it reports:
+Verified on `Sophon-4D88` (#294, #297) and `Sophon-0FAA` (#303).
 
-- where it is running, and that nothing it will write lands in slot0 — which is
-  why there is no `__ramfunc`
+If the survey fails, it writes nothing: it reprints the report every 10 s and
+never migrates. What the survey checks:
+
+- where it is running, and that nothing it will write lands in its own range,
+  which is why there is no `__ramfunc`
 - the embedded MCUboot blob's size
 - the staged application at `0x085000`: header magic, version, body size
-- the trailer offsets it would write, **derived from the partition size** rather
-  than from the image length
+- the trailer offsets, **derived from the partition size** rather than from the
+  image length
 - how much of the trailer page is live Adafruit bootloader code
 
 ## Build

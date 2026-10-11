@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### docs: Sophon-0FAA migrated; installer docs no longer say survey-only (#303)
+
+- **BOOTLOADER.md lists `Sophon-0FAA`**, a second kit's plain XIAO nRF52840, migrated by the UF2 installer with no probe straight to 2.12.0. Its only backup is `CURRENT.UF2`, identical to 01A7's, so 01A7's factory flash dump is its recovery image.
+- **The installer README's Status section is rewritten.** It said "survey only, writes nothing", but the installer has migrated boards since #294: the section now says what it writes, the 10 s countdown, and where it has been verified.
+- The same stale claim is fixed in `scripts/build.sh`'s comment and in `src/main.c`'s header comment and banner log line. No behaviour change; the installer rebuilds clean.
+
+
 ### docs: README covers the LoRa roles (#303)
 
 - **New § Roles: direct, sensor, gateway.** It covers how each role is detected, the radio presence check, what each role does and advertises, the image-confirm rule per role, and the one-connection gotcha with several devices.
