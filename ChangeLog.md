@@ -2,6 +2,15 @@
 
 ## 2026-10-10
 
+### fix: LoRa gateway recovers a lost radio interrupt (#303)
+
+- **The gateway went deaf after hours of relaying.** The sensor kept sending (134 packets per 10 s, 0 errors) while 01A7 reported "nothing heard". Read live over SWD: DIO1 (P0.03) high and steady, BUSY low, and GPIOTE armed for a rising edge with no event pending. Zephyr's loramac-node glue handles DIO1 one edge per work run and re-arms the edge with `gpio_pin_interrupt_configure_dt()` after every packet. An edge landing in that re-arm window is lost, DIO1 never falls, and no further edge ever comes.
+- **A gateway watchdog in `lora_link.c` recovers it.** Every 250 ms it checks DIO1. When the pin has been high for 1 s with no packet decoded, it sends the SX1262 ClearIrqStatus over SPI. The watchdog runs on the system work queue, as the driver does, and checks BUSY first. DIO1 drops, receive continues, and the next packet's edge restores normal operation. Each recovery is logged, and counted in the 10 s stats line.
+- **Verified with injected lost edges** (DIO1's interrupt disabled for 150 ms every 2 s, in a test build): 32 lockups in about a minute, all recovered, with packets decoded after each. With the injection removed: 0 recoveries and the normal 134 packets per 10 s.
+- **A first attempt was dropped.** Briefly switching DIO1 to a level trigger, to re-fire the driver's callback, is an interrupt storm while the pin is held high. It starved the system work queue on hardware.
+- The proper fix belongs in Zephyr's driver glue, which should resubmit its work while DIO1 is still high. `VERSION` is 2.11.0.
+
+
 ### docs: LoRa walk test turned around; antenna gain limits (#303)
 
 - **The walk test carries the gateway and phone; the sensor stays at base.** BLE ties the phone to the gateway, so this is the only way to see the link live, and a radio link loses the same both ways. The app records link stats with GPS (#309, filed), replacing the laptop log and the waypoint timing. `walktest-log.sh` is dropped, and `walktest-report.py` will read the app's CSV. The walk test now depends on #309.

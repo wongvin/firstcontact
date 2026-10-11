@@ -16,7 +16,9 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/lora.h>
+#include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/spinlock.h>
@@ -219,6 +221,51 @@ static struct {
 } relay;
 
 static uint16_t peer_id = CONFIG_SOPHON_LORA_PEER_ID;
+
+/*
+ * DIO1 WATCHDOG -- recovering a lost radio interrupt.
+ *
+ * The SX1262 raises DIO1 when a packet is done, and Zephyr's loramac-node glue
+ * (drivers/lora/loramac-node/sx126x.c) watches it for a RISING EDGE: one edge,
+ * one run of its work item, which reads and clears the radio's IRQ flags and
+ * then re-arms the edge with gpio_pin_interrupt_configure_dt(). That re-arm
+ * tears the nRF's GPIOTE channel down and back up on every packet, and an edge
+ * that lands in that window is lost. DIO1 then stays high -- the radio holds a
+ * finished packet with its interrupt raised -- and with no further edge the
+ * driver never looks at the radio again. The gateway goes deaf for good while
+ * everything else, its 10 s stats included, carries on.
+ *
+ * Found on hardware (#303): after hours at ~13 packets/s, 01A7 heard nothing
+ * while the sensor sent 134 packets per 10 s with no errors. Read live over SWD:
+ * DIO1 (P0.03) high and steady, BUSY low, GPIOTE channel 7 armed for a rising
+ * edge on P0.03 with no event pending.
+ *
+ * Recovery here, without touching the driver: if DIO1 has been high for
+ * DIO1_STUCK_MS with no packet decoded, send the radio ClearIrqStatus over SPI
+ * ourselves. DIO1 drops, the radio stays in continuous receive, and the next
+ * packet raises a fresh edge, so the driver resumes its normal path. The cost
+ * is the one packet left in the radio's buffer. It is safe because this runs on
+ * the system work queue, the same queue as all of the driver's radio access, so
+ * the two cannot interleave, and BUSY is checked first.
+ *
+ * NOT a level-triggered "kick" of the driver's callback: tried, and it is an
+ * interrupt storm -- with DIO1 held high a level interrupt re-fires the moment
+ * it returns, the thread that would switch back to edge never runs, and the
+ * system work queue starves (found on hardware with injected lost edges).
+ *
+ * The real fix belongs in the driver glue (it should resubmit its work while
+ * DIO1 is still high); this stays until it does.
+ */
+#define WATCHDOG_PERIOD_MS 250
+#define DIO1_STUCK_MS      1000
+
+static const struct gpio_dt_spec lora_dio1 = GPIO_DT_SPEC_GET(DT_NODELABEL(lora0), dio1_gpios);
+static const struct gpio_dt_spec lora_busy = GPIO_DT_SPEC_GET(DT_NODELABEL(lora0), busy_gpios);
+static const struct spi_dt_spec lora_spi =
+	SPI_DT_SPEC_GET(DT_NODELABEL(lora0), SPI_WORD_SET(8) | SPI_TRANSFER_MSB);
+static int64_t last_rx_ms = -1; /* any packet, good or bad */
+static int64_t dio1_high_since = -1;
+static uint32_t dio1_kicks;
 static bool have_last_seq;
 static uint16_t last_seq;
 
@@ -261,6 +308,7 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 	ARG_UNUSED(dev);
 	ARG_UNUSED(user_data);
 
+	last_rx_ms = k_uptime_get();
 	gw_stats.rssi_sum += rssi;
 	gw_stats.snr_sum += snr;
 	gw_stats.rssi_min = MIN(gw_stats.rssi_min, rssi);
@@ -308,6 +356,52 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 	}
 }
 
+static int radio_clear_irq(void)
+{
+	/* SX126x ClearIrqStatus: opcode 0x02, then a 16-bit mask of all IRQs. */
+	uint8_t cmd[3] = {0x02, 0xFF, 0xFF};
+	const struct spi_buf buf = {.buf = cmd, .len = sizeof(cmd)};
+	const struct spi_buf_set set = {.buffers = &buf, .count = 1};
+
+	for (int i = 0; gpio_pin_get_dt(&lora_busy) > 0; i++) {
+		if (i >= 100) {
+			return -EBUSY; /* 10 ms: the radio is mid-command, try next tick */
+		}
+		k_busy_wait(100);
+	}
+	return spi_write_dt(&lora_spi, &set);
+}
+
+static void watchdog_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(watchdog_work, watchdog_handler);
+
+static void watchdog_handler(struct k_work *work)
+{
+	int64_t now = k_uptime_get();
+
+	ARG_UNUSED(work);
+
+	if (gpio_pin_get_dt(&lora_dio1) <= 0) {
+		dio1_high_since = -1;
+	} else if (dio1_high_since < 0) {
+		dio1_high_since = now;
+	} else if (now - dio1_high_since >= DIO1_STUCK_MS &&
+		   (last_rx_ms < 0 || now - last_rx_ms >= DIO1_STUCK_MS)) {
+		int err = radio_clear_irq();
+
+		if (err == 0) {
+			dio1_kicks++;
+			LOG_WRN("radio interrupt stuck (DIO1 high %lld ms, no packet) -- "
+				"cleared, recovery #%u",
+				now - dio1_high_since, dio1_kicks);
+			dio1_high_since = -1;
+		} else {
+			LOG_WRN("radio interrupt stuck, clear failed (%d); retrying", err);
+		}
+	}
+	(void)k_work_schedule(&watchdog_work, K_MSEC(WATCHDOG_PERIOD_MS));
+}
+
 static void gateway_stats_log(void)
 {
 	uint32_t rx = gw_stats.packets + gw_stats.bad + gw_stats.wrong_peer;
@@ -318,10 +412,12 @@ static void gateway_stats_log(void)
 		LOG_INF("lora rx: nothing heard");
 	} else {
 		LOG_INF("lora rx: %u pkts, %u bad, %u wrong peer; %u samples, %u missing, "
-			"LQ %u.%u%%; RSSI avg %d min %d, SNR avg %d min %d",
+			"LQ %u.%u%%; RSSI avg %d min %d, SNR avg %d min %d; %u DIO1 recoveries "
+			"total",
 			gw_stats.packets, gw_stats.bad, gw_stats.wrong_peer, gw_stats.samples,
 			gw_stats.missing, lq_x10 / 10, lq_x10 % 10, gw_stats.rssi_sum / (int32_t)rx,
-			gw_stats.rssi_min, gw_stats.snr_sum / (int32_t)rx, gw_stats.snr_min);
+			gw_stats.rssi_min, gw_stats.snr_sum / (int32_t)rx, gw_stats.snr_min,
+			dio1_kicks);
 	}
 	memset(&gw_stats, 0, sizeof(gw_stats));
 	gw_stats.rssi_min = INT16_MAX;
@@ -397,6 +493,7 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 			LOG_ERR("lora_recv_async failed (%d)", err);
 			return err;
 		}
+		(void)k_work_schedule(&watchdog_work, K_MSEC(WATCHDOG_PERIOD_MS));
 	}
 
 	(void)k_work_schedule(&stats_work, K_MSEC(STATS_PERIOD_MS));
