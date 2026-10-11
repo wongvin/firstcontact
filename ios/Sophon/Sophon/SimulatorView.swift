@@ -73,7 +73,7 @@ struct SimulatorView: View {
                 LabeledContent("Accel", value: "\(frame.ax), \(frame.ay), \(frame.az) mg")
                 LabeledContent("Gyro", value: "\(frame.gx), \(frame.gy), \(frame.gz) cdps")
                 LabeledContent("seq", value: "\(frame.seq)")
-                LabeledContent("Uptime", value: "\(frame.tMillis) ms")
+                LabeledContent("Uptime", value: UptimeFormat.text(millis: frame.tMillis))
             } header: {
                 Text("Motion")
             } footer: {
