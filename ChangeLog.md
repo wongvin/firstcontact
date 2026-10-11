@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-11
+
+### docs: LoRa walk test and latency test split out (#303)
+
+- The walk test (with its firmware walk-test mode, and choosing the default preset) is now #313, and the bench latency test is #314. LORA-UPDATED-PLAN.md records the split. Its walk-test and latency sections stay as the spec those issues work from.
+
+
 ## 2026-10-10
 
 ### feat: LoRa link stats in the iOS app, recorded with GPS (#309)
