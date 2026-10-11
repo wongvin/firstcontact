@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-10-11
+
+### docs: Sophon-0FAA migrated; installer docs no longer say survey-only (#303)
+
+- **BOOTLOADER.md lists `Sophon-0FAA`**, a second kit's plain XIAO nRF52840, migrated by the UF2 installer with no probe straight to 2.12.0. Its only backup is `CURRENT.UF2`, identical to 01A7's, so 01A7's factory flash dump is its recovery image.
+- **The installer README's Status section is rewritten.** It said "survey only, writes nothing", but the installer has migrated boards since #294: the section now says what it writes, the 10 s countdown, and where it has been verified.
+- The same stale claim is fixed in `scripts/build.sh`'s comment and in `src/main.c`'s header comment and banner log line. No behaviour change; the installer rebuilds clean.
+
+
+### docs: README covers the LoRa roles (#303)
+
+- **New § Roles: direct, sensor, gateway.** It covers how each role is detected, the radio presence check, what each role does and advertises, the image-confirm rule per role, and the one-connection gotcha with several devices.
+- **Also:** the radio presets and Kconfig options, the console lines to expect (including `DIO1 recoveries`), and what is not built yet (walk-test mode #313, latency #314, hopping #304). It maps the LoRa documents and how to run the codec test.
+- The intro and § The board mention the relay and the base XIAO and Wio-SX1262 boards. § Layout lists the new files.
+
+
+### docs: the Wio-SX1262 LoRa board in HARDWARE.md (#303)
+
+- **New section on the Seeed Wio-SX1262 for XIAO**, from Seeed's carrier schematic (V1.0) and the module datasheet.
+  - **Carrier:** the full header map, the 22 Ω SPI series resistors, the NRST pull-up, BUSY with no pull, and a user button on D0.
+  - **Module:** DC-DC regulator, TCXO from DIO3, TX/RX switching by DIO2 alone, `RF_SW` on D5, U.FL antenna, 22 dBm at 125 mA, 7.6 mA receiving, 1.62 µA asleep.
+  - Each fact is tied to the devicetree setting that depends on it.
+- **D0 is free on the kit's carrier.** The schematic draws a user button K1 and a 10 kΩ pull-up R2 on D0, but neither is loaded on carriers bought as the XIAO nRF52840 & Wio-SX1262 Kit (SKU 102010710). So #314's D0↔D0 jumper stands. Check before driving D0 on a carrier from elsewhere.
+- **An antenna warning:** never transmit without one on the module's U.FL connector.
+
+
+### docs: the base XIAO nRF52840 in HARDWARE.md (#303)
+
+- **New section on the Seeed Studio XIAO nRF52840 (formerly XIAO BLE), the LoRa gateway board.** Checked against Seeed's V1.2 KiCad project: the Sense-only pins the shared image drives (P1.08, P0.07/P0.27, P0.11, P1.10) are harmless on it. The SWD test points match the Sense Plus.
+- **R17 is 510 kΩ on this board**, not the Sense Plus's 499 kΩ, so its own battery reading runs about 1.5% high. That doesn't matter as a gateway, which serves the sensor's reading.
+- Also noted: the V1.2 KiCad draws the IMU and microphone with no DNP flag, though the board has neither, so it can't be read as a BOM.
+
+
+### docs: LoRa walk test and latency test split out (#303)
+
+- The walk test (with its firmware walk-test mode, and choosing the default preset) is now #313, and the bench latency test is #314. LORA-UPDATED-PLAN.md records the split. Its walk-test and latency sections stay as the spec those issues work from.
+
+
 ## 2026-10-10
 
 ### feat: Sophon uptime shown as hh:mm:ss (#311)
@@ -9,7 +47,65 @@
 - Verified on devices, in the viewer and in simulator mode.
 
 
+### feat: LoRa link stats in the iOS app, recorded with GPS (#309)
+
+- **Firmware (2.11.0):**
+  - A gateway serves a new **LoRa Link** characteristic (`C6560006-…`, read + notify): one 20-byte record per 10 s window, with LQ, RSSI and SNR (average and minimum), samples, missing, bad, last-packet age, preset and sensor id.
+  - It is in every board's GATT table. Off a gateway it reads zero bytes and never notifies, so a role change never leaves iOS a stale attribute table.
+  - Notifies are best effort and never delay motion.
+  - Checked on hardware with a Mac client: every field matched the gateway console window for window.
+- **iOS app:**
+  - A **LoRa link** section shows link quality, average and worst-packet margin (coloured by the worst), RSSI against sensitivity, SNR, last packet, preset, sensor, session counters and sparklines.
+  - It appears only once a gateway sends a record. Verdict rows dim when stale.
+  - A hub-owned **walk-test recorder** writes one CSV row per record, with GPS position and distance from a pin, or from the start position if none is dropped. Rows are appended to disk as they arrive. Recordings live in **Documents**, visible in the Files app as On My iPhone › Sophon, so one cut short by a force-quit is still reachable, and can be shared through the share sheet.
+  - Recording keeps running with the phone locked. The location permission string was rewritten, because it had promised location would never be recorded.
+- **`walktest-report.py`** turns a recording into LQ, average and worst margin, RSSI and pass/fail per distance band and preset. **PROTOCOL.md** documents the frame and its margin rules, and **TEST-PLAN.md §6** covers it.
+- **First hardware walk** (V3, sensor at base, gateway and phone carried about 140 m and back, obstructed):
+  - LQ ≈ 100% close in, then 82% at 50–100 m and 49% at 100–200 m.
+  - Losses start while the average margin is still +12 dB: fades take the worst packet below the floor. Hence the worst-packet margin.
+- Fixed before review (`swift-reviewer`): a duplicate CSV row after a reconnect, recording stopping when the phone locks, GPS redrawing the whole section, recorder controls vanishing during a reconnect, stale values staying green, and a self-check gap on the walk-test bit.
+
+
+### fix: LoRa gateway recovers a lost radio interrupt (#303)
+
+- **The gateway went deaf after hours of relaying.** The sensor kept sending (134 packets per 10 s, 0 errors) while 01A7 reported "nothing heard". Read live over SWD: DIO1 (P0.03) high and steady, BUSY low, and GPIOTE armed for a rising edge with no event pending. Zephyr's loramac-node glue handles DIO1 one edge per work run and re-arms the edge with `gpio_pin_interrupt_configure_dt()` after every packet. An edge landing in that re-arm window is lost, DIO1 never falls, and no further edge ever comes.
+- **A gateway watchdog in `lora_link.c` recovers it.** Every 250 ms it checks DIO1. When the pin has been high for 1 s with no packet decoded, it sends the SX1262 ClearIrqStatus over SPI. The watchdog runs on the system work queue, as the driver does, and checks BUSY first. DIO1 drops, receive continues, and the next packet's edge restores normal operation. Each recovery is logged, and counted in the 10 s stats line.
+- **Verified with injected lost edges** (DIO1's interrupt disabled for 150 ms every 2 s, in a test build): 32 lockups in about a minute, all recovered, with packets decoded after each. With the injection removed: 0 recoveries and the normal 134 packets per 10 s.
+- **A first attempt was dropped.** Briefly switching DIO1 to a level trigger, to re-fire the driver's callback, is an interrupt storm while the pin is held high. It starved the system work queue on hardware.
+- The proper fix belongs in Zephyr's driver glue, which should resubmit its work while DIO1 is still high. `VERSION` is 2.11.0.
+
+
+### docs: LoRa walk test turned around; antenna gain limits (#303)
+
+- **The walk test carries the gateway and phone; the sensor stays at base.** BLE ties the phone to the gateway, so this is the only way to see the link live, and a radio link loses the same both ways. The app records link stats with GPS (#309, filed), replacing the laptop log and the waypoint timing. `walktest-log.sh` is dropped, and `walktest-report.py` will read the app's CSV. The walk test now depends on #309.
+- **Antenna gain and the FCC limit** (LORA-UPDATED-PLAN.md): EIRP ≤ 36 dBm caps the transmitting sensor at 14 dBi with +22 dBm. The gateway only receives, so its antenna has no FCC gain limit and is the cheapest place to add range. The levers table and takeaways are updated.
+
+
+### feat: LoRa relay works end to end (#303)
+
+- **The sensor sends and the gateway relays** (`src/lora_link.c`). The sensor's IMU thread queues each frame without blocking. A `lora_tx` thread packs frames into v2 packets under the packing rules (k samples, a seq break, a dt over 255 ms, or a W + 20 ms flush), adds a status trailer about once a second, and sends with `lora_send()`. The gateway's async receive decodes each packet, locks onto the first sensor heard (or `SOPHON_LORA_PEER_ID`), counts seq gaps, keeps the sensor's battery, and hands the rebuilt 18-byte frames to the BLE queue. Both roles log their link stats every 10 s, including LQ, RSSI and SNR.
+- **Air-rate presets** (`src/lora_presets.c`, app `Kconfig`): V0–V6b, as LORA-PROTOCOL.md § Presets, selected by `SOPHON_LORA_PRESET` (default V3), plus `SOPHON_LORA_FREQ_HZ` and `SOPHON_LORA_PEER_ID`.
+- **Per-role behaviour:**
+  - **Sensor:** produces every sample whether or not anyone is subscribed, advertises its name with SMP only (the app never lists it), and confirms a trial image after its first completed transmission.
+  - **Gateway:** delivers through a 32-deep queue and retries frames the BLE stack refuses rather than dropping them; serves the sensor's relayed battery; requests a 15 ms interval; runs no zero-axis fallback.
+  - The role is now decided before Bluetooth starts, so advertising matches it from the first packet.
+- **Found on hardware:** loramac-node computes airtime from the last TX configuration, so a gateway that only ever configured RX divided by zero at boot. The gateway now configures TX first.
+- **Verified end to end at 2.10.0 (V3):**
+  - Link: 86F0 → 01A7 → iPhone at LQ 100.0%, 53.6 Hz, 0 bad packets, RSSI −6 dBm and SNR +12 dB at desk range.
+  - BLE: iOS granted 15 ms, with no delivery refusals.
+  - App: shows only 01A7, motion follows 86F0, and uptime and battery are 86F0's.
+  - Images: 86F0's confirmed itself on its first transmission.
+
+
 ## 2026-10-09
+
+### feat: LoRa codec, radio presence check and runtime roles (#303)
+
+- **Packet codec** (`src/lora_codec.c`): v1 and the lossless compact v2 from LORA-PROTOCOL.md, plain C99 with no Zephyr headers. `scripts/test-codec.sh` runs 91 host checks under the address and undefined-behaviour sanitizers: the documented worked example byte for byte, every length-table row, the seq and t_ms wraps, the packing rules, and every case the spec says to drop. Injecting four bugs one at a time made the test fail each time.
+- **Wio-SX1262 on `spi2`** (`app.overlay`): `semtech,sx1262` on the Meshtastic kit pins with RX boost, `i2c1` disabled to free D4/D5, and the Semtech loramac-node backend named explicitly in `prj.conf`. LORA-UPDATED-PLAN.md § Driver selection explains why it was chosen over Zephyr's experimental native driver.
+- **Radio presence check and runtime role** (`src/role.c`): the driver's BUSY wait has no timeout, so the node is deferred-init and the driver starts only after the chip answers a raw SPI read of its sync-word register. Radio + IMU → sensor, radio alone → gateway, no radio → direct. The role is logged again 10 s after boot, because the startup log burst loses its tail on the USB console. Nothing behaves differently yet.
+- **Verified on all three boards with 2.9.0**: `01A7` gateway and `86F0` sensor (both read live over SWD); `4D88`, with no Wio, direct (sync word `0xffff`, role reached 49 ms after boot, no hang). The image confirmed on all three, 86F0 and 4D88 over the air. Both build modes compile. LORA-UPDATED-PLAN.md starts as the current design record.
+
 
 ### fix: the UF2 build compiles again (#306)
 
@@ -42,6 +138,13 @@
 - **Backed up as shipped, then migrated to MCUboot 2.8.0 by SWD probe.** The backups are the bootloader drive's `CURRENT.UF2` plus a 1 MB + 4 KB SWD pair verified with `cmp`; they are the only copy of the factory Meshtastic setup. The flash took 35 s, both images read back `MATCH`, and a central then connected and subscribed.
 - **Third portability data point.** Against 4D88's `uf2-sdv7` backup, the MBR, the SoftDevice, the bootloader settings, and the bootloader's address and size are identical, even though this board's bootloader is four years older (0.6.1 vs 0.9.2).
 - **BOOTLOADER.md's board table** now lists all three boards on MCUboot (4D88's row was stale). **README no longer claims** that the plain `xiao_ble/nrf52840` target builds: `imu.c` needs the Sense IMU node, and the Sense image runs on a plain board in IMU fallback.
+
+
+### docs: LoRa relay design record and link protocol (#303)
+
+- **`zephyr/sophon/LORA-PLAN.md`**: the approved plan for putting a 915 MHz LoRa hop (SX1262 on a Seeed Wio-SX1262) between the motion sensor and the gateway that serves the unchanged iOS app. It covers the throughput and airtime arithmetic, the ideas taken from ExpressLRS and the variants that test them (V0–V6b), the levers for range and latency, and the walk-test method. It is frozen as written.
+- **`zephyr/sophon/LORA-PROTOCOL.md`**: the live contract between the sensor and gateway roles: how the role is detected, the radio parameters, the preset ids, the v1 and lossless compact v2 packet formats, what `seq` means over LoRa, and how the gateway maps onto PROTOCOL.md. It is marked as specified but not yet implemented, and the walk-test results are still pending.
+- Docs only, written ahead of the code. Follow-up for frequency hopping and a downlink: #304.
 
 
 ## 2026-10-07

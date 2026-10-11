@@ -30,6 +30,7 @@ final class SophonHub: NSObject {
     private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
     private var linkParamsCharacteristics: [UUID: CBCharacteristic] = [:]
     private var batteryCharacteristics: [UUID: CBCharacteristic] = [:]
+    let walkTest = WalkTestRecorder() // #309: hub-owned so a recording outlives the detail view
 
     /// Peripherals that accepted a connection but had no Sophon service behind
     /// it. Tracked so the disconnect they are about to get is not treated as a
@@ -704,7 +705,8 @@ extension SophonHub: CBPeripheralDelegate {
                 [SophonProtocol.motionCharacteristicUUID,
                  SophonProtocol.statsCharacteristicUUID,
                  SophonProtocol.linkParamsCharacteristicUUID,
-                 SophonProtocol.batteryCharacteristicUUID],
+                 SophonProtocol.batteryCharacteristicUUID,
+                 SophonProtocol.loraLinkCharacteristicUUID],
                 for: sophon)
         }
     }
@@ -734,6 +736,7 @@ extension SophonHub: CBPeripheralDelegate {
             if device?.offersBattery != offersBattery {
                 device?.offersBattery = offersBattery
             }
+            self.noteLoRaLinkOffered(characteristics, by: device)
             // Guarded like every other latch here: a repeat didDiscoverServices
             // re-enumerates and would otherwise notify every observer with an
             // identical value (#261).
@@ -769,6 +772,7 @@ extension SophonHub: CBPeripheralDelegate {
                     // them, so the poll is what guarantees the value cannot be
                     // wrong indefinitely.
                     peripheral.setNotifyValue(true, for: characteristic)
+                case SophonProtocol.loraLinkCharacteristicUUID: self.subscribeLoRaLink(characteristic, on: peripheral)
                 case SophonProtocol.linkParamsCharacteristicUUID:
                     // Read once here, and again whenever stats are refreshed --
                     // iOS revises the interval on its own schedule, so a value
@@ -839,6 +843,10 @@ extension SophonHub: CBPeripheralDelegate {
                 self.byID[peripheral.identifier]?.ingestBattery(reading)
             }
             return
+        }
+
+        if characteristic.uuid == SophonProtocol.loraLinkCharacteristicUUID {
+            return MainActor.assumeIsolated { self.ingestLoRaLinkValue(data, from: peripheral.identifier) }
         }
 
         if characteristic.uuid == SophonProtocol.statsCharacteristicUUID {

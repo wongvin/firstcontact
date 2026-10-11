@@ -25,6 +25,22 @@ bool sophon_ble_subscribed(void);
 int sophon_ble_notify(const struct sophon_frame *frame);
 
 /*
+ * Gateway delivery (#303): as sophon_ble_notify(), except an -ENOMEM is
+ * returned uncounted, because the caller keeps the frame and retries.
+ */
+int sophon_ble_notify_relay(const struct sophon_frame *frame);
+
+/* Gateway: count a frame dropped because the delivery queue was full. */
+void sophon_ble_count_refused(void);
+
+/*
+ * Confirm a trial image, once. The direct and gateway roles do this on their
+ * first delivered frame; a LoRa sensor has no subscriber, so it calls this
+ * after its first completed transmission (#303).
+ */
+void sophon_image_confirm_once(void);
+
+/*
  * Outcome counts for the transmit path.
  *
  * A gap in the central's sequence numbers says only that an interval has no
@@ -146,5 +162,12 @@ void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,
  * A no-op when nobody has subscribed.
  */
 void sophon_ble_battery_notify(void);
+
+/*
+ * Gateway: notify the latest LoRa Link record (#309) to a subscribed central.
+ * Best effort -- a refused notify is dropped, never retried, so link stats can
+ * never delay motion. A no-op with nobody connected.
+ */
+void sophon_ble_lora_link_notify(void);
 
 #endif /* SOPHON_BLE_H */

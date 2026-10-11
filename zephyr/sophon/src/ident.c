@@ -42,3 +42,18 @@ int sophon_device_name(char *buf, size_t len)
 	snprintf(buf, len, "Sophon-%04X", tag);
 	return 0;
 }
+
+int sophon_device_tag(uint16_t *tag)
+{
+	uint8_t id[8];
+	ssize_t n = hwinfo_get_device_id(id, sizeof(id));
+
+	if (n < 2) {
+		return -ENODATA;
+	}
+
+	/* The same last two bytes as the name above, so a sensor's LoRa id is the
+	 * XXXX of its Sophon-XXXX (#303). */
+	*tag = ((uint16_t)id[n - 2] << 8) | id[n - 1];
+	return 0;
+}

@@ -284,6 +284,47 @@ final class SophonDevice: Identifiable {
         batteryAt = Date()
     }
 
+    /// Records a LoRa Link record (#309). Every record is news -- each is a new
+    /// 10 s window -- so there is no change guard, and at one per 10 s none is
+    /// needed for invalidation either.
+    @discardableResult
+    func ingestLoRaLink(_ record: LoRaLinkRecord) -> Bool {
+        // The read straight after a (re)connect returns the gateway's latest
+        // record, which may be the one already notified. Not new data, and it
+        // must not become a second walk-test row.
+        if record == loraLastIngested { return false }
+        loraLastIngested = record
+        if let previous = loraLink {
+            // Within a session, forward jumps are missed notifies. Not across
+            // one: loraLink is cleared on reconnect, so a disconnect's gap is
+            // never misread as BLE loss.
+            let skipped = Int(record.window &- previous.window) - 1
+            if skipped > 0 && skipped < 64 { loraRecordsMissed += skipped }
+        }
+        loraLink = record
+        loraLinkAt = Date()
+        loraLinkHistory.append(record)
+        if loraLinkHistory.count > Self.loraLinkHistoryCount {
+            loraLinkHistory.removeFirst(loraLinkHistory.count - Self.loraLinkHistoryCount)
+        }
+        loraSessionSamples += Int(record.samples)
+        loraSessionMissing += Int(record.missing)
+        loraSessionBad += Int(record.badPackets)
+        return true
+    }
+
+    /// How long ago the latest record arrived. Deliberately NOT added to the
+    /// record's own last-packet figure: that is measured when the window
+    /// closes, and adding up to 10 s of waiting for the next record would make
+    /// a healthy link read as stale. The UI shows the two side by side.
+    func loraRecordAge(asOf now: Date) -> TimeInterval? {
+        loraLinkAt.map { now.timeIntervalSince($0) }
+    }
+
+    /// A record is due every 10 s; past this, the BLE side has stopped
+    /// delivering them, whatever the LoRa link is doing.
+    static let loraRecordStaleAfter: TimeInterval = 15
+
     /// Total age of the battery reading: how old it was when the board sent it,
     /// plus how long ago this app received it.
     ///
@@ -540,6 +581,42 @@ final class SophonDevice: Identifiable {
     /// `@ObservationIgnored` for the same reason as ``rssiAt``: its only reader
     /// is inside a `TimelineView`, which re-reads on its own clock.
     @ObservationIgnored private(set) var batteryAt: Date?
+
+    /// Whether the peripheral's GATT database has the LoRa Link characteristic
+    /// (#309). Latched across `resetLinkStats()` like ``offersBattery``. Every
+    /// board from #309 on has it; only a gateway ever fills it.
+    var offersLoRaLink: Bool?
+
+    /// The latest LoRa Link record, or nil until a gateway sends one. Nil on a
+    /// direct board for good, which is what keeps the LoRa section off screen
+    /// there. Session-scoped: cleared by `resetLinkStats()`.
+    private(set) var loraLink: LoRaLinkRecord?
+
+    /// When the latest record arrived. `@ObservationIgnored` for the reason
+    /// ``batteryAt`` is: only a `TimelineView` reads it.
+    @ObservationIgnored private(set) var loraLinkAt: Date?
+
+    /// The last ``loraLinkHistoryCount`` records, oldest first, for sparklines.
+    private(set) var loraLinkHistory: [LoRaLinkRecord] = []
+
+    /// Five minutes of 10 s windows.
+    static let loraLinkHistoryCount = 30
+
+    /// Sums over this session's records, so the counters survive the window.
+    private(set) var loraSessionSamples = 0
+    private(set) var loraSessionMissing = 0
+    private(set) var loraSessionBad = 0
+
+    /// Records lost between the gateway and this app, from gaps in the window
+    /// counter. Not LoRa loss: a missed BLE notify.
+    private(set) var loraRecordsMissed = 0
+
+    /// The last record ingested, kept across `resetLinkStats()` on purpose. The
+    /// window counter lives on the gateway's uptime, not this app's session, so
+    /// the record the gateway re-sends on the read after a reconnect can only be
+    /// recognised against what was seen before the reset (#309 review, finding
+    /// 1). Compared whole: a rebooted gateway restarts its counter at 0.
+    @ObservationIgnored private var loraLastIngested: LoRaLinkRecord?
 
     /// When the first Link Params read of this session was issued, or nil if
     /// none has been.
@@ -903,6 +980,14 @@ final class SophonDevice: Identifiable {
         linkParamsRequestedAt = nil
         battery = nil
         batteryAt = nil
+        // LoRa Link is session-scoped like battery; offersLoRaLink is latched.
+        loraLink = nil
+        loraLinkAt = nil
+        loraLinkHistory = []
+        loraSessionSamples = 0
+        loraSessionMissing = 0
+        loraSessionBad = 0
+        loraRecordsMissed = 0
         // offersBattery deliberately NOT cleared -- it describes the GATT
         // database, which survives a reconnect. Same rule as offersLinkParams.
         // offersLinkParams is deliberately NOT cleared here. It describes the

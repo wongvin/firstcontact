@@ -13,7 +13,8 @@
 # and a build at slot0 would be nonsense. Compare ../../sophon/scripts/build.sh,
 # which has two modes because the firmware genuinely has two boot paths.
 #
-# THIS BUILD WRITES NOTHING WHEN IT RUNS. See src/main.c.
+# THE BUILT UF2 WRITES FLASH WHEN IT RUNS: it replaces the bootloader with
+# MCUboot. See src/main.c and ../README.md.
 #
 # Usage: scripts/build.sh [extra west build args...]
 

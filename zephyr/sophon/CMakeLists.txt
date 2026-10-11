@@ -30,6 +30,10 @@ target_sources(app PRIVATE
   src/ble.c
   src/ident.c
   src/imu.c
+  src/lora_codec.c
+  src/lora_link.c
+  src/lora_presets.c
+  src/role.c
 )
 
 # Build timestamp, regenerated on every build.
