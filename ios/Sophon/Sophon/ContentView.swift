@@ -602,7 +602,7 @@ private struct DeviceDetailView: View {
                     : "\(device.interruptions) · \(device.framesDuringInterruptions) frames")
             if let frame = device.lastFrame {
                 LabeledContent("Last seq", value: "\(frame.seq)")
-                LabeledContent("Sophon uptime", value: "\(frame.tMillis) ms")
+                LabeledContent("Sophon uptime", value: UptimeFormat.text(millis: frame.tMillis))
             }
         }
     }

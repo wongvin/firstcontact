@@ -615,6 +615,18 @@ nonisolated extension MotionFrame {
     }
 }
 
+/// A board's uptime -- a frame's `t_ms` -- as `hh:mm:ss` (#311).
+///
+/// Hours keep counting past 24 rather than rolling into days: `t_ms` is a u32
+/// of milliseconds and wraps at about 49.7 days, so hours can reach 1193 and are
+/// never truncated. Rendering only -- restart detection compares raw `t_ms`.
+nonisolated enum UptimeFormat {
+    static func text(millis: UInt32) -> String {
+        let seconds = Int(millis / 1000)
+        return String(format: "%02d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60)
+    }
+}
+
 #if DEBUG
 /// Checks the wire format against byte vectors transcribed from `PROTOCOL.md`.
 ///
@@ -631,6 +643,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkIdentity()
         checkLinkParams()
         checkLoRaLink()
+        checkUptimeFormat()
     }
 
     private static func checkMotionFrame() {
@@ -746,6 +759,16 @@ nonisolated enum SophonProtocolSelfCheck {
         var v2 = wire
         v2[0] = 0x02
         assert(LoRaLinkRecord(v2) == nil, "an unknown version must be dropped")
+    }
+
+    private static func checkUptimeFormat() {
+        // #311's vectors: zero, just under a minute, an hour, past a day, and
+        // the u32 wrap point, where hours reach four digits.
+        assert(UptimeFormat.text(millis: 0) == "00:00:00", "zero uptime")
+        assert(UptimeFormat.text(millis: 59_999) == "00:00:59", "seconds must truncate, not round")
+        assert(UptimeFormat.text(millis: 3_600_000) == "01:00:00", "one hour")
+        assert(UptimeFormat.text(millis: 97_445_000) == "27:04:05", "hours must keep counting past 24")
+        assert(UptimeFormat.text(millis: UInt32.max) == "1193:02:47", "four-digit hours must not truncate")
     }
 
     private static func checkLinkParams() {
