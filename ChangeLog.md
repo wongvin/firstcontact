@@ -2,6 +2,14 @@
 
 ## 2026-10-11
 
+### refactor: Sophon app passes SwiftLint and ShellCheck (#281)
+
+- **Long explanation copy is wrapped in place**: 22 single-line `Text(...)` strings, up to 865 characters, became multi-line literals ending in ` \`, so the rendered text is byte-identical (checked by script). Chosen over extracting the copy, which would separate wording from the layout it explains.
+- **`didUpdateValueFor` is a `switch` over one handler per characteristic**, each keeping its original hop to the main actor. Two 3-member tuples became small structs, and an `else` placement and a double blank line were fixed.
+- **`file_length` no longer counts comment-only lines.** `SophonDevice.swift` is 1066 lines, 662 of them comments, around one model; splitting it would have meant loosening `private` members. The 900 threshold stays.
+- **`deploy-device.sh`:** unused `id` → `_` in two loops, so the repo has no ShellCheck findings. SwiftLint reports 0 violations across all 15 files.
+
+
 ### docs: Sophon-0FAA migrated; installer docs no longer say survey-only (#303)
 
 - **BOOTLOADER.md lists `Sophon-0FAA`**, a second kit's plain XIAO nRF52840, migrated by the UF2 installer with no probe straight to 2.12.0. Its only backup is `CURRENT.UF2`, identical to 01A7's, so 01A7's factory flash dump is its recovery image.

@@ -141,18 +141,27 @@ struct RadioUnavailableView: View {
     /// Completes "Turn Bluetooth on …" — e.g. "to find Sophons".
     let purpose: String
 
-    private var message: (icon: String, title: String, detail: String) {
+    private struct Message {
+        let icon: String
+        let title: String
+        let detail: String
+    }
+
+    private var message: Message {
         switch state {
         case .poweredOff:
-            ("bluetooth.slash", "Bluetooth is off", "Turn Bluetooth on \(purpose).")
+            Message(icon: "bluetooth.slash", title: "Bluetooth is off", detail: "Turn Bluetooth on \(purpose).")
         case .unauthorized:
-            ("hand.raised", "Bluetooth not permitted", "Allow Bluetooth for Sophon in Settings.")
+            Message(icon: "hand.raised", title: "Bluetooth not permitted",
+                    detail: "Allow Bluetooth for Sophon in Settings.")
         case .unsupported:
-            ("iphone.slash", "No Bluetooth radio", "This device has no Core Bluetooth support — expected in the Simulator.")
+            Message(icon: "iphone.slash", title: "No Bluetooth radio",
+                    detail: "This device has no Core Bluetooth support — expected in the Simulator.")
         case .idle:
-            ("pause.circle", "Radio not in use", "This role is off the air while the other one has the radio.")
+            Message(icon: "pause.circle", title: "Radio not in use",
+                    detail: "This role is off the air while the other one has the radio.")
         default:
-            ("hourglass", "Starting up", "Waiting for the Bluetooth radio.")
+            Message(icon: "hourglass", title: "Starting up", detail: "Waiting for the Bluetooth radio.")
         }
     }
 
@@ -520,13 +529,26 @@ private struct DeviceDetailView: View {
     @ViewBuilder private func linkFooter(asOf now: Date) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if case .stalled = device.linkStatus(asOf: now) {
-                Text("The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that a peripheral has stopped until its supervision timeout expires, which can take minutes between two iOS devices — so this is reported from the data rather than from the link.")
+                Text("""
+                    The connection is still open, but no frames are arriving. Core Bluetooth cannot tell that \
+                    a peripheral has stopped until its supervision timeout expires, which can take minutes \
+                    between two iOS devices — so this is reported from the data rather than from the link.
+                    """)
             }
             if case .released = device.linkStatus(asOf: now) {
                 if device.isStaleReleased {
-                    Text("Not reachable. Another device may have taken this board, or it is off or out of range — it stops advertising either way, so the app cannot tell which. It will be dropped from the list when you go back, and picked up again automatically if it returns.")
+                    Text("""
+                        Not reachable. Another device may have taken this board, or it is off or out of range \
+                        — it stops advertising either way, so the app cannot tell which. It will be dropped \
+                        from the list when you go back, and picked up again automatically if it returns.
+                        """)
                 } else {
-                    Text("You released this board, so it will not reconnect on its own. A Sophon holds one connection at a time and is invisible to other scanners while taken, so releasing it is what hands it to another device without a power cycle. Restarting the app clears this.")
+                    Text("""
+                        You released this board, so it will not reconnect on its own. A Sophon holds one \
+                        connection at a time and is invisible to other scanners while taken, so releasing it \
+                        is what hands it to another device without a power cycle. Restarting the app clears \
+                        this.
+                        """)
                 }
             }
             // VBAT is the charger's OUT, the BAT pad and the top of the divider
@@ -535,23 +557,47 @@ private struct DeviceDetailView: View {
             // all. The row label already says `VBAT net` rather than `Battery`;
             // this explains why (#268).
             if device.battery?.usbPowered == true {
-                Text("USB is powering this board, so the charger is holding VBAT and the reading is simply the voltage on that net — not necessarily a battery. With USB disconnected the board can only be running off its pack, and the row says Battery. Whether a pack is *absent* cannot be determined: the one pin that might have said so carries the charger's PRETERM input rather than its charge status.")
+                Text("""
+                    USB is powering this board, so the charger is holding VBAT and the reading is simply the \
+                    voltage on that net — not necessarily a battery. With USB disconnected the board can only \
+                    be running off its pack, and the row says Battery. Whether a pack is *absent* cannot be \
+                    determined: the one pin that might have said so carries the charger's PRETERM input \
+                    rather than its charge status.
+                    """)
             }
             // Gated on a POSITIVE "does not offer it", not on the absence of a
             // value. A read still in flight is not a peripheral that cannot
             // report, and saying so while waiting is the #263 defect.
             if device.offersBattery == false, device.state.isConnected, device.hasSession {
-                Text("No battery voltage: this peripheral does not report one. That is every simulated Sophon — an iOS peripheral has no battery divider, and its own charge level is a different quantity wearing the same label — and every board running firmware older than #268, or one whose divider failed to start. Voltage is the only figure the hardware can measure; there is no fuel gauge, so no percentage or remaining capacity is derived from it.")
+                Text("""
+                    No battery voltage: this peripheral does not report one. That is every simulated Sophon — \
+                    an iOS peripheral has no battery divider, and its own charge level is a different \
+                    quantity wearing the same label — and every board running firmware older than #268, or \
+                    one whose divider failed to start. Voltage is the only figure the hardware can measure; \
+                    there is no fuel gauge, so no percentage or remaining capacity is derived from it.
+                    """)
             }
             // Said once, in prose, rather than as three rows repeating a
             // sentinel. The issue allows either; a footnote is what the rest of
             // this section already uses to explain an absence, and three rows
             // saying "never" would be louder than the fact deserves.
             if device.offersLinkParams == false {
-                Text("No interval, latency or supervision timeout is shown because this peripheral has no link-parameters characteristic to read them from. That is every simulated Sophon — Core Bluetooth exposes no API for connection parameters on either side, so an iOS peripheral cannot report what it was granted — and every board running firmware older than #224. Normal, not a fault.")
+                Text("""
+                    No interval, latency or supervision timeout is shown because this peripheral has no \
+                    link-parameters characteristic to read them from. That is every simulated Sophon — Core \
+                    Bluetooth exposes no API for connection parameters on either side, so an iOS peripheral \
+                    cannot report what it was granted — and every board running firmware older than #224. \
+                    Normal, not a fault.
+                    """)
             }
             if device.identity == nil {
-                Text("\(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise manufacturer data at all, so a simulated Sophon reports no hardware or firmware version — nor does a board running firmware older than #230. TX power is different: it is a standard advertising field that iOS fills in itself, so a value there is the phone's own radio rather than a Sophon's.")
+                Text("""
+                    \(Self.notReported) is normal, not a fault: an iOS peripheral cannot advertise \
+                    manufacturer data at all, so a simulated Sophon reports no hardware or firmware version — \
+                    nor does a board running firmware older than #230. TX power is different: it is a \
+                    standard advertising field that iOS fills in itself, so a value there is the phone's own \
+                    radio rather than a Sophon's.
+                    """)
             }
         }
     }
@@ -630,7 +676,10 @@ private struct DeviceDetailView: View {
                 // avoid. One row either way, so the layout is unchanged (#242).
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     if case .stalled = device.linkStatus(asOf: context.date) {
-                        Text("Not responding. The Sophon has stopped answering, so these are the last figures it returned, not current ones.")
+                        Text("""
+                            Not responding. The Sophon has stopped answering, so these are the last figures \
+                            it returned, not current ones.
+                            """)
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     } else {
@@ -663,7 +712,11 @@ private struct DeviceDetailView: View {
             Text("Sophon transmit counters")
         } footer: {
             if device.txStatsAt != nil {
-                Text("Scoped to this connection; the Sophon's own totals run since it booted, so they are rebased on connect to stay comparable with the counts above. Re-read every 2s while this screen is open — polled rather than subscribed, and stops when you navigate away.")
+                Text("""
+                    Scoped to this connection; the Sophon's own totals run since it booted, so they are \
+                    rebased on connect to stay comparable with the counts above. Re-read every 2s while this \
+                    screen is open — polled rather than subscribed, and stops when you navigate away.
+                    """)
             }
         }
     }
@@ -701,13 +754,21 @@ private func attribution(device: SophonDevice) -> String {
 
     switch (tx.noBuffer, lost) {
     case (0, 0):
-        return "Everything the Sophon sent arrived, and nothing was dropped before sending — the link is keeping up." + aside
+        return """
+            Everything the Sophon sent arrived, and nothing was dropped before sending — the link is keeping \
+            up.
+            """ + aside
     case (0, _):
         return "\(lost) frame(s) left the Sophon but never arrived — lost on the link." + aside
     case (_, 0):
-        return "\(tx.noBuffer) frame(s) were dropped on the Sophon before sending, but everything that did go out arrived." + aside
+        return """
+            \(tx.noBuffer) frame(s) were dropped on the Sophon before sending, but everything that did go out \
+            arrived.
+            """ + aside
     default:
-        return "\(tx.noBuffer) frame(s) never left the Sophon, and a further \(lost) went out but did not arrive." + aside
+        return """
+            \(tx.noBuffer) frame(s) never left the Sophon, and a further \(lost) went out but did not arrive.
+            """ + aside
     }
 }
 
@@ -729,9 +790,13 @@ private extension SophonDevice.LinkStatus {
         // Silence is worth saying out loud: a released board still on the air can
         // be taken back, one that has gone quiet cannot.
         case .released(let silent):
-            if silent <= SophonDevice.releasedSilenceThreshold { "Released" }
-            else if silent.isFinite { "Released · not seen \(Int(silent))s" }
-            else { "Released · not seen" }
+            if silent <= SophonDevice.releasedSilenceThreshold {
+                "Released"
+            } else if silent.isFinite {
+                "Released · not seen \(Int(silent))s"
+            } else {
+                "Released · not seen"
+            }
         }
     }
 

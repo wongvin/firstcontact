@@ -415,7 +415,6 @@ final class SophonDevice: Identifiable {
         }
     }
 
-
     /// The user has deliberately let this board go, so auto-connect must leave it
     /// alone until they say otherwise.
     ///
@@ -1030,11 +1029,18 @@ final class SophonDevice: Identifiable {
     /// side by side without rebasing invites a false reading — `sent` would
     /// simply be larger than `received` by however long the board had been
     /// running beforehand.
-    var txThisSession: (sent: UInt32, noBuffer: UInt32, other: UInt32)? {
+    var txThisSession: SessionTxCounts? {
         guard let now = txStats, let base = txStatsAtConnect else { return nil }
-        return (now.sent &- base.sent,
-                now.noBuffer &- base.noBuffer,
-                now.other &- base.other)
+        return SessionTxCounts(sent: now.sent &- base.sent,
+                               noBuffer: now.noBuffer &- base.noBuffer,
+                               other: now.other &- base.other)
+    }
+
+    /// ``txThisSession``'s three counters, wrapping like the board's own.
+    struct SessionTxCounts {
+        let sent: UInt32
+        let noBuffer: UInt32
+        let other: UInt32
     }
 
     /// Frames that were produced and never arrived, excluding the ones the
