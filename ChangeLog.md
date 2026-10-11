@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### docs: the base XIAO nRF52840 in HARDWARE.md (#303)
+
+- **New section on the Seeed Studio XIAO nRF52840 (formerly XIAO BLE), the LoRa gateway board.** Checked against Seeed's V1.2 KiCad project: the Sense-only pins the shared image drives (P1.08, P0.07/P0.27, P0.11, P1.10) are harmless on it. The SWD test points match the Sense Plus.
+- **R17 is 510 kΩ on this board**, not the Sense Plus's 499 kΩ, so its own battery reading runs about 1.5% high. That doesn't matter as a gateway, which serves the sensor's reading.
+- Also noted: the V1.2 KiCad draws the IMU and microphone with no DNP flag, though the board has neither, so it can't be read as a BOM.
+
+
 ### docs: LoRa walk test and latency test split out (#303)
 
 - The walk test (with its firmware walk-test mode, and choosing the default preset) is now #313, and the bench latency test is #314. LORA-UPDATED-PLAN.md records the split. Its walk-test and latency sections stay as the spec those issues work from.
