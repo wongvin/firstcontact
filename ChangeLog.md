@@ -2,6 +2,12 @@
 
 ## 2026-10-11
 
+### feat: default LoRa preset is V6 (#321)
+
+- **The default preset is now V6** (`SOPHON_LORA_PRESET` 7): V3's SF7, 4 samples per packet and 102 ms latency, at +22 dBm instead of +14. That's 8 dB more link budget, about 1.85× the range near the ground, for about 45 mA average sensor radio current instead of 17. The other presets keep their TX power.
+- Firmware 2.19.0, with #318's battery-read fix, which +22 dBm needs. LORA-PROTOCOL.md and the README name V6 as the default; the walk test (#313) may still choose another.
+
+
 ### fix: battery reads no longer time out LoRa sends (#318)
 
 - **A battery read could make a sent LoRa packet report as failed, and the sensor could then hang.** The SX1262 driver handles its TX-done interrupt on the system workqueue, and the battery read held that queue for about 70 ms every 60 s, longer than `lora_send()`'s 58 ms timeout. At +14 dBm the sensor recovered; at +22 dBm (#317) it hung, once freezing the whole board.
