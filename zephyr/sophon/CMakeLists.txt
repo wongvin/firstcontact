@@ -34,6 +34,7 @@ target_sources(app PRIVATE
   src/lora_link.c
   src/lora_presets.c
   src/role.c
+  src/slow_work.c
 )
 
 # Build timestamp, regenerated on every build.

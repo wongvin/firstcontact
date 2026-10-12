@@ -16,6 +16,7 @@
 
 #include "battery.h"
 #include "ble.h"
+#include "slow_work.h"
 
 LOG_MODULE_REGISTER(sophon_battery, LOG_LEVEL_INF);
 
@@ -186,10 +187,13 @@ static void sample_timer_expiry(struct k_timer *timer)
 	ARG_UNUSED(timer);
 
 	/*
-	 * Deferred to the system work queue because sample_once() sleeps between
+	 * Deferred to a work queue because sample_once() sleeps between
 	 * conversions, and a timer expiry runs in ISR context where it must not.
+	 * Not the SYSTEM work queue: a read holds its queue for about 70 ms, long
+	 * enough to time out a LoRa send waiting on the radio's DIO1 work there
+	 * (#318).
 	 */
-	k_work_submit(&sample_work);
+	(void)sophon_slow_work_submit(&sample_work);
 }
 
 static K_TIMER_DEFINE(sample_timer, sample_timer_expiry, NULL);
@@ -219,7 +223,7 @@ static void vbus_work_handler(struct k_work *work)
 	last = now;
 
 	LOG_INF("USB %s -- re-sampling", now ? "connected" : "disconnected");
-	k_work_submit(&sample_work);
+	(void)sophon_slow_work_submit(&sample_work);
 }
 
 static K_WORK_DEFINE(vbus_work, vbus_work_handler);
@@ -302,7 +306,7 @@ int sophon_battery_init(void)
 	 * minute -- which is indistinguishable, from the app, from a board whose
 	 * firmware predates this change.
 	 */
-	k_work_submit(&sample_work);
+	(void)sophon_slow_work_submit(&sample_work);
 	k_timer_start(&sample_timer, K_MSEC(SOPHON_BATTERY_PERIOD_MS),
 		      K_MSEC(SOPHON_BATTERY_PERIOD_MS));
 	k_timer_start(&vbus_timer, K_MSEC(SOPHON_BATTERY_VBUS_POLL_MS),

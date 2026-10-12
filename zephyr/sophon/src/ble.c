@@ -19,6 +19,7 @@
 #include "ident.h"
 #include "lora_link.h"
 #include "role.h"
+#include "slow_work.h"
 #include "version.h"
 
 #if defined(CONFIG_MCUBOOT_IMG_MANAGER)
@@ -483,7 +484,9 @@ bool sophon_ble_subscribed(void)
  * Deferred to a work item rather than called inline. This runs on the system
  * work queue at ~54 Hz, and boot_write_img_confirmed() writes flash -- which on
  * this part is radio-synchronised and can take tens of milliseconds. Deferring
- * keeps the frame that triggered it from paying for it.
+ * keeps the frame that triggered it from paying for it, and deferring to the
+ * slow queue rather than the system one keeps that flash write from delaying
+ * the radio's DIO1 work, which would time out a LoRa send (#318).
  */
 static void confirm_work_handler(struct k_work *work)
 {
@@ -521,7 +524,7 @@ static void maybe_confirm_image(void)
 	}
 
 	LOG_INF("running an unconfirmed image -- confirming on first delivered frame");
-	k_work_submit(&confirm_work);
+	(void)sophon_slow_work_submit(&confirm_work);
 }
 #else
 static inline void maybe_confirm_image(void)
