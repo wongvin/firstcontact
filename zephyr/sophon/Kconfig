@@ -6,12 +6,12 @@ menu "Sophon LoRa relay (#303)"
 config SOPHON_LORA_PRESET
 	int "LoRa air-rate preset id"
 	range 0 8
-	default 2
+	default 7
 	help
 	  Index into src/lora_presets.c, the same ids LORA-PROTOCOL.md § Presets
 	  lists: 0 V0, 1 V1, 2 V3, 3 V3b, 4 V4, 5 V5, 6 V5b, 7 V6, 8 V6b.
-	  Both ends are built from one image, so they always agree. V3 is the
-	  provisional default until the walk test chooses one.
+	  Both ends are built from one image, so they always agree. V6 (V3 at
+	  +22 dBm) is the default (#321); the walk test may still choose another.
 
 config SOPHON_LORA_FREQ_HZ
 	int "LoRa carrier frequency (Hz)"

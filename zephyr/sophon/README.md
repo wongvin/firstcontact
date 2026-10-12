@@ -88,8 +88,8 @@ attached:
 
 915 MHz, 500 kHz bandwidth, one fixed channel. The air rate is a **preset** from
 `src/lora_presets.c`, chosen at build time with `CONFIG_SOPHON_LORA_PRESET`. The
-default, **V3**, is SF7, CR 4/5, 4 samples per packet, +14 dBm, and it is
-provisional until the walk test chooses one (#313). Both boards are built from
+default, **V6**, is SF7, CR 4/5, 4 samples per packet, +22 dBm (#321), and it
+stands until the walk test chooses one (#313). Both boards are built from
 the same image, so they always agree. The other options are
 `CONFIG_SOPHON_LORA_FREQ_HZ` and `CONFIG_SOPHON_LORA_PEER_ID` (0 = lock onto the
 first sensor heard). All are in the app's `Kconfig`.
@@ -97,7 +97,7 @@ first sensor heard). All are in the app's `Kconfig`.
 Both ends log their link every 10 s:
 
 ```
-<inf> sophon_lora: preset V3: SF7 BW500 CR4/5 k=4 v2 +14 dBm, 915.000 MHz; full packet 60 B = 29 ms on air
+<inf> sophon_lora: preset V6: SF7 BW500 CR4/5 k=4 v2 +22 dBm, 915.000 MHz; full packet 60 B = 29 ms on air
 <inf> sophon_lora: lora tx: 134 pkts, 536 samples, 0 send errors, 0 dropped (queue)          # sensor
 <inf> sophon_lora: lora rx: 134 pkts, 0 bad, 0 wrong peer; 536 samples, 0 missing, LQ 100.0%; RSSI avg -6 min -6, SNR avg 12 min 12; 0 DIO1 recoveries total   # gateway
 ```

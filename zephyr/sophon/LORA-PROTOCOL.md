@@ -80,8 +80,8 @@ doesn't have, and is deferred to #304, where it takes the next free id.
 | 7 | V6 | v2 | 7 | 4/5 | 4 | +22 dBm |
 | 8 | V6b | v2 | 8 | 4/5 | 10 | +22 dBm |
 
-**Default:** V3, provisionally, until the walk test picks one (*pending*; see
-§ Chosen preset). Set by `SOPHON_LORA_PRESET`. Both ends are built from the same
+**Default:** V6, V3 at +22 dBm (#321), until the walk test picks one (*pending*;
+see § Chosen preset). Set by `SOPHON_LORA_PRESET`. Both ends are built from the same
 image, so they always agree on it.
 
 ## LoRa variables
@@ -381,4 +381,5 @@ max per variant).
 ## Chosen preset
 
 *Pending.* Chosen by the rule in § Variants (How to choose), with the required
-distance and the reason recorded here. V3 until then.
+distance and the reason recorded here. V6 until then (#321): V3's latency with
+8 dB more link budget, for about 2.6× the sensor's radio current.
