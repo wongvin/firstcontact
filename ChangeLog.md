@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### fix: battery reads no longer time out LoRa sends (#318)
+
+- **A battery read could make a sent LoRa packet report as failed, and the sensor could then hang.** The SX1262 driver handles its TX-done interrupt on the system workqueue, and the battery read held that queue for about 70 ms every 60 s, longer than `lora_send()`'s 58 ms timeout. At +14 dBm the sensor recovered; at +22 dBm (#317) it hung, once freezing the whole board.
+- **New `slow_work` queue** (`src/slow_work.c`), below the system queue and the LoRa sensor thread, for work that sleeps or blocks: the battery read and the image confirm's flash write both move there.
+- Firmware 2.16.0.
+
+
 ### refactor: Sophon app passes SwiftLint and ShellCheck (#281)
 
 - **Long explanation copy is wrapped in place**: 22 single-line `Text(...)` strings, up to 865 characters, became multi-line literals ending in ` \`, so the rendered text is byte-identical (checked by script). Chosen over extracting the copy, which would separate wording from the layout it explains.
