@@ -164,7 +164,32 @@ driver:
 | absent | the board is running off the pack, so the reading **is** the pack |
 | present | the charger is holding VBAT; the reading is that net's voltage, and may or may not be a pack |
 
-Pack **absence** stays undetectable.
+Pack **absence** stays undetectable, though not for want of a signature (#319).
+
+**Why the reading wanders on USB: the charger's battery-detect routine.** With no
+battery, the BQ25101 runs it continuously: it regulates `OUT` at `VO(REG)` 4.2 V,
+then at `VREG-BD` = `VO(REG)` − 0.40 V (0.35–0.45 V) while sinking `IBD-SINK`
+2 mA, for `tDGL(HI/LOW REG)` 25 ms each (datasheet SLUSBV8, Electrical
+Characteristics, Battery Detect Routine; § 8.4.6). It also runs after each charge
+termination, to tell a removed battery from a full one (§ 8.3.10). A reading's 8
+conversions span ~70 ms, more than the 50 ms cycle, so its average lands anywhere
+between the levels: that is the minute-to-minute wander of up to ~350 mV that
+#319 was filed for.
+
+Measured on VBAT at 40 µs acquisition, 8 conversions 10 ms apart:
+
+| Board on USB | Levels | Step within one reading |
+|---|---|---|
+| no pack (`0FAA`) | 4.17–4.20 V / 3.76–3.79 V | 400–421 mV, every reading |
+| 200 mAh pack (`86F0`) | 4.17–4.20 V / 3.83–4.04 V | 165–371 mV, varying; above 280 mV for minutes at a time |
+
+**Tried and dropped:** reporting no reading when a reading's step exceeded a
+threshold. With this pack the charger runs the routine much of the time, and the
+pack's steps (up to 371 mV) come within ~30 mV of the no-pack ones. Even
+requiring three such readings 500 ms apart blanked a fitted pack for 47 of 60
+reads. A sturdier pack or connection would likely separate cleanly; the firmware
+can't count on one. So on USB the board reports the average, flagged USB, and the
+app labels it accordingly.
 
 ## The charger, and the pins that are not what they seem
 
@@ -192,6 +217,37 @@ it.
 **P0.13** selects charge current: high-impedance ≈ 50 mA, driven low ≈ 100 mA
 (wiki). Sophon does not touch it.
 
+## Power path: VBAT is not on the load path while USB is present (#319)
+
+The 3.3 V rail comes from **U6**, a 3.3 V LDO (X2SON-4; the schematic gives
+`Value = 3.3V` and no part number). Its input, `VIN`, is fed through a
+diode-or of USB and the battery:
+
+| Net | Members |
+|---|---|
+| `VBUS` | USB connector, charger `U2.IN`, **D1** anode, **Q1** gate, `R9` 100k, `U1.VBUS`, header 5V/VBUS pin |
+| `VIN` | **D1** cathode, **Q1** source, `U6.IN`, `U6.EN`, `C4` 2.2 µF |
+| `VBAT` | charger `U2.OUT`, `BAT0` pad, `C30` 2.2 µF, divider `R16`, **Q1** drain |
+| `3V3` | `U6.OUT`, the nRF52840's VDD and VDDH, the header 3V3 pin (`U4.12`), which powers the Wio-SX1262 carrier |
+
+`Q1` is a P-MOSFET whose gate is VBUS. **With USB present** its gate is high, so
+it is off, and `VIN` comes from VBUS through `D1`. The board's whole load, the
+SX1262 transmitting included, is drawn from USB and never passes through
+`VBAT`. **With USB absent**, `R9` pulls the gate low, `Q1` turns on, and the
+pack feeds `VIN`.
+
+Consequences:
+
+- On USB, a battery reading cannot sag under the board's own load: `VBAT` is the
+  charger's output, loaded only by the pack (if any), `C30` and the 1.5 MΩ
+  divider.
+- **With no pack fitted, the charger drives just 2.2 µF and ~2.8 µA.** Whatever
+  the reading does then is the charger's own output behaviour, not a battery.
+
+Reproduce with `scripts/kicad-netlist.py '<sch>' VIN VBUS VBAT 3V3` and
+`--values U6 Q1 D1 C30 C4 R9`. The base XIAO nRF52840's v1.2 schematic (sheet
+`02 XIAO Header & nRF52840`) has the same members on `VBUS`, `VIN` and `VBAT`.
+
 ## ADC configuration
 
 | | |
@@ -199,6 +255,7 @@ it.
 | Input | `AIN7` = P0.31 — fixed silicon mapping |
 | Gain / reference | `ADC_GAIN_1_4` against the internal 0.6 V → 2.4 V full scale |
 | Resolution | 12-bit |
+| Acquisition time | **40 µs**, the SAADC's longest (#319) |
 
 A 4.2 V pack presents `4.2 × 499/1499` = **1.42 V** at the pin: comfortable
 headroom without waste. Gain 1/2 (1.2 V FS) would clip; 1/6 (3.6 V FS) would
@@ -209,6 +266,43 @@ is already taken, so AIN7 is not merely free but the correct choice.
 
 The board files declare **none** of this: no divider node, no named enable pin,
 and `&adc` enabled with no channel children. All of it lives in `app.overlay`.
+
+### Acquisition time: 40 µs, not the default
+
+The source the SAADC sees is the divider's Thévenin resistance, 1 MΩ ∥ 499 kΩ ≈
+**333 kΩ**, and nothing holds the node: `AIN7` carries only R16, R17, the pin
+and the header (`kicad-netlist.py '<sch>' AIN7`).
+
+The nRF52840 product specification sets the acquisition time by source
+resistance ([§ SAADC, Acquisition time, Table 1](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/saadc.html)):
+
+| TACQ | Maximum source resistance |
+|---|---|
+| 3 µs | 10 kΩ |
+| 5 µs | 40 kΩ |
+| **10 µs** (Zephyr's `ADC_ACQ_TIME_DEFAULT`) | **100 kΩ** |
+| 15 µs | 200 kΩ |
+| **20 µs** | **400 kΩ**, the shortest that covers 333 kΩ |
+| **40 µs** (chosen) | **800 kΩ** |
+
+The base XIAO nRF52840's divider (R17 = 510 kΩ, § The battery divider differs)
+is 1 MΩ ∥ 510 kΩ ≈ 338 kΩ, in the same row. The default is rated for a third of
+either divider's resistance. 20 µs would meet
+the table; 40 µs is chosen for margin, since R16 and R17 are 1% parts and nothing
+on the node helps. It is also the longest the SAADC offers, so there is no
+further step if a future divider goes higher: above 800 kΩ needs a capacitor on
+the node or a buffer, not a longer acquisition.
+
+At the 10 µs default the sampling capacitor did not charge in time, and readings
+came out low by an amount that varied with the level:
+
+| 86F0 | 10 µs | 40 µs | Reference |
+|---|---|---|---|
+| on its pack, no USB | 3.73–3.81 V | 4.03 V | 4.08 V on a meter at the pack terminals |
+| charger regulating (`VO(REG)`) | 4.04–4.14 V | 4.17–4.20 V | 4.2 V nominal |
+
+Every reading before #319 was taken at 10 µs, including the table under
+§ Measurements.
 
 ### Accuracy
 
@@ -238,6 +332,10 @@ the working path. See `README.md`.
 ## Measurements
 
 All from `Sophon-86F0`, a Sense Plus, bootloader UF2 0.9.2 dated Oct 15 2025.
+**Taken at the 10 µs acquisition time, so they read low** (see § Acquisition
+time), and the "USB, no pack" rows are averages of the charger's detect
+waveform rather than voltages (§ Whether a pack is fitted). Since #319, the
+same board reads 4.03 V on a pack metered at 4.08 V.
 
 | Config | Condition | Reported |
 |---|---|---|

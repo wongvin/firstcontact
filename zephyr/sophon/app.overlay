@@ -113,7 +113,19 @@
 		zephyr,gain = "ADC_GAIN_1_4";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,vref-mv = <600>;
-		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		/*
+		 * 40 us, the longest the SAADC offers. The source is the divider's
+		 * Thevenin resistance, 1M || 499k = 333 kOhm, with no capacitor on
+		 * AIN7 to hold the node. The nRF52840 PS (SAADC, Acquisition time,
+		 * Table 1) allows 100 kOhm at 10 us and 400 kOhm at 20 us, the
+		 * shortest that covers it; 40 us allows 800 kOhm, for margin. At
+		 * the 10 us default the sampling capacitor did not charge in time:
+		 * readings came out 100-300 mV low, by an amount that varied with
+		 * the level (#319). At 40 us a pack metered at 4.08 V reads 4.03 V,
+		 * within the divider's tolerance, and the charger's 4.2 V
+		 * regulation reads 4.2 V.
+		 */
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
 		zephyr,resolution = <12>;
 		zephyr,input-positive = <NRF_SAADC_AIN7>;
 	};

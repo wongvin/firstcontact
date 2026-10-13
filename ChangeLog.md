@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-13
+
+### fix: battery readings read 100–300 mV low (#319)
+
+- **Battery readings were 100–300 mV low.** The ADC sampled the 333 kΩ battery divider for 10 µs, too short to charge its sampling capacitor: the nRF52840 product specification allows 100 kΩ at 10 µs and needs 20 µs for 400 kΩ. It now samples for 40 µs: a pack metered at 4.08 V reads 4.03 V (it read 3.73–3.81 V), and the charger's 4.2 V regulation reads 4.2 V.
+- **Why the reading wanders on USB:** with no pack, the charger toggles its output between 4.2 V and 3.8 V every 25 ms looking for a battery, and each reading averages a random slice of that. Reporting no reading in that case was tried and dropped: with a marginal pack the charger does nearly the same, and a fitted pack was blanked most of the time. On USB the reading stays the average, flagged USB.
+- HARDWARE.md records the power path (the board's load doesn't use VBAT on USB), the charger's detect routine with datasheet figures, and the acquisition-time evidence. Firmware 2.24.0.
+
+
 ## 2026-10-11
 
 ### feat: default LoRa preset is V6 (#321)
