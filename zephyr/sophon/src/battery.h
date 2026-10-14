@@ -98,12 +98,19 @@ int sophon_battery_init(void);
  *   present -> the charger is holding the node; the reading is simply the
  *              voltage on VBAT, which may or may not be a pack
  *
- * Note what this deliberately does NOT claim: pack ABSENCE is not detectable.
- * `/CHG` would have been the extra evidence, but P0.17 does not carry it -- the
- * net name says `~{CHG}` while the pin lands on the BQ25101's PRETERM input,
- * with its programming resistor R8 marked DNP.
+ * The charger's /CHG on P0.17 adds whether a charge is in progress (#323), set
+ * only when this firmware reads the pin (CHG_KNOWN):
+ *
+ *   CHARGING     -> /CHG low: the first charge cycle is running, so a pack is
+ *                   fitted and taking current
+ *   not CHARGING -> /CHG released: the pack is full, OR no pack is fitted, OR
+ *                   USB is absent. The pin cannot separate the first two.
+ *
+ * Pack ABSENCE therefore stays undetectable; see HARDWARE.md.
  */
-#define SOPHON_BATTERY_FLAG_USB BIT(0)
+#define SOPHON_BATTERY_FLAG_USB       BIT(0)
+#define SOPHON_BATTERY_FLAG_CHARGING  BIT(1)
+#define SOPHON_BATTERY_FLAG_CHG_KNOWN BIT(2)
 
 void sophon_battery_read(uint16_t *mv, uint16_t *age_s, uint8_t *flags);
 

@@ -1,0 +1,25 @@
+# Copyright (c) 2026
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  The battery charger's charge-status output, read by the application (#323).
+
+  On the XIAO nRF52840 this is the BQ25101's /CHG, an open-drain output on ball
+  C1, wired to P0.17 and to the green charge LED, whose anode returns to 3V3
+  through R5. Low while the first charge cycle is in progress; released when it
+  completes, when USB is absent, and when no pack is fitted.
+
+  A binding of its own rather than borrowing `gpio-keys` or `gpio-leds`, which
+  would describe the pin as something it is not.
+
+compatible: "sophon,charge-status"
+
+include: base.yaml
+
+properties:
+  gpios:
+    type: phandle-array
+    required: true
+    description: |
+      The status pin, ACTIVE = charging. Needs the internal pull-up: with /CHG
+      released, the LED and R5 pull the net only weakly toward 3V3.

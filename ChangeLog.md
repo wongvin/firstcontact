@@ -2,6 +2,13 @@
 
 ## 2026-10-13
 
+### feat: Sophon reports whether the battery is charging (#323)
+
+- **P0.17 is the charger's `/CHG` output**, not its `PRETERM` input as HARDWARE.md said. The base XIAO's v1.2 schematic names the charger `BQ25101YFPT` and puts the green charge LED on that pin, and on hardware P0.17 reads low while charging and high once the charge ends with USB still in.
+- **The battery flags gain bit 1 `charging` and bit 2 `charge_known`.** The firmware reads `/CHG` with the internal pull-up and re-samples within a second when it changes, comparing against what it last reported, so a pin that bounces as a pack goes in can't leave a stale state. The gateway relays the bits unchanged.
+- **The app shows a Charger row on USB:** "Charging", or "Not charging · full or no pack". `/CHG` releases for a full pack and for no pack alike, so the app doesn't guess between them.
+- HARDWARE.md, PROTOCOL.md (which now documents the flags byte) and LORA-PROTOCOL.md are corrected. Firmware 2.27.0.
+
 ### fix: battery readings read 100–300 mV low (#319)
 
 - **Battery readings were 100–300 mV low.** The ADC sampled the 333 kΩ battery divider for 10 µs, too short to charge its sampling capacitor: the nRF52840 product specification allows 100 kΩ at 10 µs and needs 20 µs for 400 kΩ. It now samples for 40 µs: a pack metered at 4.08 V reads 4.03 V (it read 3.73–3.81 V), and the charger's 4.2 V regulation reads 4.2 V.

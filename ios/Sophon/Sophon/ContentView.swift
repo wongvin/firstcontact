@@ -426,6 +426,23 @@ private struct DeviceDetailView: View {
                 }
             }
 
+            // The charger's /CHG (#323), on USB only: without USB the charger is
+            // off and the row above already says Battery. Two states and no
+            // third, because a full pack and no pack both release /CHG -- "not
+            // charging" names both rather than guessing between them. Gated on
+            // an observable check outside the timeline, so no branch renders an
+            // empty row; it describes the same reading as the row above and
+            // fades with it.
+            if device.battery?.usbPowered == true, let charging = device.battery?.charging {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let live = device.batteryReading(asOf: context.date)?.isStale == false
+                    LabeledContent("Charger") {
+                        Text(charging ? "Charging" : "Not charging · full or no pack")
+                            .foregroundStyle(live ? .primary : .secondary)
+                    }
+                }
+            }
+
             // The interval iOS granted, which Core Bluetooth will not tell this
             // app — it comes back from the peripheral, the only side that can see
             // it (#224). Shown with events/second because that is the form worth
@@ -561,8 +578,8 @@ private struct DeviceDetailView: View {
                     USB is powering this board, so the charger is holding VBAT and the reading is simply the \
                     voltage on that net — not necessarily a battery. With USB disconnected the board can only \
                     be running off its pack, and the row says Battery. Whether a pack is *absent* cannot be \
-                    determined: the one pin that might have said so carries the charger's PRETERM input \
-                    rather than its charge status.
+                    determined: the charger's status says only charging or not, and a full pack and no pack \
+                    both read as not charging.
                     """)
             }
             // Gated on a POSITIVE "does not offer it", not on the absence of a

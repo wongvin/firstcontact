@@ -91,6 +91,18 @@
 		compatible = "sophon,vbatt-enable";
 		gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
 	};
+
+	/*
+	 * The charger's /CHG (#323): BQ25101 ball C1, open drain, low while
+	 * charging. The net also carries the green charge LED from 3V3 through
+	 * R5, which pulls a released pin only weakly toward 3V3 -- hence the
+	 * internal pull-up. Harmless even if the part were the BQ25100, whose C1
+	 * is PRETERM: the LED already ties that net to 3V3.
+	 */
+	charge_status: charge-status {
+		compatible = "sophon,charge-status";
+		gpios = <&gpio0 17 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+	};
 };
 
 &adc {

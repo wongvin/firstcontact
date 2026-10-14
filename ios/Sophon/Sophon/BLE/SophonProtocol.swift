@@ -188,10 +188,19 @@ nonisolated struct BatteryReading: Equatable, Sendable {
     ///   voltage on VBAT, which may or may not be a pack.
     /// - `nil` — firmware older than the flags byte; the source is unknown.
     ///
-    /// Note what is absent: **pack absence is not detectable.** `/CHG` would
-    /// have been the extra evidence, but P0.17 does not carry it — the net is
-    /// named `~{CHG}` while the pin lands on the BQ25101's `PRETERM` input.
+    /// Note what is absent: **pack absence is not detectable.** `charging`
+    /// narrows it but cannot close it -- see there.
     let usbPowered: Bool?
+
+    /// The charger's `/CHG`, or nil if the peripheral does not read it (#323).
+    ///
+    /// - `true` -- a charge is running, so a pack is fitted and taking current.
+    /// - `false` -- not charging: the pack is full, **or** no pack is fitted,
+    ///   **or** USB is absent. The pin cannot separate the first two, so the UI
+    ///   must not pick one.
+    /// - `nil` -- no flags byte, or `charge_known` (bit 2) clear: firmware that
+    ///   does not read the pin. Distinct from `false`, which is a reading.
+    let charging: Bool?
 
     var volts: Double { Double(millivolts) / 1000 }
 
@@ -220,7 +229,11 @@ nonisolated struct BatteryReading: Equatable, Sendable {
         ageSeconds = u16(2)
         // Minimum length, not exact: a peripheral on the 4-byte form is not an
         // error, it simply cannot say where its power is coming from.
-        usbPowered = data.count >= 5 ? (data[data.startIndex + 4] & 0x01) != 0 : nil
+        let flags: UInt8? = data.count >= 5 ? data[data.startIndex + 4] : nil
+        usbPowered = flags.map { $0 & 0x01 != 0 }
+        // Bit 2 says the firmware read /CHG at all; without it a clear bit 1
+        // would claim "not charging" on behalf of firmware that never looked.
+        charging = flags.flatMap { $0 & 0x04 != 0 ? $0 & 0x02 != 0 : nil }
     }
 
 }
@@ -644,6 +657,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkLinkParams()
         checkLoRaLink()
         checkUptimeFormat()
+        checkBattery()
     }
 
     private static func checkMotionFrame() {
@@ -759,6 +773,32 @@ nonisolated enum SophonProtocolSelfCheck {
         var v2 = wire
         v2[0] = 0x02
         assert(LoRaLinkRecord(v2) == nil, "an unknown version must be dropped")
+    }
+
+    private static func checkBattery() {
+        // PROTOCOL.md § Battery frame: mv 4123 (0x101B), age 7 s, then flags.
+        let base = Data([0x1B, 0x10, 0x07, 0x00])
+        func read(_ flags: UInt8?) -> BatteryReading? {
+            BatteryReading(flags.map { base + Data([$0]) } ?? base)
+        }
+        guard let old = read(nil), let usbOnly = read(0x01), let notCharging = read(0x05),
+              let charging = read(0x07), let onPack = read(0x04) else {
+            assertionFailure("BatteryReading rejected a valid frame")
+            return
+        }
+        assert(old.millivolts == 4123 && old.ageSeconds == 7, "mv or age byte-swapped")
+        assert(old.usbPowered == nil && old.charging == nil, "4-byte frame has no flags")
+        assert(usbOnly.usbPowered == true && usbOnly.charging == nil,
+               "charging must stay unknown without charge_known (bit 2)")
+        assert(notCharging.usbPowered == true && notCharging.charging == false, "0x05: USB, not charging")
+        assert(charging.usbPowered == true && charging.charging == true, "0x07: USB, charging")
+        assert(onPack.usbPowered == false && onPack.charging == false, "0x04: on the pack, not charging")
+        assert(read(0x03)?.charging == nil, "bit 1 without charge_known (bit 2) must stay unknown")
+        let reserved = read(0xF9)
+        assert(reserved?.usbPowered == true && reserved?.charging == nil, "reserved bits 3-7 must be masked")
+        assert(BatteryReading(base + Data([0x07, 0x00]))?.charging == true, "a longer frame must still parse")
+        assert(BatteryReading(Data([0x00, 0x00, 0x07, 0x00, 0x07])) == nil, "mv 0 is the no-reading sentinel")
+        assert(BatteryReading(Data([0x1B, 0x10, 0x07])) == nil, "short frame must be rejected")
     }
 
     private static func checkUptimeFormat() {
