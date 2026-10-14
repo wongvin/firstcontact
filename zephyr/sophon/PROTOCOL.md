@@ -228,12 +228,25 @@ sysqueue for exactly this reason; see the queue comment in `src/main.c`.
 
 ## Battery frame
 
-**4 bytes, little-endian**, read from the Battery characteristic.
+**5 bytes, little-endian**, read from the Battery characteristic (4 from firmware
+before the flags byte).
 
 | Offset | Size | Type | Field | Meaning |
 |---|---|---|---|---|
 | 0 | 2 | `u16` | `mv` | terminal millivolts, or **0 meaning no reading** |
 | 2 | 2 | `u16` | `age_s` | seconds since the board took that reading, saturating |
+| 4 | 1 | `u8` | `flags` | bit 0 `usb` · bit 1 `charging` · bit 2 `charge_known` · bits 3–7 are 0 |
+
+All three flags describe the instant the reading was taken, not the read:
+
+| Bit | Name | Set when |
+|---|---|---|
+| 0 | `usb` | VBUS is present. Clear means the board runs off the pack, so the reading **is** the pack; set means it is the voltage on the VBAT net, which may or may not be a pack (HARDWARE.md § Whether a pack is fitted). |
+| 1 | `charging` | The charger's `/CHG` is asserted: its first charge cycle is running, so a pack is fitted and taking current (#323). Meaningful only with bit 2. |
+| 2 | `charge_known` | This firmware reads `/CHG`. With bit 2 set and bit 1 clear, the charger is **not charging**: the pack is full, **or** no pack is fitted, **or** USB is absent. The pin cannot separate the first two. With bit 2 clear, charge status is unknown (older firmware). |
+
+A gateway reports its sensor's flags as relayed over LoRa (LORA-PROTOCOL.md,
+status trailer), unchanged.
 
 `mv == 0` is a sentinel, not a measurement. A connected pack cannot sit at 0 mV,
 so it unambiguously means *this board has no reading* — a divider that failed to

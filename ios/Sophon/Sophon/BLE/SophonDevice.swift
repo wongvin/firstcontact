@@ -275,7 +275,8 @@ final class SophonDevice: Identifiable {
         // 0...60 on every read and an `!=` over the whole struct would fire every
         // time -- a guard that reads as protection while providing none (#261).
         if battery?.millivolts != reading.millivolts
-            || battery?.usbPowered != reading.usbPowered {
+            || battery?.usbPowered != reading.usbPowered
+            || battery?.charging != reading.charging {
             battery = reading
         }
         // Stamped unconditionally: arrival time is real news even when the

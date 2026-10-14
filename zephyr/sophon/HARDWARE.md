@@ -193,29 +193,56 @@ app labels it accordingly.
 
 ## The charger, and the pins that are not what they seem
 
-`U2` is a **BQ25101** per the wiki's specifications table, which lists it for all
-XIAO nRF52840 variants. **The schematic contradicts itself**: `Value = BQ25100`,
-while both the footprint and the library symbol say BQ25101. Neither is an
-orderable MPN, there is no `MPN` property on the part, and `Datasheet` is empty.
+`U2` is a **BQ25101**. The two variants differ on exactly one ball, C1: it is
+**`PRE-TERM` on the BQ25100 and `/CHG` on the BQ25101** (TI SLUSBV8, Pin
+Functions: "spins have different pin definitions"). The part is under the
+module's shield, so the evidence is the schematics and the board's behaviour
+(#323):
+
+| | Sense Plus v1.1 schematic | Base v1.2 schematic |
+|---|---|---|
+| U2 | `Value = BQ25100`, on an Eagle-imported `BQ25101` symbol and footprint | **`BQ25101YFPT`**, an orderable part number |
+| Ball C1 named | `PRETERM` | **`~{CHG}`** |
+| Net `P0.17_~{CHG}` | U2.C1, R8 (DNP), P0.17 | **charge LED `CHG0` cathode**, R8 (DNP), P0.17, U2.C1 |
+| `CHG0` anode | R5 (the parser leaves the LED unconnected on this sheet) | **R5 → 3V3** |
+
+An LED from 3V3 onto C1 is the standard `/CHG` indicator. **On hardware**
+(86F0, a Sense Plus, read over SWD without halting): P0.17 reads **low while
+charging**, **high once the charge terminated with USB still in**, and **high
+with no pack fitted** (3,000 samples over 3.55 s, no edges). The charge LED,
+which is **green** (not red as drawn), follows it. A pin that tracked VBUS would
+have stayed low at termination. So C1 is `/CHG` on the Sense Plus too, and the
+v1.1 `BQ25100`/`PRETERM` labels are artefacts of the Eagle import. This file
+said the opposite until #323, from those labels.
 
 | Net | Lands on | Also on the net |
 |---|---|---|
-| `P0.17_~{CHG}` | `U2.C1` **`PRETERM`** | `R8` → GND, **`DNP`** |
+| `P0.17_~{CHG}` | `U2.C1` **`/CHG`**, open drain | green charge LED `CHG0` + `R5` to 3V3; `R8` → GND, **`DNP`** |
 | `P0.13_HICHG` | `U2.B2` `ISET` | `R18` 2.7k, `R12` 2.7k to GND |
 | — | `U2.B1` `TS` | `R20` 10k to GND — temp sense disabled per the sheet note |
 
-**P0.17 is not a charge-status readback**, despite the `~{CHG}` name and its
-active-low overbar. It lands on the charger's `PRETERM` current-programming
-input, whose programming resistor is not fitted. This was mis-identified twice
-from the PDF — once from the net name, once from where symbols sat on the page —
-and only the netlist settled it.
+**Reading `/CHG`.** Sophon reads P0.17 as an input **with the internal
+pull-up**: with `/CHG` released, the LED and R5 pull the net only weakly toward
+3V3, possibly below the nRF's logic-high threshold. The pull-up would be harmless
+even on a BQ25100, since the LED already ties the net to 3V3. It is reported as
+two bits in the battery flags (PROTOCOL.md § Battery frame):
 
-That closes off the obvious refinement: `/CHG` would have distinguished "charging,
-therefore a pack is present" from "not charging", but this board does not expose
-it.
+| On USB | `/CHG` | Meaning |
+|---|---|---|
+| low | charging | the first charge cycle is running, so a pack is fitted and taking current |
+| released | not charging | the pack is full, **or** no pack is fitted. The pin cannot separate them. |
 
-**P0.13** selects charge current: high-impedance ≈ 50 mA, driven low ≈ 100 mA
-(wiki). Sophon does not touch it.
+The BQ25101 drives `/CHG` low for the **first** charge cycle only: a later top-up
+of a full pack (refresh, § 8.4.7) leaves it released. Pack **absence** therefore
+stays undetectable: neither `/CHG` nor the VBAT swing (§ Whether a pack is
+fitted) separates it from a full pack.
+
+**P0.13** selects charge current, through ISET: high-impedance → R18 alone,
+2.7 kΩ ≈ **50 mA**; driven low → R18 ∥ R12 = 1.35 kΩ ≈ **100 mA** (the datasheet's
+range, 13.5 kΩ for 10 mA to 0.54 kΩ for 250 mA, is about 135 mA·kΩ). Sophon
+does not touch it, so the charger runs at 50 mA. Measured: a 200 mAh pack went
+from ~60% to terminated in 1.7–3.3 h. Driving it **high** would push current
+into ISET through R12 and disturb the setting; only low is meaningful.
 
 ## Power path: VBAT is not on the load path while USB is present (#319)
 

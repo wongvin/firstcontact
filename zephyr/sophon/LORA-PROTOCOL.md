@@ -204,7 +204,7 @@ So v1 = `0x54`, and v2 = `0x58` (motion only), `0x59` (+ status), `0x5A` (+ test
 |---|---|---|---|---|
 | 0 | 1 | `type` | u8 | `0x54` |
 | 1 | 2 | `sensor_id` | u16 | Low 16 bits of the sensor's FICR ID (`src/ident.c`) |
-| 3 | 1 | `flags` | u8 | bit 0 = USB powered; bits 1–7 are 0 |
+| 3 | 1 | `flags` | u8 | the battery flags as on the Battery characteristic (PROTOCOL.md § Battery frame): bit 0 `usb`, bit 1 `charging`, bit 2 `charge_known` (#323); bits 3–7 are 0 |
 | 4 | 2 | `batt_mv` | u16 | Sensor battery in mV; 0 = no reading |
 | 6 | 2 | `batt_age_s` | u16 | Seconds since that reading |
 | 8 | 1 | `count` | u8 | 1–10 |
@@ -240,7 +240,7 @@ So v1 = `0x54`, and v2 = `0x58` (motion only), `0x59` (+ status), `0x5A` (+ test
 | Offset in trailer | Size | Field | Type | Meaning |
 |---|---|---|---|---|
 | 0 | 2 | `sensor_id` | u16 | as in v1 |
-| 2 | 1 | `flags` | u8 | bit 0 = USB powered |
+| 2 | 1 | `flags` | u8 | bit 0 `usb`, bit 1 `charging`, bit 2 `charge_known`, as in v1 |
 | 3 | 2 | `batt_mv` | u16 | mV; 0 = no reading |
 | 5 | 2 | `batt_age_s` | u16 | seconds |
 

@@ -108,6 +108,38 @@ static uint16_t sample_once(void)
 	return (uint16_t)(total_mv / taken);
 }
 
+/*
+ * The charger's /CHG (#323), active = charging. See app.overlay and
+ * dts/bindings/sophon,charge-status.yaml.
+ */
+static const struct gpio_dt_spec charge_status =
+	GPIO_DT_SPEC_GET(DT_NODELABEL(charge_status), gpios);
+static bool charge_status_ok;
+
+/*
+ * The charge bits for the flags byte. KNOWN says this firmware reads /CHG at
+ * all, so a clear CHARGING means "not charging" rather than "not asked".
+ *
+ * Only ever "charging" or "not charging". Released /CHG covers a full pack, no
+ * pack, and USB absent alike -- and the VBAT swing that might separate the
+ * first two misfired on a fitted pack (#319) -- so nothing further is claimed.
+ * The BQ25101 also holds /CHG low for the first charge cycle only: a later
+ * top-up of a full pack reads as not charging, which is the useful answer.
+ */
+static uint8_t charge_flags(void)
+{
+	if (!charge_status_ok) {
+		return 0;
+	}
+
+	uint8_t flags = SOPHON_BATTERY_FLAG_CHG_KNOWN;
+
+	if (gpio_pin_get_dt(&charge_status) == 1) {
+		flags |= SOPHON_BATTERY_FLAG_CHARGING;
+	}
+	return flags;
+}
+
 static void sample_work_handler(struct k_work *work)
 {
 	uint16_t mv;
@@ -135,6 +167,8 @@ static void sample_work_handler(struct k_work *work)
 	 * plugged in would otherwise be labelled as the charger's.
 	 */
 	uint8_t flags = nrf_power_usbregstatus_vbusdet_get(NRF_POWER) ? SOPHON_BATTERY_FLAG_USB : 0;
+
+	flags |= charge_flags();
 
 	bool changed;
 
@@ -199,8 +233,9 @@ static void sample_timer_expiry(struct k_timer *timer)
 static K_TIMER_DEFINE(sample_timer, sample_timer_expiry, NULL);
 
 /*
- * Watches VBUS between samples so a plug or unplug is reflected in about a
- * second rather than at the next 60 s sample.
+ * Watches VBUS and the charger's /CHG between samples, so a plug, an unplug or
+ * a charge starting or ending is reflected in about a second rather than at the
+ * next 60 s sample.
  *
  * Re-samples rather than merely restamping the flag: the cached voltage was
  * measured under the old power source, and relabelling it without re-measuring
@@ -208,21 +243,48 @@ static K_TIMER_DEFINE(sample_timer, sample_timer_expiry, NULL);
  */
 static void vbus_work_handler(struct k_work *work)
 {
-	static bool known;
-	static bool last;
+	static uint8_t last_logged = 0xff;
 
-	bool now = nrf_power_usbregstatus_vbusdet_get(NRF_POWER);
+	uint8_t want =
+		(nrf_power_usbregstatus_vbusdet_get(NRF_POWER) ? SOPHON_BATTERY_FLAG_USB : 0) |
+		charge_flags();
+	uint8_t have;
+	bool valid;
 
 	ARG_UNUSED(work);
 
-	if (known && now == last) {
+	K_SPINLOCK(&lock) {
+		have = state.flags;
+		valid = state.mv && state.at >= 0;
+	}
+
+	/*
+	 * Compared with what was last STORED, not with what this handler saw a
+	 * second ago. /CHG bounces when a pack is plugged in -- low, briefly high
+	 * while the charger checks for it, low again -- and a re-sample landing on
+	 * the high moment stored "not charging". Against its own previous view
+	 * this handler then saw nothing new, and the wrong state stood until the
+	 * next 60 s sample (seen on hardware, #323). Against the stored flags, any
+	 * disagreement re-samples within a second, however the pin bounces.
+	 *
+	 * Skipped until there is a reading: the periodic and boot samples cover
+	 * that, and re-sampling every second after failed reads would not help.
+	 */
+	if (!valid || want == have) {
 		return;
 	}
 
-	known = true;
-	last = now;
-
-	LOG_INF("USB %s -- re-sampling", now ? "connected" : "disconnected");
+	if (want != last_logged) {
+		if ((want ^ have) & SOPHON_BATTERY_FLAG_USB) {
+			LOG_INF("USB %s -- re-sampling",
+				(want & SOPHON_BATTERY_FLAG_USB) ? "connected" : "disconnected");
+		} else {
+			LOG_INF("charger %s -- re-sampling", (want & SOPHON_BATTERY_FLAG_CHARGING)
+								     ? "charging"
+								     : "not charging");
+		}
+		last_logged = want;
+	}
 	(void)sophon_slow_work_submit(&sample_work);
 }
 
@@ -293,6 +355,17 @@ int sophon_battery_init(void)
 	if (err) {
 		LOG_WRN("battery enable gpio config failed (%d)", err);
 		return err;
+	}
+
+	/*
+	 * Before the first sample, so even the boot reading carries charge status.
+	 * A failure only costs that: the voltage is unaffected.
+	 */
+	if (gpio_is_ready_dt(&charge_status) &&
+	    gpio_pin_configure_dt(&charge_status, GPIO_INPUT) == 0) {
+		charge_status_ok = true;
+	} else {
+		LOG_WRN("charge status pin unavailable; charging will not be reported");
 	}
 
 	if (!device_is_ready(vbatt)) {

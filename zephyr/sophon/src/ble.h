@@ -133,7 +133,9 @@ void sophon_link_params_pack(const struct sophon_link_params *in,
  * OUT, the BAT pad and the top of the divider shorted together, so the voltage
  * alone cannot say what is driving it. VBUS **absent** proves the pack is, so
  * the reading is the pack; VBUS **present** means the reading is simply what is
- * on VBAT, which may or may not be a pack. Pack ABSENCE stays undetectable.
+ * on VBAT, which may or may not be a pack. Bits 1-2 add the charger's /CHG
+ * (#323): charging, or not charging (full, or no pack -- the pin cannot tell
+ * which). Pack ABSENCE stays undetectable.
  *
  * Appended rather than folded into spare bits of `mv`, so the append-only rule
  * that governs the scan response holds here too: the app's parser requires a
