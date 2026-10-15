@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-14
+
+### docs: plan for publishing Sophon as its own repository (#327)
+
+- **New `zephyr/sophon/PUBLIC-REPO-PLAN.md`:** the plan for a public `wongvin/sophon` repository that the public carries on, while this repo keeps its Sophon work and later goes private. MIT for code and CC BY 4.0 for docs, a fresh initial commit, and both copies continuing independently.
+- It covers the cleaned export (layout, re-pathing, personal identifiers, issue numbers removed or rewritten, monorepo workflow text), licensing and third-party notices, public-project files, CI, an audit gate, and verification. It stays in this repo and is not exported.
+
+
 ## 2026-10-13
 
 ### feat: Sophon reports whether the battery is charging (#323)
