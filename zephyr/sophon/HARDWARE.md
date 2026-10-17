@@ -532,3 +532,53 @@ From the datasheet, and why each fact matters to the firmware:
 - For antenna gain and the FCC EIRP limit, the sensor is capped at 14 dBi at
   +22 dBm, and the receive-only gateway has no limit. See LORA-UPDATED-PLAN.md
   § Antenna gain and the FCC limit.
+
+#### No output power is specified as safe without an antenna
+
+What the datasheets say about transmitting into a mismatched or open antenna
+port:
+
+| Source | Figure | What it means here |
+|---|---|---|
+| Semtech SX1261/2 datasheet Rev 1.2, Table 3-3, Operating Range | **VSWR ≤ 10:1** at the antenna port | about half the power reflected; this is the specified limit. An open U.FL reflects essentially all of it, far outside the range |
+| Same, § 15.2, "Better Resistance of the SX1262 Tx to Antenna Mismatch" | the PA has an internal **clamp that backs off output power on over-voltage**, "to protect the internal devices and ensure long-term reliability" | some built-in self-protection. Semtech's workaround raises the clamp threshold, and says reliability "is guaranteed with or without" it |
+| Zephyr's loramac-node driver, `sx126x.c:554` | applies that workaround: `TxClampConfig` (0x08D8) bits 4–1 set to `1111` | Sophon runs with the less protective clamp, which Semtech still calls reliable |
+| Seeed Wio-SX1262 module datasheet | nothing on mismatch or running without an antenna | — |
+
+So the SX1262 guards itself to a degree, but **no source gives an output power
+that is safe with the antenna disconnected**. Stress rises with power. A brief
+accidental transmission at +14 dBm is much less likely to harm the PA than
+sustained transmission at +22 dBm, now the default preset (V6), but neither is
+within specification.
+
+#### Receiver input limits, and bench spacing
+
+| Source | Figure |
+|---|---|
+| SX1261/2 datasheet Table 3-3 (Operating Range); Wio-SX1262 datasheet, Operating Range | RF input **≤ 0 dBm** for normal operation |
+| SX1261/2 datasheet Table 3-2 (Absolute Maximum Ratings); Wio-SX1262 datasheet, Absolute Maximum Ratings | RF input **+10 dBm**, beyond which damage is possible |
+
+Two boards close together can exceed those limits. Free-space path loss at
+915 MHz is 20·log10(4πd/λ), with λ = 0.328 m. At +22 dBm, with roughly 2 dBi
+on each antenna, the receiver sees approximately:
+
+| Spacing | Path loss | Received |
+|---|---|---|
+| 10 cm | 11.7 dB | **+14 dBm**: above the absolute maximum |
+| 30 cm | 21.2 dB | **+5 dBm**: above the operating limit |
+| 1 m | 31.7 dB | −6 dBm: fine |
+
+These are estimates, loosest at the shortest range, where the antennas are
+within each other's near field. They fit the desk tests: at +22 dBm the
+gateway's RSSI pegged at 0 dBm, the top of the scale.
+
+**Bench rules:**
+
+- **Attach the antenna before power, every time.**
+- **With no antenna, terminate the port**: a 50 Ω U.FL load or an attenuator,
+  not a low power setting.
+- **At +22 dBm, keep the sensor and the receiver at least 1 m apart**, or
+  lower the sensor's TX power for desk work.
+
+Local copies of all three datasheets (SX1261/2, Wio-SX1262, BQ25101) are kept
+in `datasheets/`, which is gitignored: they are not ours to redistribute.

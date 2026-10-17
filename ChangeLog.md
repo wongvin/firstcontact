@@ -2,6 +2,12 @@
 
 ## 2026-10-17
 
+### docs: SX1262 antenna-mismatch limits and bench spacing
+
+- **HARDWARE.md § Antenna and RF exposure** records what the datasheets say about transmitting without an antenna. The SX1262 is specified only up to a 10:1 VSWR, and its PA has an over-voltage clamp that Zephyr's driver loosens with Semtech's workaround. No source gives an output power that is safe with the antenna disconnected.
+- **Receiver input limits:** 0 dBm for normal operation and +10 dBm absolute maximum. Path-loss estimates at +22 dBm show boards closer than about 30 cm exceed them, so the bench rules are: antenna on before power, a 50 Ω load when there's no antenna, and at least 1 m between boards.
+- Local copies of the SX1261/2, Wio-SX1262 and BQ25101 datasheets go in a gitignored `zephyr/sophon/datasheets/`.
+
 ### docs: LoRa field-test scenarios
 
 - **New `zephyr/sophon/FIELD-TEST.md`:** two field scenarios at the default preset (V6). In the first, the sensor is parked in a vehicle with a roof antenna and the tester walks with the receiver powered from the iPhone. In the second, the sensor is indoors on a computer and the receiver is in a moving vehicle with a roof antenna.
