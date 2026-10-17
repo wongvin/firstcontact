@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-17
+
+### docs: LoRa field-test scenarios
+
+- **New `zephyr/sophon/FIELD-TEST.md`:** two field scenarios at the default preset (V6). In the first, the sensor is parked in a vehicle with a roof antenna and the tester walks with the receiver powered from the iPhone. In the second, the sensor is indoors on a computer and the receiver is in a moving vehicle with a roof antenna.
+- Each scenario has an illustration (`img/field-test-1-on-foot.svg`, `img/field-test-2-by-car.svg`), an equipment list, antenna rules, a pre-flight check, a procedure, what to watch in the app, and a results template.
+- USB power packs are backed by a LiPo on the board, since many packs switch off at low current. The app's battery row shows the sensor's switch to its LiPo; the document covers how to spot a shut-off on the receiver too.
+
+
 ## 2026-10-13
 
 ### feat: Sophon reports whether the battery is charging (#323)
