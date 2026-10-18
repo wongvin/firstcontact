@@ -2,6 +2,11 @@
 
 ## 2026-10-17
 
+### docs: plan for configuring a board from the app (#329)
+
+- **New `zephyr/sophon/CONFIG-PLAN.md`:** the plan for setting a board's role and LoRa parameters from the Sophon app, stored in flash and applied on restart. It lets one unit play transmitter or receiver across the field-test scenarios without swapping hardware.
+- Roles: Auto (detect at boot) by default, or a forced direct, sensor or gateway within what the hardware supports. Storage: Zephyr settings on an 8 KB partition, with 8 KB reserved. Recovery: Restore defaults from the app, plus an automatic boot-loop guard. App: a Config characteristic `C6560007`, sensors found by a second scan, and a Configuration section. Not yet approved for implementation.
+
 ### docs: SX1262 antenna-mismatch limits and bench spacing
 
 - **HARDWARE.md § Antenna and RF exposure** records what the datasheets say about transmitting without an antenna. The SX1262 is specified only up to a 10:1 VSWR, and its PA has an over-voltage clamp that Zephyr's driver loosens with Semtech's workaround. No source gives an output power that is safe with the antenna disconnected.
