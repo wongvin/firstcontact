@@ -2,6 +2,12 @@
 
 ## 2026-10-18
 
+### fix: walk test records every window with the phone locked (#331)
+
+- **The Sophon app now declares the `bluetooth-central` background mode.** A walk-test recording's location session kept the app running in the background, but iOS held back the gateway's LoRa Link notifies until the phone was unlocked. The 2026-10-18 walk recorded only 127 of 364 windows.
+- On the bench, a locked phone recorded 2 of about 41 windows before the fix, and 92 of 92 over 15 minutes after it, locked and unlocked.
+- Comments in `WalkTestRecorder` and `SophonDevice`, and the iOS README, no longer say the location session keeps notifies arriving.
+
 ### feat: configure a board's role and LoRa settings from the app (#329)
 
 - **The app can set a board's role** (Auto, direct, sensor or gateway) **and its LoRa preset, frequency, TX power and peer.** The board stores them in flash and applies them on restart, so one unit can be the transmitter or the receiver in the field tests without swapping hardware. Auto, the default, picks the role from the hardware at every boot, as before. A board only accepts roles its hardware supports: a sensor needs an IMU, a gateway a radio.

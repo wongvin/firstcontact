@@ -900,8 +900,10 @@ final class SophonDevice: Identifiable {
                 // throttling, a stall -- where no notification was posted.
                 if wasSuspended || elapsed > Self.interruptionThreshold {
                     // Not loss. The frames were sent; this app was not there to
-                    // receive them — a locked phone suspends the app while the
-                    // BLE link itself stays up, so no disconnect resets anything.
+                    // receive them -- iOS suspended or throttled it while the
+                    // BLE link itself stayed up, so no disconnect resets
+                    // anything. With the `bluetooth-central` background mode
+                    // (#331) a locked phone keeps receiving, so this is rarer.
                     interruptions += 1
                     framesDuringInterruptions += missing
                 } else {

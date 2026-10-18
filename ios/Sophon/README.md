@@ -94,6 +94,12 @@ one-row list; with five it needs no change. Issue #210's views attach to a
 `SophonHub` scans **filtered by service UUID**, which is required — an unfiltered
 scan returns nothing while the app is backgrounded.
 
+**A connected board keeps notifying while the phone is locked** because the app
+declares the `bluetooth-central` background mode (#331). Without it, a walk-test
+recording's location session kept the app running but iOS held back every
+notify until the phone was unlocked: a locked phone recorded 2 of about 41
+LoRa Link windows on the bench.
+
 ## Simulator mode
 
 The app has two modes, chosen from the picker in the navigation bar.
