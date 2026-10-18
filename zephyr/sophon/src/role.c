@@ -24,6 +24,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include "config.h"
 #include "role.h"
 
 LOG_MODULE_REGISTER(sophon_role, LOG_LEVEL_INF);
@@ -49,6 +50,7 @@ static const struct gpio_dt_spec lora_reset = GPIO_DT_SPEC_GET(LORA_NODE, reset_
 static enum sophon_role role = SOPHON_ROLE_DIRECT;
 static bool role_radio;
 static bool role_imu;
+static bool role_forced;
 
 /*
  * The boot-time role line is usually lost: logging is deferred, the backlog is
@@ -140,34 +142,74 @@ release:
 	return present;
 }
 
-enum sophon_role sophon_role_detect(bool imu_ok)
+/* Today's table (#303): what Auto chooses. */
+static enum sophon_role auto_role(bool radio, bool imu_ok)
+{
+	if (!radio) {
+		return SOPHON_ROLE_DIRECT;
+	}
+	/*
+	 * A radio without an IMU is a gateway -- also where a sensor whose IMU
+	 * failed to start ends up, documented in LORA-PROTOCOL.md § Roles rather
+	 * than guessed around here.
+	 */
+	return imu_ok ? SOPHON_ROLE_SENSOR : SOPHON_ROLE_GATEWAY;
+}
+
+enum sophon_role sophon_role_resolve(uint8_t override, bool imu_ok)
 {
 	bool radio = radio_present();
+	enum sophon_role want;
 
-	if (radio) {
+	switch (override) {
+	case SOPHON_CONFIG_ROLE_DIRECT:
+		want = SOPHON_ROLE_DIRECT;
+		role_forced = true;
+		break;
+	case SOPHON_CONFIG_ROLE_GATEWAY:
+		want = SOPHON_ROLE_GATEWAY;
+		role_forced = radio;
+		break;
+	case SOPHON_CONFIG_ROLE_SENSOR:
+		want = SOPHON_ROLE_SENSOR;
+		role_forced = radio && imu_ok;
+		break;
+	default:
+		want = auto_role(radio, imu_ok);
+		role_forced = false;
+		break;
+	}
+
+	if (override != SOPHON_CONFIG_ROLE_AUTO && !role_forced) {
+		/*
+		 * Writes are validated against the hardware, so this means the
+		 * hardware changed since the role was set: a Wio removed, or an IMU
+		 * that no longer starts. Run as Auto rather than as a role the board
+		 * cannot do (#329).
+		 */
+		want = auto_role(radio, imu_ok);
+		LOG_WRN("stored role %u needs hardware this board lacks (radio %s, IMU %s) -- "
+			"running as Auto",
+			override, radio ? "yes" : "no", imu_ok ? "yes" : "no");
+	}
+
+	/* A direct board never starts the radio, even one that answered. */
+	if (radio && want != SOPHON_ROLE_DIRECT) {
 		int err = device_init(lora_dev);
 
 		if (err) {
 			LOG_ERR("radio answered but its driver failed to start (%d)", err);
 			radio = false;
+			want = SOPHON_ROLE_DIRECT;
+			role_forced = override == SOPHON_CONFIG_ROLE_DIRECT;
 		}
 	}
 
-	if (!radio) {
-		role = SOPHON_ROLE_DIRECT;
-	} else if (imu_ok) {
-		role = SOPHON_ROLE_SENSOR;
-	} else {
-		/*
-		 * Also where a sensor whose IMU failed to start ends up -- documented
-		 * in LORA-PROTOCOL.md § Roles rather than guessed around here.
-		 */
-		role = SOPHON_ROLE_GATEWAY;
-	}
-
+	role = want;
 	role_radio = radio;
 	role_imu = imu_ok;
-	LOG_INF("role: %s (radio %s, IMU %s)", sophon_role_name(role), radio ? "yes" : "no",
+	LOG_INF("role: %s%s (radio %s, IMU %s)", sophon_role_name(role),
+		role_forced ? ", set from the app" : "", radio ? "yes" : "no",
 		imu_ok ? "yes" : "no");
 	(void)k_work_schedule(&role_relog_work, K_MSEC(ROLE_RELOG_DELAY_MS));
 	return role;
@@ -176,6 +218,16 @@ enum sophon_role sophon_role_detect(bool imu_ok)
 enum sophon_role sophon_role(void)
 {
 	return role;
+}
+
+bool sophon_role_radio(void)
+{
+	return role_radio;
+}
+
+bool sophon_role_forced(void)
+{
+	return role_forced;
 }
 
 const char *sophon_role_name(enum sophon_role r)

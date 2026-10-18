@@ -28,6 +28,7 @@ target_sources(app PRIVATE
   src/main.c
   src/battery.c
   src/ble.c
+  src/config.c
   src/ident.c
   src/imu.c
   src/lora_codec.c

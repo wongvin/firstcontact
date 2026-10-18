@@ -658,6 +658,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkLoRaLink()
         checkUptimeFormat()
         checkBattery()
+        checkConfig()
     }
 
     private static func checkMotionFrame() {

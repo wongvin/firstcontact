@@ -27,6 +27,7 @@
 #include "battery.h"
 #include "ble.h"
 #include "ident.h"
+#include "config.h"
 #include "lora_codec.h"
 #include "lora_link.h"
 #include "lora_presets.h"
@@ -54,15 +55,23 @@ static const struct lora_preset *preset;
 /* A seq jump at least this large is a sensor restart, not loss. */
 #define SEQ_RESYNC_GAP 1024
 
+/* The preset's TX power, unless the stored config overrides it (#329). */
+static int8_t tx_dbm(void)
+{
+	int8_t override = sophon_config_tx_override();
+
+	return override != SOPHON_CONFIG_TX_DEFAULT ? override : preset->tx_dbm;
+}
+
 static int configure(bool tx)
 {
 	struct lora_modem_config cfg = {
-		.frequency = CONFIG_SOPHON_LORA_FREQ_HZ,
+		.frequency = sophon_config_freq_hz(),
 		.bandwidth = BW_500_KHZ,
 		.datarate = (enum lora_datarate)preset->sf,
 		.coding_rate = (enum lora_coding_rate)preset->cr,
 		.preamble_len = LORA_PREAMBLE_LEN,
-		.tx_power = preset->tx_dbm,
+		.tx_power = tx_dbm(),
 		.tx = tx,
 		.iq_inverted = false,
 		.public_network = false, /* the private sync word */
@@ -227,7 +236,13 @@ static bool record_valid;
 static uint8_t record_window;
 static int64_t last_rx_ms = -1; /* any packet, good or bad */
 
+/* From the stored config at start (#329); 0 locks onto the first sensor heard. */
 static uint16_t peer_id = CONFIG_SOPHON_LORA_PEER_ID;
+
+uint16_t lora_link_peer_id(void)
+{
+	return peer_id;
+}
 
 /*
  * DIO1 WATCHDOG -- recovering a lost radio interrupt.
@@ -521,6 +536,7 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 	}
 
 	preset = lora_preset_selected();
+	peer_id = sophon_config_boot()->peer_id;
 	link_role = role;
 
 	/*
@@ -540,8 +556,8 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 	LOG_INF("preset %s: SF%u BW%u CR4/%u k=%u %s %+d dBm, %u.%03u MHz; "
 		"full packet %u B = %u ms on air",
 		preset->name, preset->sf, LORA_BANDWIDTH_KHZ, 4 + preset->cr, preset->k,
-		preset->format == LORA_FORMAT_V1 ? "v1" : "v2", preset->tx_dbm,
-		CONFIG_SOPHON_LORA_FREQ_HZ / 1000000, (CONFIG_SOPHON_LORA_FREQ_HZ / 1000) % 1000,
+		preset->format == LORA_FORMAT_V1 ? "v1" : "v2", tx_dbm(),
+		sophon_config_freq_hz() / 1000000, (sophon_config_freq_hz() / 1000) % 1000,
 		lora_preset_full_len(preset), lora_airtime(lora_dev, lora_preset_full_len(preset)));
 
 	if (role == SOPHON_ROLE_SENSOR) {

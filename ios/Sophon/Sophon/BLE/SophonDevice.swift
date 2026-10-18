@@ -587,6 +587,45 @@ final class SophonDevice: Identifiable {
     /// board from #309 on has it; only a gateway ever fills it.
     var offersLoRaLink: Bool?
 
+    /// Whether the board has the Config characteristic (#329); nil until
+    /// characteristics are discovered. Latched like the other `offers*`.
+    var offersConfig: Bool?
+
+    /// The board's config as last read: stored, running, and why (#329). Nil
+    /// until read in this session.
+    var config: ConfigState?
+
+    /// A config write in flight, and the error from the last one, if it failed.
+    var configWritePending = false
+    var configWriteError: String?
+    /// Whether the write in flight asked the board to restart, which decides
+    /// what success means: a re-read, or waiting for the reconnect.
+    @ObservationIgnored var configWriteRestarts = false
+
+    /// A board in the LoRa sensor role (#329): it advertises the SMP service but
+    /// not the Sophon one, or its config read says so. Listed under Sensors and
+    /// never auto-connected -- a board takes one connection, and holding a
+    /// sensor's would block its OTA. Kept apart from `isReleasedByUser`, which
+    /// is the user's own choice and drives the duplicate-reporting scan (#235).
+    var advertisesAsSensor = false
+
+    /// The user tapped Connect on this sensor, to configure it. Until then the
+    /// hub neither connects to it nor keeps a link to it.
+    @ObservationIgnored var sensorSessionRequested = false
+
+    /// A write asked this board to restart into the sensor role, so the
+    /// disconnect that follows must not be re-armed: the board comes back as a
+    /// sensor, under Sensors.
+    @ObservationIgnored var expectingSensorRestart = false
+
+    /// The config last written without a restart, checked against the next
+    /// read: the board acknowledges a write before its flash save, so a read
+    /// too soon can still show the old one.
+    @ObservationIgnored var configAwaitingStore: SophonConfig?
+
+    /// The config read failed: an answer, not still loading.
+    var configReadFailed = false
+
     /// The latest LoRa Link record, or nil until a gateway sends one. Nil on a
     /// direct board for good, which is what keeps the LoRa section off screen
     /// there. Session-scoped: cleared by `resetLinkStats()`.
@@ -950,6 +989,12 @@ final class SophonDevice: Identifiable {
     /// just happened survives on screen for reading.
     func endSession() {
         hasSession = false
+        // Per-connection state, cleared when the connection ends rather than
+        // when the next one begins (#329 review): a write in flight when the
+        // link drops never completes, and a board that comes back as a sensor
+        // may not reconnect at all.
+        configWritePending = false
+        configAwaitingStore = nil
     }
 
     /// Clears everything scoped to **one session**, leaving advertisement-scoped
@@ -967,6 +1012,13 @@ final class SophonDevice: Identifiable {
     /// the connection is older than the session.
     func resetLinkStats() {
         connectedAt = Date()
+        // A restart applies the stored config, so a value read before it is
+        // about a board that no longer exists. Re-read at session start.
+        config = nil
+        configWritePending = false
+        configWriteError = nil
+        configReadFailed = false
+        configAwaitingStore = nil
         framesReceived = 0
         seqGaps = 0
         interruptions = 0

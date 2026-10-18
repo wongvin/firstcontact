@@ -50,7 +50,7 @@ static const uint8_t mcuboot_blob[] = {
 #define UF2_WINDOW_END 0x0EC000U /* top of what the UF2 bootloader accepts */
 #define FLASH_SECTOR   0x001000U
 #define MCUBOOT_REGION 0x00C000U /* 0x0 up to slot0: MBR + SoftDevice, in layout A */
-#define STORAGE_BASE   0x0FC000U /* slot1 ends here; storage runs to 0x100000 */
+#define STORAGE_BASE   0x0FC000U /* slot1 ends here; settings + reserved run to 0x100000 */
 
 /*
  * Where the stub TLV trailer for slot0 goes: the last sector before the
@@ -493,11 +493,12 @@ static int step5_stub_primary_slot(void)
 }
 
 /*
- * Step 5b. The storage partition, which nothing currently uses.
+ * Step 5b. The 16 KB above slot1: settings_partition (0xFC000, the config the
+ * app writes, #329) and reserved_partition (0xFE000).
  *
- * Not required. It is erased anyway because the first time settings storage is
- * enabled it would otherwise meet flash that is neither erased nor a valid
- * structure -- a latent trap, for about 0.4 s now.
+ * Erased because the app's settings must start on flash that is either erased
+ * or a valid NVS structure, never whatever the UF2 bootloader left there --
+ * about 0.4 s. A migrating board has no Sophon config to lose.
  */
 static void step5b_erase_storage(void)
 {
@@ -508,7 +509,9 @@ static void step5b_erase_storage(void)
 	int rc = flash_erase(flash_dev, STORAGE_BASE, len);
 
 	if (rc) {
-		LOG_WRN("  returned %d -- harmless, nothing uses it yet", rc);
+		LOG_WRN("  returned %d -- erase 0x%06X-0x100000 over SWD before relying on "
+			"stored settings",
+			rc, (unsigned int)STORAGE_BASE);
 	}
 }
 

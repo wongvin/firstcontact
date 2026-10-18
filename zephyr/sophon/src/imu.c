@@ -251,6 +251,11 @@ static void watchdog_timer_expiry(struct k_timer *timer)
 
 static K_TIMER_DEFINE(watchdog_timer, watchdog_timer_expiry, NULL);
 
+bool sophon_imu_present(void)
+{
+	return device_is_ready(imu);
+}
+
 int sophon_imu_init(sophon_imu_cb_t cb)
 {
 	int err;

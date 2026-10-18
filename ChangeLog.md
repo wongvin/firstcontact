@@ -1,6 +1,27 @@
 # Changelog
 
+## 2026-10-18
+
+### feat: configure a board's role and LoRa settings from the app (#329)
+
+- **The app can set a board's role** (Auto, direct, sensor or gateway) **and its LoRa preset, frequency, TX power and peer.** The board stores them in flash and applies them on restart, so one unit can be the transmitter or the receiver in the field tests without swapping hardware. Auto, the default, picks the role from the hardware at every boot, as before. A board only accepts roles its hardware supports: a sensor needs an IMU, a gateway a radio.
+- **Firmware 2.28.0:**
+  - new Config characteristic `C6560007` (`src/config.c`), with a 12-byte write and a 20-byte read;
+  - stored with Zephyr settings on NVS, in a new 8 KB `settings_partition`, with 8 KB reserved beside it;
+  - a Sense Plus forced to gateway leaves its IMU unarmed;
+  - a boot-loop guard ignores the stored config after three failed boots in a row.
+- **App:**
+  - a Configuration section and editor, the app's first write;
+  - boards in the sensor role found by also scanning for the SMP service, and listed under Sensors without auto-connecting.
+- PROTOCOL.md § Config frame, LORA-PROTOCOL.md and README.md document it; FIELD-TEST.md says how to set up each scenario, and BOOTLOADER.md's memory map shows the split storage area.
+
 ## 2026-10-17
+
+
+### docs: plan for configuring a board from the app (#329)
+
+- **New `zephyr/sophon/CONFIG-PLAN.md`:** the plan for setting a board's role and LoRa parameters from the Sophon app, stored in flash and applied on restart. It lets one unit play transmitter or receiver across the field-test scenarios without swapping hardware.
+- Roles: Auto (detect at boot) by default, or a forced direct, sensor or gateway within what the hardware supports. Storage: Zephyr settings on an 8 KB partition, with 8 KB reserved. Recovery: Restore defaults from the app, plus an automatic boot-loop guard. App: a Config characteristic `C6560007`, sensors found by a second scan, and a Configuration section. Not yet approved for implementation.
 
 ### docs: SX1262 antenna-mismatch limits and bench spacing
 
