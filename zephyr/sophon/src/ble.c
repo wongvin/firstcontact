@@ -16,6 +16,7 @@
 
 #include "battery.h"
 #include "ble.h"
+#include "config.h"
 #include "ident.h"
 #include "lora_link.h"
 #include "role.h"
@@ -36,7 +37,9 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
  *   Motion Data: C6560002-84D5-4DC2-8C1E-4B4EB2337CE4  (notify)
  *   TX Stats:    C6560003-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
  *   Link Params: C6560004-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
- *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read)
+ *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read, notify)
+ *   LoRa Link:   C6560006-84D5-4DC2-8C1E-4B4EB2337CE4  (read, notify)
+ *   Config:      C6560007-84D5-4DC2-8C1E-4B4EB2337CE4  (read, write)
  */
 /*
  * Whose battery the Battery characteristic reports. A gateway has a pack of its
@@ -65,6 +68,7 @@ static void read_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
 	BT_UUID_128_ENCODE(0xC6560004, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_BATTERY   BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_LORA_LINK BT_UUID_128_ENCODE(0xC6560006, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_CONFIG    BT_UUID_128_ENCODE(0xC6560007, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
 static const struct bt_uuid_128 sophon_service_uuid = BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
 static const struct bt_uuid_128 sophon_motion_uuid = BT_UUID_INIT_128(SOPHON_UUID_MOTION);
@@ -72,6 +76,7 @@ static const struct bt_uuid_128 sophon_stats_uuid = BT_UUID_INIT_128(SOPHON_UUID
 static const struct bt_uuid_128 sophon_link_params_uuid = BT_UUID_INIT_128(SOPHON_UUID_LINK_PARAMS);
 static const struct bt_uuid_128 sophon_battery_uuid = BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
 static const struct bt_uuid_128 sophon_lora_link_uuid = BT_UUID_INIT_128(SOPHON_UUID_LORA_LINK);
+static const struct bt_uuid_128 sophon_config_uuid = BT_UUID_INIT_128(SOPHON_UUID_CONFIG);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -185,6 +190,41 @@ static ssize_t lora_link_read(struct bt_conn *conn, const struct bt_gatt_attr *a
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
 }
 
+/*
+ * Config (#329): the role override and LoRa parameters, applied at the next
+ * boot. PROTOCOL.md § Config frame. The write is validated here, on the BT RX
+ * thread, so a bad value is refused with an ATT error before anything is
+ * queued; the flash save, and any restart, run later on the slow work queue.
+ */
+static ssize_t config_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			   uint16_t len, uint16_t offset)
+{
+	uint8_t wire[SOPHON_CONFIG_READ_SIZE];
+
+	sophon_config_read(wire);
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
+}
+
+static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+			    uint16_t len, uint16_t offset, uint8_t flags)
+{
+	uint8_t err;
+
+	ARG_UNUSED(conn);
+	ARG_UNUSED(attr);
+	ARG_UNUSED(flags);
+
+	if (offset != 0) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+	err = sophon_config_write(buf, len);
+	if (err) {
+		LOG_WRN("config write refused (ATT 0x%02x)", err);
+		return BT_GATT_ERR(err);
+	}
+	return len;
+}
+
 BT_GATT_SERVICE_DEFINE(
 	sophon_svc, BT_GATT_PRIMARY_SERVICE(&sophon_service_uuid),
 	BT_GATT_CHARACTERISTIC(&sophon_motion_uuid.uuid, BT_GATT_CHRC_NOTIFY,
@@ -215,7 +255,11 @@ BT_GATT_SERVICE_DEFINE(
 	/* Notify once per 10 s window; read for the latest on (re)connect. */
 	BT_GATT_CHARACTERISTIC(&sophon_lora_link_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
 			       BT_GATT_PERM_READ, lora_link_read, NULL, NULL),
-	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
+	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	/* Every role, like LoRa Link: the table is static. Unauthenticated, like SMP. */
+	BT_GATT_CHARACTERISTIC(&sophon_config_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE, config_read, config_write,
+			       NULL), );
 
 /*
  * The advertisement and the scan response are SEPARATE 31-byte budgets, not one

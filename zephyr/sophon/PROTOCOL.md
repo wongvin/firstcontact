@@ -24,6 +24,7 @@ following the Nordic UART convention.
 | Link Params characteristic (read) | `C6560004-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Battery characteristic (read) | `C6560005-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | LoRa Link characteristic (read, notify) | `C6560006-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| Config characteristic (read, write with response) | `C6560007-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -416,6 +417,97 @@ CSV carries it as `margin_min_db`.
 | 50–100 m | 81.9% | +11.6 dB | −1.5 dB |
 | 100–200 m | 48.6% | +4.8 dB | −2.5 dB |
 
+## Config frame
+
+The Config characteristic (#329) sets a board's **role** and its **LoRa
+parameters** from the app. The board stores them in flash and applies them at
+its **next restart**, which a write can request. A write never changes what is
+running. Present on every board, in every role. Design: CONFIG-PLAN.md.
+
+### Fields
+
+The same nine bytes appear in the write and twice in the read, little-endian:
+
+| Offset | Size | Type | Field | Values |
+|---|---|---|---|---|
+| 0 | 1 | `u8` | `role` | 0 **auto** · 1 direct · 2 sensor · 3 gateway |
+| 1 | 1 | `u8` | `preset` | 0–8 (V0…V6b, LORA-PROTOCOL.md § Presets) · `0xFF` = the build's default |
+| 2 | 1 | `i8` | `tx_dbm` | −9…+22 · `0x7F` = the preset's own power |
+| 3 | 4 | `u32` | `freq_hz` | 902 250 000…927 750 000 · 0 = the build's default |
+| 7 | 2 | `u16` | `peer_id` | the sensor id a gateway accepts · 0 = lock onto the first heard |
+
+**Auto** is no override: the board picks its role at every boot from its
+hardware, as LORA-PROTOCOL.md § Roles describes. It is the default. The other
+roles override detection until changed.
+
+### Write: 12 bytes, with response
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | `version`, 1 |
+| 1 | 9 | the fields above |
+| 10 | 1 | `flags`: bit 0 **restart** (reboot once saved) · bit 1 **defaults** (erase the stored config; the fields are ignored) · other bits 0 |
+| 11 | 1 | reserved, 0 |
+
+The board validates the write on receipt. Nothing is stored unless all of it is
+valid. It answers with an ATT error and stores nothing for:
+- a length other than 12: `0x0D` (invalid attribute value length);
+- an unknown version or flag, a non-zero reserved byte, or a field out of range: `0x13` (value not allowed);
+- a role the hardware can't run, also `0x13`: **sensor** needs a radio and an IMU, **gateway** needs a radio.
+
+The save runs after the response, off the Bluetooth thread. With **restart**,
+the board reboots about 500 ms after saving, so the response goes out first. The
+link drops, and the app reconnects to a board running the new config.
+
+Core Bluetooth on macOS doesn't name ATT `0x13`; it reports a generic error. A
+client should treat any write error as "refused", then re-read.
+
+### Read: 20 bytes
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 1 | `version`, 1 |
+| 1 | 9 | **stored**: what flash holds, the config the next restart runs |
+| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm` and `freq_hz` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto |
+| 19 | 1 | `status` |
+
+| `status` bit | Meaning |
+|---|---|
+| 0 | radio present: the Wio-SX1262 answered |
+| 1 | IMU present |
+| 2 | **restart pending**: stored differs from what is running |
+| 3 | a stored role override is in effect. Clear with a non-auto stored role means the hardware no longer supports it, and the board is running as auto |
+| 4 | this boot runs a config from flash; clear means the build's defaults |
+| 5 | **boot-loop guard tripped**: after three boots in a row that never came up, the stored config is ignored for this boot. It is kept, not erased |
+
+**Worked example** (the app's DEBUG self-check uses this vector): a gateway
+forced from the app, preset V3, +14 dBm, 915.5 MHz, peer `0x86F0`, nothing
+pending:
+
+```
+01                              version
+03 02 0E E0 6B 91 36 F0 86      stored: gateway, V3, +14 dBm, 915 500 000 Hz, 86F0
+03 02 0E E0 6B 91 36 F0 86      active: the same
+19                              status: radio | forced | from flash
+```
+
+Writing that config with **restart** is `01 03 02 0E E0 6B 91 36 F0 86 01 00`.
+**Restore defaults** is `01 00 FF 7F 00 00 00 00 00 00 03 00`.
+
+### Storage and recovery
+
+- **Storage:** the config is a Zephyr settings record, `sophon/cfg`, on NVS in
+  `settings_partition` (0xFC000, 8 KB). It survives power-off, OTA updates and
+  SWD reflashing (`flash-swd.sh` leaves 0xFC000–0xFFFFF alone). BOOTLOADER.md §
+  Memory map has the layout.
+- **Bluetooth stays reachable.** No valid stored config takes the board off
+  Bluetooth. A board set to **sensor** advertises SMP and its name, not the
+  Sophon service, so the app also scans for SMP and lists such boards under
+  Sensors.
+- **Recovery:** Restore defaults from the app, or the boot-loop guard, a
+  `GPREGRET2` counter that lasts across resets but not power-off. As a last
+  resort, erase the settings partition over SWD.
+
 ## Rates
 
 | Stage | Notify rate | Axis fields |
@@ -700,6 +792,12 @@ its keys while the phone still believes it is bonded, which requires a manual
 
 Full reasoning, and the shape of the change if it is ever wanted, is in
 UPDATED-PLAN.md.
+
+### So is the Config characteristic (#329)
+
+Anyone in range can write a board's Config, as with SMP: change its role, its
+LoRa parameters, or restart it. Recorded here, not addressed. Pairing would
+cover both.
 
 ### The management transport is unauthenticated too (#271)
 

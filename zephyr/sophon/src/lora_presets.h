@@ -30,7 +30,7 @@ struct lora_preset {
 /* The preset for this id, or NULL. */
 const struct lora_preset *lora_preset_get(uint8_t id);
 
-/* The one selected by CONFIG_SOPHON_LORA_PRESET. */
+/* The one this boot uses: the stored config's (#329), else CONFIG_SOPHON_LORA_PRESET. */
 const struct lora_preset *lora_preset_selected(void);
 
 /* Payload length of a full motion-only packet for this preset. */

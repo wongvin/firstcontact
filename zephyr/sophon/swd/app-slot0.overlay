@@ -17,5 +17,7 @@
 / {
 	chosen {
 		zephyr,code-partition = &slot0_partition;
+		/* The config record (#329). App only: MCUboot keeps no settings. */
+		zephyr,settings-partition = &settings_partition;
 	};
 };

@@ -94,12 +94,39 @@ Still bench-test the pack: leave it powering the board, LiPo fitted, for
 15 minutes, and check it's still supplying power at the end. Use a pack with a
 low-current or "always on" mode if it has one.
 
+## Configuring the units for each scenario
+
+Each unit's role can be set from the app (#329; README.md § Configuring a
+board), so one set of hardware covers both scenarios without swapping boards or
+reflashing:
+
+| Scenario | Vehicle unit (Sense Plus + Wio) | Other unit |
+|---|---|---|
+| 1 | **Auto**, which is a sensor | **Auto** on a base XIAO + Wio (a gateway), or **Gateway** on a Sense Plus + Wio |
+| 2 | **Gateway**: its IMU is left unused | **Sensor**: needs a **Sense Plus + Wio**; a base XIAO can't be a sensor |
+
+So switching between both scenarios from the app alone takes **two Sense Plus +
+Wio units**. With one Sense Plus and one base XIAO, scenario 2 needs the boards
+swapped on their carriers.
+
+To change a unit:
+
+1. Open it in the app: a gateway or direct board under its name, a sensor under
+   **Sensors** (tap it, then **Connect**).
+2. **Configuration › Edit…**, pick the role, then **Save and restart**.
+3. A unit that becomes a sensor reappears under **Sensors**; one that stops
+   being a sensor reconnects in the main list.
+
+Leave the preset and frequency at their defaults on both units, or change them
+on **both**: the link needs the same spreading factor and frequency at each end.
+
 ## Before going out
 
-1. **Firmware:** both boards on the same release, with V6 as the default
-   (2.19.0 or later; 2.27.0 at the time of writing). Check in the app's Device
+1. **Firmware:** both boards on the same release, with V6 as the default, and
+   2.28.0 or later to set roles from the app. Check in the app's Device
    section, or with `smpmgr`.
 2. **Bench check:** power both, open the app, and connect to the receiver.
+   Check each unit's **Configuration** shows the role this scenario needs.
    The LoRa link section should show:
    - **Sensor:** the sensor's `Sophon-XXXX`;
    - **Preset:** `V6 · SF7 · 500 kHz`;

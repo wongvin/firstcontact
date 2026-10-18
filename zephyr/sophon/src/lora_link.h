@@ -44,4 +44,10 @@ bool lora_link_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags);
 #define LORA_LINK_RECORD_SIZE 20
 bool lora_link_record(uint8_t out[LORA_LINK_RECORD_SIZE]);
 
+/*
+ * Gateway: the sensor id accepted -- the configured one, or the one locked onto
+ * when that is 0. 0 until a sensor has been heard. For the Config read (#329).
+ */
+uint16_t lora_link_peer_id(void);
+
 #endif /* SOPHON_LORA_LINK_H */

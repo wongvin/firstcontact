@@ -28,7 +28,8 @@ acknowledgement and no retransmission; a lost packet is a visible gap in `seq`
 
 ## Roles
 
-One image; the role is chosen at boot from what is attached.
+One image. By default (**Auto**) the role is chosen at boot from what is
+attached:
 
 | Radio present | IMU started | Role |
 |---|---|---|
@@ -44,6 +45,28 @@ One image; the role is chosen at boot from what is attached.
   radio is present, and only then is the driver initialised.
 - **Known edge case:** a sensor whose IMU fails to start comes up as a gateway.
 - The role is logged at boot.
+
+### Setting the role from the app (#329)
+
+The app can store a role override on a board (PROTOCOL.md § Config frame); it
+applies at the next restart. **Auto**, the default, is the table above, run at
+every boot. An override holds only if the hardware supports it:
+
+| Hardware | Roles it accepts |
+|---|---|
+| Wio + IMU (Sense Plus on a Wio carrier) | auto (sensor), direct, sensor, gateway |
+| Wio, no IMU (base XIAO on a Wio carrier) | auto (gateway), direct, gateway |
+| no Wio | auto (direct), direct |
+
+- **A sensor needs an IMU.** A board without one is refused the sensor role,
+  rather than sending motion it doesn't have.
+- **A Sense Plus forced to gateway leaves its IMU unarmed.** Its Motion stream is
+  the sensor's, relayed. Local samples would interleave a second `seq` space
+  into it.
+- **Forced direct** never starts the radio, even with a Wio fitted.
+- **If the hardware changes** after a role was stored (a Wio removed, an IMU
+  that no longer starts), the board runs as Auto and says so in the Config
+  read's status.
 
 ## Radio parameters
 
@@ -82,7 +105,17 @@ doesn't have, and is deferred to #304, where it takes the next free id.
 
 **Default:** V6, V3 at +22 dBm (#321), until the walk test picks one (*pending*;
 see § Chosen preset). Set by `SOPHON_LORA_PRESET`. Both ends are built from the same
-image, so they always agree on it.
+image, so by default they agree on it.
+
+**Set from the app (#329):** the preset, frequency, TX power and peer can each be
+overridden per board through the Config characteristic (PROTOCOL.md § Config
+frame), applied at the next restart. **Both ends must then agree** on the
+spreading factor and the frequency: the gateway decodes any coding rate, packet
+format and `k`, but hears nothing on another SF or channel. Change the sensor
+and the gateway together. Measured at the desk with only the gateway moved
+500 kHz, the link didn't drop cleanly: LQ fell to 8–13% as the off-channel
+signal leaked through, which looks like a weak link rather than a
+misconfiguration.
 
 ## LoRa variables
 

@@ -77,12 +77,41 @@ attached:
   battery. The sensor leaves the Sophon service UUID out of its advertising, so
   the app never lists it. Behind a gateway, the app's **LoRa link** section
   shows the radio link itself (#309).
+- **The role can be overridden from the app** (#329). Auto, the default, is the
+  table above, run at every boot; see § Configuring a board.
 - **Image confirmation:** a direct board and a gateway confirm a trial image on
   their first delivered BLE frame. A sensor, which has no subscriber, confirms
   on its first completed LoRa send.
 - **A board accepts one connection.** With Sophon open on several phones or
   iPads, one of them will hold the board and the others won't see it. Close
   the app on the devices you aren't using, and always before `flash-ota.sh`.
+
+### Configuring a board (#329)
+
+The app's **Configuration** section shows a board's role and LoRa settings: what
+it runs now, and what it will run after a restart. **Edit…** changes them:
+
+- **Role:** Auto (detect from hardware at boot, the default), direct, sensor or
+  gateway, offering only roles the board's hardware supports.
+- **LoRa:** preset, frequency (902.25–927.75 MHz), peer, and a TX power override.
+- **Save** stores the setting; **Save and restart** applies it now; **Restore
+  defaults** erases it and restarts as Auto.
+
+The board keeps the setting in flash (`settings_partition`, 0xFC000), through
+power-off, OTA and SWD reflashing. A board set to **sensor** stops advertising
+the Sophon service. The app lists it under **Sensors** and connects to it only
+when tapped, so it doesn't hold the board's one connection.
+
+**If a stored config crashes the board at boot**, the boot-loop guard runs it on
+defaults after three failed boots in a row, so the app can reach it to restore
+defaults. As a last resort, erase the settings partition over SWD:
+
+```bash
+openocd -f interface/cmsis-dap.cfg -c "transport select swd" -f target/nrf52.cfg \
+  -c "init; halt; flash erase_address 0xFC000 0x2000; reset; exit"
+```
+
+Wire layouts: PROTOCOL.md § Config frame. Design: CONFIG-PLAN.md.
 
 ### The radio link
 
@@ -93,6 +122,10 @@ stands until the walk test chooses one (#313). Both boards are built from
 the same image, so they always agree. The other options are
 `CONFIG_SOPHON_LORA_FREQ_HZ` and `CONFIG_SOPHON_LORA_PEER_ID` (0 = lock onto the
 first sensor heard). All are in the app's `Kconfig`.
+
+**Each can also be set per board from the app** (#329), along with the role.
+The board stores the setting and applies it when it restarts; see § Configuring
+a board.
 
 Both ends log their link every 10 s:
 

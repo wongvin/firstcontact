@@ -20,6 +20,7 @@
 
 #include "battery.h"
 #include "ble.h"
+#include "config.h"
 #include "frame.h"
 #include "imu.h"
 #include "lora_link.h"
@@ -334,9 +335,26 @@ static void stats_timer_expiry(struct k_timer *timer)
 
 static K_TIMER_DEFINE(stats_timer, stats_timer_expiry, NULL);
 
+/*
+ * The boot-loop guard's "this boot came up" (#329): once advertising has run
+ * this long the app can reach the board, so a config that crashes it later is
+ * not the boot-time lockout the guard exists for.
+ */
+#define HEALTHY_AFTER_MS 10000
+
+static void healthy_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	sophon_config_mark_healthy();
+}
+
+static K_WORK_DELAYABLE_DEFINE(healthy_work, healthy_handler);
+
 int main(void)
 {
 	enum sophon_role role;
+	uint8_t override;
+	bool imu_skipped = false;
 	uint32_t tick = 0;
 	int imu_err;
 	int err;
@@ -369,12 +387,41 @@ int main(void)
 	(void)sophon_battery_init();
 
 	/*
+	 * The stored config (#329) comes first: its role decides whether the IMU
+	 * starts at all, and its LoRa values whether the radio sees the right
+	 * preset.
+	 */
+	sophon_config_init();
+	override = sophon_config_boot()->role;
+
+	/*
 	 * A missing IMU is explicitly not fatal. The radio, the GATT table and the
 	 * transmit counters are all still worth having on a board whose sensor did
 	 * not come up.
+	 *
+	 * A board forced to gateway leaves its IMU unarmed (#329). Its Motion
+	 * stream is the sensor's, relayed; local samples would interleave a second
+	 * seq space into it. It still reports whether it has one.
 	 */
-	imu_err = sophon_imu_init(imu_sample);
-	role = sophon_role_detect(imu_err == 0);
+	if (override == SOPHON_CONFIG_ROLE_GATEWAY) {
+		imu_skipped = true;
+		imu_err = sophon_imu_present() ? 0 : -ENODEV;
+	} else {
+		imu_err = sophon_imu_init(imu_sample);
+	}
+	role = sophon_role_resolve(override, imu_err == 0);
+
+	/*
+	 * A forced gateway with no radio falls back to Auto, which on a radio-less
+	 * board is direct: start the IMU it skipped.
+	 */
+	if (imu_skipped && role != SOPHON_ROLE_GATEWAY) {
+		imu_err = sophon_imu_init(imu_sample);
+		imu_skipped = false;
+	}
+	sophon_config_set_hardware(sophon_role_radio(),
+				   imu_skipped ? sophon_imu_present() : imu_err == 0,
+				   sophon_role_forced());
 
 	err = sophon_ble_init();
 	if (err) {
@@ -400,6 +447,8 @@ int main(void)
 		k_timer_start(&fallback_timer, K_MSEC(FALLBACK_NOTIFY_PERIOD_MS),
 			      K_MSEC(FALLBACK_NOTIFY_PERIOD_MS));
 	}
+
+	(void)k_work_schedule(&healthy_work, K_MSEC(HEALTHY_AFTER_MS));
 
 	err = lora_link_start(role, gateway_frame);
 	if (err) {

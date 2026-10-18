@@ -90,34 +90,24 @@ private struct ViewerView: View {
                 Text("Power on a Sophon and it will appear here.")
             }
         } else {
-            List(hub.devices) { device in
-                NavigationLink {
-                    DeviceDetailView(
-                        device: device,
-                        walkTest: hub.walkTest,
-                        onRefresh: { hub.refreshStats(device) },
-                        onToggleConnection: {
-                            if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
-                        },
-                        onScreen: { hub.setDeviceOnScreen($0 ? device.id : nil) }
-                    )
-                } label: {
-                    DeviceRow(device: device)
+            // Two sections (#329): boards the app streams from, and boards in the
+            // LoRa sensor role, which advertise SMP rather than the Sophon
+            // service and are only ever connected on request, to configure them.
+            List {
+                Section {
+                    ForEach(hub.devices.filter { !$0.advertisesAsSensor }) { row($0) }
                 }
-                // A swipe rather than a button in the row: the row IS a
-                // NavigationLink, and an inline button inside one competes with
-                // it for the tap. The detail view carries the visible control;
-                // this is the fast path for switching between boards, which is
-                // where the choice actually gets made (#233).
-                .swipeActions(edge: .trailing) {
-                    if device.isHeld {
-                        Button("Release") { hub.release(device) }.tint(.orange)
-                    } else if !device.isStaleReleased {
-                        // Offered only while the board is actually reachable.
-                        // connect() on iOS never times out, so on a board that has
-                        // gone quiet this would strand the device in .connecting
-                        // with nothing to show for it.
-                        Button("Connect") { hub.reclaim(device) }.tint(.green)
+                let sensors = hub.devices.filter(\.advertisesAsSensor)
+                if !sensors.isEmpty {
+                    Section {
+                        ForEach(sensors) { row($0) }
+                    } header: {
+                        Text("Sensors")
+                    } footer: {
+                        Text("""
+                            Boards sending motion over LoRa. They stream through a gateway, not to this \
+                            phone; connect to one only to configure it, and release it afterwards.
+                            """)
                     }
                 }
             }
@@ -126,6 +116,39 @@ private struct ViewerView: View {
             // detail view is pushed, which is precisely when staleness still needs
             // evaluating.
             .animation(.default, value: hub.devices.count)
+        }
+    }
+
+    private func row(_ device: SophonDevice) -> some View {
+        NavigationLink {
+            DeviceDetailView(
+                device: device,
+                walkTest: hub.walkTest,
+                onRefresh: { hub.refreshStats(device) },
+                onToggleConnection: {
+                    if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
+                },
+                onScreen: { hub.setDeviceOnScreen($0 ? device.id : nil) },
+                onWriteConfig: { hub.writeConfig($0, to: device) }
+            )
+        } label: {
+            DeviceRow(device: device)
+        }
+        // A swipe rather than a button in the row: the row IS a
+        // NavigationLink, and an inline button inside one competes with
+        // it for the tap. The detail view carries the visible control;
+        // this is the fast path for switching between boards, which is
+        // where the choice actually gets made (#233).
+        .swipeActions(edge: .trailing) {
+            if device.isHeld {
+                Button("Release") { hub.release(device) }.tint(.orange)
+            } else if !device.isStaleReleased {
+                // Offered only while the board is actually reachable.
+                // connect() on iOS never times out, so on a board that has
+                // gone quiet this would strand the device in .connecting
+                // with nothing to show for it.
+                Button("Connect") { hub.reclaim(device) }.tint(.green)
+            }
         }
     }
 }
@@ -244,6 +267,8 @@ private struct DeviceDetailView: View {
     let onRefresh: () -> Void
     let onToggleConnection: () -> Void
     let onScreen: (Bool) -> Void
+    /// Sends a config write (#329).
+    let onWriteConfig: (ConfigRequest) -> Void
 
     /// Pops this view off the NavigationStack. Note this needs no `NavigationPath`
     /// and no selection binding — `DismissAction` works on a plain
@@ -262,6 +287,10 @@ private struct DeviceDetailView: View {
     /// narrow split-screen slot correctly gets the phone layout instead of two
     /// columns squeezed into half a screen.
     @Environment(\.horizontalSizeClass) private var sizeClass
+
+    /// The open config editor, if any (#329). Held here, not in ConfigSection,
+    /// so the sheet can hang off the Group rather than off a List section.
+    @State private var configEditing: ConfigSection.EditTarget?
 
     /// How often the Sophon's counters are re-read while this view is on screen.
     ///
@@ -288,6 +317,7 @@ private struct DeviceDetailView: View {
                 HStack(alignment: .top, spacing: 0) {
                     List {
                         linkSection
+                        ConfigSection(device: device) { configEditing = $0 }
                         LoRaLinkSection(device: device, recorder: walkTest)
                         framesSection
                     }
@@ -300,6 +330,7 @@ private struct DeviceDetailView: View {
             } else {
                 List {
                     linkSection
+                    ConfigSection(device: device) { configEditing = $0 }
                     LoRaLinkSection(device: device, recorder: walkTest)
                     framesSection
                     countersSection
@@ -309,6 +340,7 @@ private struct DeviceDetailView: View {
         }
         .navigationTitle(device.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .configEditor(item: $configEditing, device: device, onWrite: onWriteConfig)
         // Tell the hub not to sweep this one while it is being looked at. The
         // back chevron is what releases it, so the row disappears on return to
         // the list rather than out from under the reader (#235).

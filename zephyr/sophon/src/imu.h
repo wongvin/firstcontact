@@ -9,6 +9,7 @@
 #ifndef SOPHON_IMU_H
 #define SOPHON_IMU_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /*
@@ -64,5 +65,12 @@ typedef void (*sophon_imu_cb_t)(const struct sophon_imu_sample *sample);
  * is useful (and debuggable) without an IMU behind it.
  */
 int sophon_imu_init(sophon_imu_cb_t cb);
+
+/*
+ * Whether the sensor is fitted and its driver started, without arming it. For
+ * a board forced to gateway (#329), which must not stream its own samples but
+ * still reports whether it has an IMU.
+ */
+bool sophon_imu_present(void);
 
 #endif /* SOPHON_IMU_H */

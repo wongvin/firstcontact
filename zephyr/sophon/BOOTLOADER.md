@@ -47,7 +47,7 @@ Not to a shared scale; each column is internally proportional only.
                                         (swap via scratch)         (swap in place, in use)
 
 0x100000 ┌──────────────────┐  0x100000 ┌──────────────────┐  0x100000 ┌──────────────────┐
-         │ UF2 bootloader   │           │ storage    16 KB │           │ storage    16 KB │
+         │ UF2 bootloader   │           │ storage    16 KB │           │ set 8K + rsvd 8K │
          │ Adafruit   48 KB │  0x0FC000 ├──────────────────┤  0x0FC000 ├──────────────────┤
 0x0F4000 ├──────────────────┤           │ scratch   120 KB │           │                  │
          │ Storage    32 KB │           │ swap workspace   │           │ slot1 "image-1"  │
@@ -59,13 +59,19 @@ Not to a shared scale; each column is internally proportional only.
          │ Sophon @0x27000  │  0x075000 ├──────────────────┤           │ slot0 "image-0"  │
          │                  │           │ slot0 "image-0"  │           │        480 KB    │
          │                  │           │        420 KB    │           │ signed Sophon    │
-0x027000 ├──────────────────┤           │ signed Sophon    │           │ 169 KB   (34.7%) │
+0x027000 ├──────────────────┤           │ signed Sophon    │           │ 213 KB   (44.8%) │
          │ SoftDevice S140  │  0x00C000 ├──────────────────┤  0x00C000 ├──────────────────┤
          │ v7.3.0    152 KB │           │ mcuboot    48 KB │           │ mcuboot    48 KB │
 0x001000 ├──────────────────┤           │ 39.2 KB  (79.8%) │           │ 39.2 KB  (79.8%) │
          │ Nordic MBR  4 KB │           │                  │           │                  │
 0x000000 └──────────────────┘  0x000000 └──────────────────┘  0x000000 └──────────────────┘
 ```
+
+In column C the top 16 KB is split (#329): **`settings_partition`** at
+0xFC000, 8 KB (2 NVS sectors), holds the config the app writes (PROTOCOL.md §
+Config frame); **`reserved_partition`** at 0xFE000, 8 KB, is unassigned and kept
+erased for a future use. `flash-swd.sh` leaves both alone, and the UF2 installer
+erases both on migration. The image figure is 2.28.0's.
 
 **Column C is what runs today.** Column B is what an earlier revision built: the
 partition table was copied from Zephyr's `nrf52840dk` layout, which is written
@@ -418,7 +424,8 @@ found: slot0_partition`, because the XIAO ships with a UF2 bootloader and needs
 none. Both overlays live in `swd/`.
 
 **`mcuboot-partitions.overlay`** deletes the four stock partitions and defines
-`boot_partition`, `slot0_partition`, `slot1_partition`, `storage_partition`.
+`boot_partition`, `slot0_partition`, `slot1_partition`, and the 16 KB at 0xFC000
+as `settings_partition` plus `reserved_partition` (#329).
 Deleting `boot_partition` is the consequential one — that is the Adafruit
 bootloader's region.
 

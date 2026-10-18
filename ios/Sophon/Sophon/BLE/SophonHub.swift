@@ -30,6 +30,8 @@ final class SophonHub: NSObject {
     private var statsCharacteristics: [UUID: CBCharacteristic] = [:]
     private var linkParamsCharacteristics: [UUID: CBCharacteristic] = [:]
     private var batteryCharacteristics: [UUID: CBCharacteristic] = [:]
+    /// Internal, not private, for `SophonHub+Config.swift` (#329).
+    var configCharacteristics: [UUID: CBCharacteristic] = [:]
     let walkTest = WalkTestRecorder() // #309: hub-owned so a recording outlives the detail view
 
     /// Peripherals that accepted a connection but had no Sophon service behind
@@ -148,6 +150,14 @@ final class SophonHub: NSObject {
     /// this returns and must already be able to see the intent — otherwise it
     /// re-arms the connection being torn down.
     func release(_ device: SophonDevice) {
+        // A sensor (#329) is never held unless asked for, so releasing one just
+        // ends the configuration session. Not via isReleasedByUser, which would
+        // turn on duplicate reporting for as long as the sensor is in range.
+        if device.advertisesAsSensor {
+            device.sensorSessionRequested = false
+            dropConnection(device)
+            return
+        }
         device.isReleasedByUser = true
         // Start the clock now. Nothing has been heard since the release as far as
         // this feature is concerned, and the board is about to stop being ours.
@@ -158,10 +168,17 @@ final class SophonHub: NSObject {
 
     /// Take a released board back, or connect one that was never auto-connected.
     func reclaim(_ device: SophonDevice) {
+        if device.advertisesAsSensor { device.sensorSessionRequested = true }
         device.isReleasedByUser = false
         connect(device)
         // Back to consolidated discovery if nothing else is released.
         applyRadioState()
+    }
+
+    /// Cancel a link without marking the board released (#329): for sensors,
+    /// whose policy is "connect only on request", not the user's release.
+    func dropConnection(_ device: SophonDevice) {
+        central.cancelPeripheralConnection(device.peripheral)
     }
 
     /// Drop a board the app can no longer see, so the list stops implying it is
@@ -178,6 +195,7 @@ final class SophonHub: NSObject {
         statsCharacteristics[device.id] = nil
         linkParamsCharacteristics[device.id] = nil
         batteryCharacteristics[device.id] = nil
+        configCharacteristics[device.id] = nil
         withoutService.remove(device.id)
         log.info("forgot \(device.displayName, privacy: .public)")
         applyRadioState()
@@ -373,8 +391,11 @@ final class SophonHub: NSObject {
                 // peripheral must keep the service UUID in the advertisement, not
                 // the scan response.
                 central.stopScan()
+                // SMP as well (#329): a board in the LoRa sensor role advertises
+                // that and its name, not the Sophon service. didDiscover keeps
+                // only Sophon-named ones and never auto-connects them.
                 central.scanForPeripherals(
-                    withServices: [SophonProtocol.serviceUUID],
+                    withServices: [SophonProtocol.serviceUUID, SophonProtocol.smpServiceUUID],
                     options: [CBCentralManagerScanOptionAllowDuplicatesKey: wantDuplicates]
                 )
                 scanningWithDuplicates = wantDuplicates
@@ -494,7 +515,18 @@ extension SophonHub: CBCentralManagerDelegate {
         let keys = advertisementData.keys.sorted().joined(separator: ", ")
         let keySet = Set(advertisementData.keys)
 
+        // Which of the two scanned services this advertisement carries (#329).
+        // Only the SMP one, from a Sophon-named board, is a LoRa sensor; any
+        // other SMP device in range is not ours and is ignored.
+        let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let advertisesSophon = services.contains(SophonProtocol.serviceUUID)
+        let advertisesSMP = services.contains(SophonProtocol.smpServiceUUID)
+
         Task { @MainActor in
+            let sensorAdvert = !advertisesSophon && advertisesSMP
+            let named = (advertisedName ?? "").hasPrefix("Sophon-")
+            if sensorAdvert && !named && self.byID[peripheral.identifier] == nil { return }
+
             let device: SophonDevice
             if let known = self.byID[peripheral.identifier] {
                 device = known
@@ -531,6 +563,7 @@ extension SophonHub: CBCentralManagerDelegate {
 
             if let identity { device.identity = identity }
             if let txPower { device.txPower = txPower }
+            self.noteRoleAdvertised(device, sensor: sensorAdvert, sophon: advertisesSophon)
 
             // Before the released-guard below, deliberately: this is the only
             // evidence that a released board is still on the air and reclaimable.
@@ -551,6 +584,9 @@ extension SophonHub: CBCentralManagerDelegate {
             // undone by the next advertisement, about a second later (#233).
             // Per-device: releasing one board must not stop another connecting.
             guard !device.isReleasedByUser else { return }
+
+            // Nor a LoRa sensor, unless the user asked to configure it (#329).
+            guard !device.advertisesAsSensor || device.sensorSessionRequested else { return }
 
             if case .discovered = device.state {
                 self.connect(device)
@@ -624,6 +660,7 @@ extension SophonHub: CBCentralManagerDelegate {
             // round trip before the map is rewritten.
             self.batteryCharacteristics[peripheral.identifier] = nil
             self.linkParamsCharacteristics[peripheral.identifier] = nil
+            self.configCharacteristics[peripheral.identifier] = nil
 
             // Do not re-arm a link that was dropped on purpose. Without this,
             // suspend()'s cancels each bounce straight back into a connect() and
@@ -645,6 +682,16 @@ extension SophonHub: CBCentralManagerDelegate {
                 self.log.info("released \(device.displayName, privacy: .public), not re-arming")
                 return
             }
+
+            // Nor a board that is, or is restarting into, a LoRa sensor, unless
+            // the user is configuring it (#329). Re-arming here is what would
+            // take the board's one connection the moment it advertises.
+            if device.expectingSensorRestart {
+                device.expectingSensorRestart = false
+                device.advertisesAsSensor = true
+                return
+            }
+            if device.advertisesAsSensor, !device.sensorSessionRequested { return }
 
             // Re-arm. The scan is still running, so walking back into range
             // rediscovers and reconnects without a relaunch.
@@ -706,7 +753,8 @@ extension SophonHub: CBPeripheralDelegate {
                  SophonProtocol.statsCharacteristicUUID,
                  SophonProtocol.linkParamsCharacteristicUUID,
                  SophonProtocol.batteryCharacteristicUUID,
-                 SophonProtocol.loraLinkCharacteristicUUID],
+                 SophonProtocol.loraLinkCharacteristicUUID,
+                 SophonProtocol.configCharacteristicUUID],
                 for: sophon)
         }
     }
@@ -722,25 +770,7 @@ extension SophonHub: CBPeripheralDelegate {
         MainActor.assumeIsolated {
             guard error == nil, let characteristics = service.characteristics else { return }
 
-            // Recorded whether or not it is there. Absence is an answer -- a
-            // simulator and any board older than #224 have no Link Params
-            // characteristic -- and the detail view needs it to tell "never going
-            // to answer" from "has not answered yet" (#263).
-            let device = self.byID[peripheral.identifier]
-            let offers = characteristics.contains {
-                $0.uuid == SophonProtocol.linkParamsCharacteristicUUID
-            }
-            let offersBattery = characteristics.contains {
-                $0.uuid == SophonProtocol.batteryCharacteristicUUID
-            }
-            if device?.offersBattery != offersBattery {
-                device?.offersBattery = offersBattery
-            }
-            self.noteLoRaLinkOffered(characteristics, by: device)
-            // Guarded like every other latch here: a repeat didDiscoverServices
-            // re-enumerates and would otherwise notify every observer with an
-            // identical value (#261).
-            if device?.offersLinkParams != offers { device?.offersLinkParams = offers }
+            self.latchOffers(characteristics, by: self.byID[peripheral.identifier])
 
             for characteristic in characteristics {
                 switch characteristic.uuid {
@@ -773,6 +803,7 @@ extension SophonHub: CBPeripheralDelegate {
                     // wrong indefinitely.
                     peripheral.setNotifyValue(true, for: characteristic)
                 case SophonProtocol.loraLinkCharacteristicUUID: self.subscribeLoRaLink(characteristic, on: peripheral)
+                case SophonProtocol.configCharacteristicUUID: self.readConfig(characteristic, on: peripheral)
                 case SophonProtocol.linkParamsCharacteristicUUID:
                     // Read once here, and again whenever stats are refreshed --
                     // iOS revises the interval on its own schedule, so a value
@@ -785,6 +816,23 @@ extension SophonHub: CBPeripheralDelegate {
                 }
             }
         }
+    }
+
+    /// Record which optional characteristics the board has, whether or not they
+    /// are there. Absence is an answer -- a simulator and any board older than
+    /// #224 have no Link Params characteristic -- and the detail view needs it to
+    /// tell "never going to answer" from "has not answered yet" (#263).
+    ///
+    /// Each is guarded like every other latch here: a repeat didDiscoverServices
+    /// re-enumerates and would otherwise notify every observer with an identical
+    /// value (#261).
+    private func latchOffers(_ characteristics: [CBCharacteristic], by device: SophonDevice?) {
+        let offers = characteristics.contains { $0.uuid == SophonProtocol.linkParamsCharacteristicUUID }
+        let offersBattery = characteristics.contains { $0.uuid == SophonProtocol.batteryCharacteristicUUID }
+        if device?.offersBattery != offersBattery { device?.offersBattery = offersBattery }
+        if device?.offersLinkParams != offers { device?.offersLinkParams = offers }
+        noteLoRaLinkOffered(characteristics, by: device)
+        noteConfigOffered(characteristics, by: device)
     }
 
     nonisolated func peripheral(
@@ -820,6 +868,10 @@ extension SophonHub: CBPeripheralDelegate {
         if let error {
             let uuid = characteristic.uuid.uuidString
             let reason = error.localizedDescription
+            if characteristic.uuid == SophonProtocol.configCharacteristicUUID {
+                let id = peripheral.identifier
+                MainActor.assumeIsolated { self.configReadFailed(id) }
+            }
             Task { @MainActor in
                 self.log.error("read failed on \(uuid, privacy: .public): \(reason, privacy: .public)")
             }
@@ -835,6 +887,8 @@ extension SophonHub: CBPeripheralDelegate {
             ingestBatteryValue(data, from: id)
         case SophonProtocol.loraLinkCharacteristicUUID:
             MainActor.assumeIsolated { self.ingestLoRaLinkValue(data, from: id) }
+        case SophonProtocol.configCharacteristicUUID:
+            MainActor.assumeIsolated { self.ingestConfigValue(data, from: id) }
         case SophonProtocol.statsCharacteristicUUID:
             ingestStatsValue(data, from: id)
         case SophonProtocol.linkParamsCharacteristicUUID:
@@ -844,6 +898,20 @@ extension SophonHub: CBPeripheralDelegate {
         default:
             break
         }
+    }
+
+    /// The app's only write (#329): the Config characteristic, with a response.
+    /// Here rather than in `SophonHub+Config.swift` so the delegate method sits
+    /// with the class's conformance, where its Objective-C exposure is certain.
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard characteristic.uuid == SophonProtocol.configCharacteristicUUID else { return }
+        let id = peripheral.identifier
+        let reason = error?.localizedDescription
+        MainActor.assumeIsolated { self.configWriteFinished(id, error: reason) }
     }
 
     nonisolated private func ingestBatteryValue(_ data: Data, from id: UUID) {

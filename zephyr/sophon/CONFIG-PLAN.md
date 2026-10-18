@@ -1,6 +1,6 @@
 # sophon: configure role and LoRa parameters from the app
 
-Plan saved on 2026-10-17 and not yet approved for implementation; tracked as #329. The design record for setting a board's role and LoRa parameters from the app.
+Plan approved for implementation on 2026-10-17; tracked as #329. The design record for setting a board's role and LoRa parameters from the app.
 
 ## Context
 

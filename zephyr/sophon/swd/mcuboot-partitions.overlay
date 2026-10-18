@@ -90,9 +90,21 @@
 			reg = <0x00084000 0x00078000>;   /* 480K */
 		};
 
-		storage_partition: partition@fc000 {
-			label = "storage";
-			reg = <0x000FC000 0x00004000>;   /* 16K */
+		/*
+		 * The 16K storage area, split (#329). Settings hold the config record
+		 * the app writes; NVS needs two sectors, one kept empty for garbage
+		 * collection. The other half is reserved -- unassigned and kept erased
+		 * -- so a future use (a crash dump, an on-board link log) does not have
+		 * to move the settings area after boards already hold a config.
+		 */
+		settings_partition: partition@fc000 {
+			label = "settings";
+			reg = <0x000FC000 0x00002000>;   /* 8K */
+		};
+
+		reserved_partition: partition@fe000 {
+			label = "reserved";
+			reg = <0x000FE000 0x00002000>;   /* 8K */
 		};
 	};
 };

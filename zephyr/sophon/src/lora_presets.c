@@ -6,6 +6,7 @@
 
 #include <zephyr/sys/util.h>
 
+#include "config.h"
 #include "lora_presets.h"
 
 static const struct lora_preset presets[LORA_PRESET_COUNT] = {
@@ -29,7 +30,13 @@ const struct lora_preset *lora_preset_get(uint8_t id)
 
 const struct lora_preset *lora_preset_selected(void)
 {
-	return &presets[CONFIG_SOPHON_LORA_PRESET];
+	/*
+	 * The stored config's preset (#329), validated on write and on load, so
+	 * the fallback only guards against a bug.
+	 */
+	const struct lora_preset *p = lora_preset_get(sophon_config_preset_id());
+
+	return p ? p : &presets[CONFIG_SOPHON_LORA_PRESET];
 }
 
 uint16_t lora_preset_full_len(const struct lora_preset *p)
