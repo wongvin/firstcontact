@@ -84,9 +84,11 @@ final class WalkTestRecorder: NSObject {
         // The walker carries this phone, so it will lock or go in a pocket
         // (#309 review, finding 2). Background location -- the app already
         // declares the `location` background mode for the simulator keep-alive
-        // -- keeps the app running, which also keeps the gateway's LoRa Link
-        // notifies arriving; the idle timer is held off so an unlocked screen
-        // stays readable at each stop.
+        // -- keeps the app running so fixes keep arriving. It does NOT keep the
+        // gateway's LoRa Link notifies arriving: that takes the
+        // `bluetooth-central` background mode. Without it, a locked phone
+        // recorded 2 of about 41 windows on the bench (#331). The idle timer is
+        // held off so an unlocked screen stays readable at each stop.
         manager.allowsBackgroundLocationUpdates = true
         manager.showsBackgroundLocationIndicator = true
         manager.startUpdatingLocation()
