@@ -2,6 +2,15 @@
 
 ## 2026-10-18
 
+### feat: walk-test recordings open with a session preamble (#335)
+
+- **Walk-test CSV version 2:**
+  - A `# key: value` preamble records the app, both boards' firmware, the gateway's active configuration, the pin, and a setup note typed at Start.
+  - Rows carry only what changes per window, plus the **sensor's** battery.
+- **Event rows** log the app going to the background, the gateway's link dropping and returning, markers added with **Add marker…**, and re-dropped pins.
+- **A log never changes configuration half-way:** a change mid-recording ends the file and continues in `…-part2.csv`, whose preamble says which file it continues.
+- `walktest-report.py` reads both versions, listing the preamble and the events. LORA-PROTOCOL.md § Walk-test recording format documents the format, and TEST-PLAN 6.12 and 6.15 now reflect #331.
+
 ### fix: walk test records every window with the phone locked (#331)
 
 - **The Sophon app now declares the `bluetooth-central` background mode.** A walk-test recording's location session kept the app running in the background, but iOS held back the gateway's LoRa Link notifies until the phone was unlocked. The 2026-10-18 walk recorded only 127 of 364 windows.

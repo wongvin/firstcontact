@@ -402,7 +402,84 @@ radio path.
 uptime_s, sf_block, boost, variant, expected, received, LQ%, rssi_avg, rssi_min, snr_avg, snr_min, crc_err
 ```
 
-Procedure: LORA-UPDATED-PLAN.md § Walk-test procedure. The sensor stays at base, and the walker carries the gateway and phone.
+Procedure: LORA-UPDATED-PLAN.md § Walk-test procedure. The sensor stays at base, and the walker carries the gateway and phone. The app's recording format is § Walk-test recording format below.
+
+## Walk-test recording format
+
+The Sophon app writes each walk-test recording as a CSV in Documents (the Files
+app's On My iPhone › Sophon). This is **version 2** (#335). What stays fixed for
+the session is written once, in a preamble, and only what changes per window is
+in the rows. Version 1 files, from before #335, have no preamble and one flat
+row per record; `scripts/walktest-report.py` reads both.
+
+**Preamble:** `# key: value` lines before the header, written when the first
+record arrives, so the boards and their configuration are known.
+
+| Key | Value |
+|---|---|
+| `sophon-walktest` | `2`, always the first line |
+| `started` | local start time with offset, and the time zone |
+| `part`, `continues` | only in a continuation file: its part number and the previous file's name |
+| `app` | app version and build, phone model, iOS version |
+| `gateway` | name, firmware and hardware version |
+| `gateway config` | the active Config (PROTOCOL.md § Config frame): role and whether it was set from the app, preset, SF, TX power, frequency, stored peer, RX boost |
+| `sensor` | the sensor the gateway locked onto, with its firmware if the app has seen it advertise; `not locked` otherwise |
+| `sensor config` | only if the app read the sensor's Config this session |
+| `variant rotation` | `off`: one preset for the whole file. `on`: walk-test variant rotation (§ Walk-test mode), so preset, SF and RX boost become row columns |
+| `pin` | where distances are measured from: position, accuracy, and `automatic (first fix)` or `dropped by hand` |
+| `note` | the walker's description of the setup, typed at Start |
+| `no records` | only in a recording stopped before any record arrived |
+
+**Columns:** `type`, `time` (UTC), `window`; with variant rotation on,
+`preset`, `sf`, `rx_boost`; then the record's link figures (`heard`, `lq_pct`,
+`margin_db`, `margin_min_db`, `rssi_avg`, `rssi_min`, `snr_avg`, `snr_min`,
+`samples`, `missing`, `bad`, `wrong_peer`, `last_packet_ms`; § How the gateway
+maps onto the BLE protocol); the position (`lat`, `lon`, `h_accuracy_m`,
+`distance_m`, `fix_age_s`); the **sensor's** battery as the gateway relays it
+(`sensor_batt_mv`, `sensor_usb`, `sensor_charging`); and `event`.
+
+**Row types:**
+
+- `window`: one LoRa Link record. `event` is empty.
+- `event`: a moment, not a window. Only `type`, `time`, the latest position
+  and `event` are filled. The `event` values are:
+  - `background`, `foreground`: the app went to the background, e.g. the
+    phone was locked, and came back. Control Center or a banner over the app
+    isn't logged: the app keeps running;
+  - `disconnected`, `connected`: the Bluetooth link to the recording's gateway.
+    `disconnected` is logged when iOS gives up on the link, up to the link's
+    supervision timeout after it actually failed. `connected` means the link
+    is up, not that records are flowing again;
+  - `sensor locked: Sophon-XXXX`: the gateway locked onto a sensor after the
+    preamble said `not locked`;
+  - `gateway config: …`: the gateway's Config, read after the preamble said
+    `not read yet`;
+  - `marker: <text>`: added by the walker while recording;
+  - `pin: <lat>,<lon> ±<acc> m`: a pin dropped by hand after rows were written. Later distances are from it;
+  - `pin automatic: …`: the first fix, when it arrived after the first record;
+  - `config changed`: the last row of a file that a configuration change closed.
+- `missing` is reserved for #334.
+
+**One configuration per file.** If any of these differ from the open file's
+preamble, the app ends that file with a `config changed` event and continues in
+`…-part2.csv`, with a fresh preamble saying which file it continues:
+- the locked sensor, once both are known. A gateway reports no sensor until it
+  locks onto one and again after it restarts, and that matches any sensor;
+- variant rotation;
+- outside rotation, the record's preset, SF and RX boost;
+- the gateway's active role, preset, TX power and frequency, once both are
+  known. They change only when the gateway restarts. The peer isn't compared:
+  a stored peer can change without a restart, and the lock is the sensor above.
+
+A recording follows **one gateway**, the first it hears from. Records from any
+other connected gateway are ignored.
+
+A gateway that restarts with the same configuration continues the same file;
+the restart shows as `window` starting again. After any reconnect, records wait for the
+gateway's Config to be read again before they are written, so the first record
+after a real change lands in the new file. They wait at most 15 s, and not
+past a disconnect or Stop; a record written while the config is unknown never
+splits a file.
 
 ## Walk-test results
 

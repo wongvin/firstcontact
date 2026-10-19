@@ -600,6 +600,7 @@ extension SophonHub: CBCentralManagerDelegate {
         Task { @MainActor in
             guard let device = self.byID[peripheral.identifier] else { return }
             device.state = .connected
+            self.walkTest.noteLink(device, connected: true)
 
             // Deliberately NOT resetLinkStats() here.
             //
@@ -651,6 +652,7 @@ extension SophonHub: CBCentralManagerDelegate {
             device.state = .disconnected(reason: reason)
             device.endSession()
             self.log.info("disconnected \(device.displayName, privacy: .public)")
+            self.walkTest.noteLink(device, connected: false)
             self.statsCharacteristics[peripheral.identifier] = nil
             // Cleared with its siblings. A CBCharacteristic is invalidated by the
             // disconnect that produced this callback, and the peripheral

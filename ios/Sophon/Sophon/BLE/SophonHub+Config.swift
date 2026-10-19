@@ -26,6 +26,9 @@ extension SophonHub {
     func ingestConfigValue(_ data: Data, from id: UUID) {
         guard let state = ConfigState(data) else {
             Self.configLog.error("malformed config (\(data.count, privacy: .public) bytes)")
+            // An answer all the same: nothing better is coming this session
+            // (#335 review, finding 3).
+            configReadFailed(id)
             return
         }
         guard let device = devices.first(where: { $0.id == id }) else { return }
@@ -50,12 +53,14 @@ extension SophonHub {
         if let expected = device.configAwaitingStore, state.stored == expected {
             device.configAwaitingStore = nil
         }
+        walkTest.configSettled(device)
     }
 
     /// A config read that failed is an answer, not "still reading" (#263).
     func configReadFailed(_ id: UUID) {
         guard let device = devices.first(where: { $0.id == id }) else { return }
         device.configReadFailed = true
+        walkTest.configSettled(device)
     }
 
     /// Send a config. It is stored by the board and applied at its next restart,
