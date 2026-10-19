@@ -8,6 +8,13 @@ distance from a pin dropped at the sensor. This turns that CSV into the table
 LORA-PROTOCOL.md § Walk-test results wants: per distance band and variant, link
 quality, margin, RSSI, and whether the variant passes at LQ >= 99%.
 
+Version 2 recordings (#335) open with a preamble of `# key: value` lines --
+the boards, their configuration, the pin, the walker's note -- and type each
+row: `window` rows are records, `event` rows are moments (background, link
+dropped, markers, pins). The preamble is printed at the top and the events at
+the bottom; only window rows are measured. Older recordings, with no preamble,
+read as before.
+
 LQ is pooled over a band (total samples received / total expected), not
 averaged per window, so a window that heard little cannot outvote one that heard
 a lot. Rows with no position are reported apart. A recording with no pin at all
@@ -28,6 +35,7 @@ import argparse
 import csv
 import itertools
 import math
+import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -98,6 +106,41 @@ def fill_missing_distances(rows: list[dict[str, str]]) -> None:
     print("(no pin in this recording: distances are from its first fix)\n")
 
 
+def read_recording(path: str) -> tuple[list[str], list[dict[str, str]]]:
+    """Return the preamble lines (without `# `) and the rows."""
+    with open(path, newline="", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    preamble = []
+    while lines and lines[0].startswith("#"):
+        preamble.append(lines.pop(0)[1:].strip())
+    return preamble, list(csv.DictReader(lines))
+
+
+def preamble_value(preamble: list[str], key: str) -> str:
+    for line in preamble:
+        name, _, value = line.partition(":")
+        if name.strip() == key:
+            return value.strip()
+    return ""
+
+
+def apply_preamble(preamble: list[str], rows: list[dict[str, str]]) -> None:
+    """Version 2 moves fixed fields into the preamble; put them back on each row.
+
+    Outside variant rotation, the preset and RX boost are in the gateway config
+    line; the pin is the preamble's, until a `pin:` event moves it.
+    """
+    config = preamble_value(preamble, "gateway config")
+    preset = re.search(r"preset (\S+)", config)
+    boost = re.search(r"RX boost (on|off)", config)
+    rotating = preamble_value(preamble, "variant rotation").startswith("on")
+    for row in rows:
+        row.setdefault("walk_test", "1" if rotating else "0")
+        if not rotating:
+            row.setdefault("preset", preset.group(1) if preset else "?")
+            row.setdefault("rx_boost", "1" if boost and boost.group(1) == "on" else "0")
+
+
 def fmt(value: float | None, spec: str) -> str:
     return "—" if value is None else format(value, spec)
 
@@ -116,8 +159,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    with open(args.csv, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    preamble, rows = read_recording(args.csv)
+    events = [r for r in rows if r.get("type") == "event"]
+    if preamble:
+        rows = [r for r in rows if r.get("type") == "window"]
+        apply_preamble(preamble, rows)
     if not rows:
         print("no rows", file=sys.stderr)
         return 1
@@ -136,6 +182,10 @@ def main() -> int:
 
     walk_test = any(r["walk_test"] == "1" for r in rows)
     print(f"# Walk-test report: {args.csv}\n")
+    for line in preamble:
+        print(f"- {line}")
+    if preamble:
+        print()
     mode = " (walk-test mode)" if walk_test else ""
     print(f"{len(rows)} records{mode}; pass = LQ >= {args.pass_lq:g}%\n")
     print(
@@ -155,6 +205,12 @@ def main() -> int:
             f"{fmt(margin_avg, '+.1f')} | {fmt(worst, '+.1f')} | {fmt(rssi_avg, '.0f')} | "
             f"{cell.bad} | {verdict} |"
         )
+    if events:
+        print("\n## Events\n")
+        print("| Time (UTC) | Event | Distance (m) |")
+        print("|---|---|---|")
+        for event in events:
+            print(f"| {event['time']} | {event['event']} | {event.get('distance_m') or '—'} |")
     return 0
 
 

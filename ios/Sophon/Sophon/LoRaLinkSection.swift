@@ -12,6 +12,9 @@ import SwiftUI
 struct LoRaLinkSection: View {
     let device: SophonDevice
     let recorder: WalkTestRecorder
+    /// Asks for the note or a marker. The alert itself hangs off the detail
+    /// view, outside its List (see ``View/walkTestPrompt(_:recorder:)``).
+    let onPrompt: (WalkTestPrompt) -> Void
 
     var body: some View {
         if let record = device.loraLink {
@@ -67,7 +70,7 @@ struct LoRaLinkSection: View {
                 if device.loraLinkHistory.count >= 2 {
                     sparklines
                 }
-                WalkTestControls(recorder: recorder)
+                WalkTestControls(recorder: recorder, onPrompt: onPrompt)
             } header: {
                 Text("LoRa link")
             } footer: {
@@ -87,7 +90,7 @@ struct LoRaLinkSection: View {
                     Text("Waiting for a LoRa record from this board").foregroundStyle(.secondary)
                 }
                 DistanceRow(recorder: recorder)
-                WalkTestControls(recorder: recorder)
+                WalkTestControls(recorder: recorder, onPrompt: onPrompt)
             }
         }
     }
@@ -168,20 +171,23 @@ struct LoRaLinkSection: View {
 /// and charts change once per 10 s (#309 review, finding 3).
 private struct WalkTestControls: View {
     let recorder: WalkTestRecorder
+    let onPrompt: (WalkTestPrompt) -> Void
 
     var body: some View {
         if recorder.isRecording {
             LabeledContent("Recording") {
-                Text("\(recorder.rowCount) windows").font(.callout.monospacedDigit())
+                Text("\(recorder.rowCount) windows" + (recorder.part > 1 ? " · part \(recorder.part)" : ""))
+                    .font(.callout.monospacedDigit())
             }
+            Button("Add marker…") { onPrompt(.marker) }
             Button("Drop pin here (at the sensor)") { recorder.dropPin() }
                 .disabled(recorder.lastFix == nil)
             Button("Stop recording", role: .destructive) { recorder.stop() }
         } else {
-            Button("Start walk-test recording") { recorder.start() }
-            if let url = recorder.exportURL {
-                ShareLink(item: url) {
-                    Label("Share last recording (\(recorder.rowCount) windows)", systemImage: "square.and.arrow.up")
+            Button("Start walk-test recording") { onPrompt(.note) }
+            if !recorder.exportURLs.isEmpty {
+                ShareLink(items: recorder.exportURLs) {
+                    Label(shareLabel, systemImage: "square.and.arrow.up")
                 }
             }
         }
@@ -195,6 +201,59 @@ private struct WalkTestControls: View {
                 .font(.footnote)
                 .foregroundStyle(.orange)
         }
+    }
+
+    private var shareLabel: String {
+        let files = recorder.exportURLs.count
+        return "Share last recording (\(recorder.rowCount) windows" + (files > 1 ? ", \(files) files)" : ")")
+    }
+}
+
+/// What the walker types at Start (the setup note, into the preamble) or while
+/// recording (a marker, as an event row) -- #335.
+enum WalkTestPrompt: Identifiable {
+    case note
+    case marker
+
+    var id: Self { self }
+}
+
+extension View {
+    /// The walk-test text prompts. Attach outside any List, for the reason
+    /// ``View/configEditor(item:device:onWrite:)`` gives: a presentation hung off a
+    /// List row is torn down when the List rebuilds it, here every second.
+    func walkTestPrompt(_ prompt: Binding<WalkTestPrompt?>, recorder: WalkTestRecorder) -> some View {
+        modifier(WalkTestPromptModifier(prompt: prompt, recorder: recorder))
+    }
+}
+
+private struct WalkTestPromptModifier: ViewModifier {
+    @Binding var prompt: WalkTestPrompt?
+    let recorder: WalkTestRecorder
+    @State private var text = ""
+
+    func body(content: Content) -> some View {
+        content
+            .alert(prompt == .marker ? "Add marker" : "Start walk-test recording",
+                   isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } }),
+                   presenting: prompt) { kind in
+                TextField(kind == .note ? "e.g. receiver in a pocket, 6 dBi both ends" : "e.g. antenna in hand",
+                          text: $text)
+                Button("Cancel", role: .cancel) {}
+                Button(kind == .note ? "Start" : "Add") {
+                    switch kind {
+                    case .note: recorder.start(note: text)
+                    case .marker: recorder.addMarker(text)
+                    }
+                }
+            } message: { kind in
+                Text(kind == .note
+                     ? "Describe the setup: antennas, where the receiver is carried. Optional."
+                     : "What changed? It is logged at this moment.")
+            }
+            .onChange(of: prompt) { _, new in
+                if new != nil { text = "" }
+            }
     }
 }
 

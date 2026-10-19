@@ -292,6 +292,10 @@ private struct DeviceDetailView: View {
     /// so the sheet can hang off the Group rather than off a List section.
     @State private var configEditing: ConfigSection.EditTarget?
 
+    /// The walk-test note or marker being asked for (#335). Held here, like
+    /// `configEditing`, so the alert hangs off the Group, not a List row.
+    @State private var walkTestPrompt: WalkTestPrompt?
+
     /// How often the Sophon's counters are re-read while this view is on screen.
     ///
     /// Polling rather than subscribing, and only while visible. A notify would
@@ -318,7 +322,7 @@ private struct DeviceDetailView: View {
                     List {
                         linkSection
                         ConfigSection(device: device) { configEditing = $0 }
-                        LoRaLinkSection(device: device, recorder: walkTest)
+                        LoRaLinkSection(device: device, recorder: walkTest) { walkTestPrompt = $0 }
                         framesSection
                     }
                     Divider()
@@ -331,7 +335,7 @@ private struct DeviceDetailView: View {
                 List {
                     linkSection
                     ConfigSection(device: device) { configEditing = $0 }
-                    LoRaLinkSection(device: device, recorder: walkTest)
+                    LoRaLinkSection(device: device, recorder: walkTest) { walkTestPrompt = $0 }
                     framesSection
                     countersSection
                     motionSection
@@ -341,6 +345,7 @@ private struct DeviceDetailView: View {
         .navigationTitle(device.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .configEditor(item: $configEditing, device: device, onWrite: onWriteConfig)
+        .walkTestPrompt($walkTestPrompt, recorder: walkTest)
         // Tell the hub not to sweep this one while it is being looked at. The
         // back chevron is what releases it, so the row disappears on return to
         // the list rather than out from under the reader (#235).

@@ -214,7 +214,16 @@ source. Check its charge LED, or its pack, at a stop.
 Each recording is a CSV in the Files app (On My iPhone › Sophon), one row per
 10 s record: time, position, distance from the pin, `lq_pct`, `margin_db`,
 `margin_min_db`, `rssi_avg`, `rssi_min`, `snr_avg`, `snr_min`, `samples`,
-`missing`, `bad`, and more. Copy it to the Mac and summarise it by distance:
+`missing`, `bad`, and more. Its preamble records both boards, the gateway's
+configuration and the pin (LORA-PROTOCOL.md § Walk-test recording format).
+
+- **At Start**, the app asks for a setup note: type the antennas and where the
+  receiver is carried, e.g. "receiver in trouser pocket, 6 dBi both ends".
+- **While walking**, use **Add marker…** for anything that changes, e.g.
+  "antenna in hand" or "stop 3". Each marker is logged at that moment, with the
+  position.
+
+Copy it to the Mac and summarise it by distance:
 
 ```bash
 zephyr/sophon/scripts/walktest-report.py <recording>.csv
