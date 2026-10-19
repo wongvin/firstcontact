@@ -2,6 +2,11 @@
 
 ## 2026-10-18
 
+### fix: reconnect after Bluetooth is turned off and on (#339)
+
+- **Turning the iPhone's Bluetooth off** (Control Center or Settings) left a connected board shown as "Connected – no data" for good, and the app never reconnected it. Core Bluetooth reports only that the radio went off, with no disconnect per board.
+- `SophonHub` now runs every connected board through the disconnect path when the radio leaves powered-on: its session ends, its cached characteristics are cleared, and a walk-test recording logs `disconnected`. When Bluetooth returns, the next advertisement reconnects it; released boards and sensors stay as they were.
+
 ### feat: walk-test recordings open with a session preamble (#335)
 
 - **Walk-test CSV version 2:**

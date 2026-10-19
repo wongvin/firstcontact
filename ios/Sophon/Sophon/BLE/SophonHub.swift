@@ -415,6 +415,32 @@ final class SophonHub: NSObject {
         // it -- see applySweepState. Ordered after `radio` is set below.
         defer { applySweepState() }
 
+        // Bluetooth turned off (or reset, or permission withdrawn) drops every
+        // link and cancels every pending connect, and Core Bluetooth reports
+        // only the state change -- no didDisconnectPeripheral per board. Left
+        // alone, a board stayed "Connected -- no data" for good, and since the
+        // auto-connect below only re-arms a disconnected board, it never came
+        // back (#339). So each one goes through the disconnect path here; when
+        // the radio returns, the scan's next sighting reconnects it, subject to
+        // the same release and sensor rules as any reconnect. Suspension has
+        // its own teardown and is not this case.
+        if managerState != .poweredOn && !isSuspended {
+            let reason = switch managerState {
+            case .resetting: "Bluetooth resetting"
+            case .unauthorized: "Bluetooth not permitted"
+            default: "Bluetooth off"
+            }
+            for device in devices where device.isHeld {
+                // A restart-to-sensor whose disconnect never arrived: the flag
+                // would otherwise wait for an unrelated later disconnect and
+                // file the board under Sensors then (#339 review, finding 3).
+                // A board that really became a sensor is still recognised from
+                // its advertisement.
+                device.expectingSensorRestart = false
+                linkLost(device, reason: reason)
+            }
+        }
+
         if radio == .ready {
             central.stopScan()
             log.info("stopped scanning")
@@ -423,6 +449,29 @@ final class SophonHub: NSObject {
         // poweredOn here can only mean deliberately suspended -- the radio is
         // fine, this role is just not using it.
         radio = isSuspended && managerState == .poweredOn ? .idle : RadioState(managerState)
+    }
+
+    /// Everything a lost link invalidates, shared by didDisconnectPeripheral and
+    /// the radio going off (#339).
+    private func linkLost(_ device: SophonDevice, reason: String?) {
+        // Mirrors where `connected` is logged (didConnect), so the walk-test log
+        // pairs them: not for a connect that never completed, and once per
+        // loss, however many callbacks report it (#339 review, finding 2).
+        let wasConnected = device.state == .connected
+        device.state = .disconnected(reason: reason)
+        device.endSession()
+        log.info("disconnected \(device.displayName, privacy: .public)")
+        if wasConnected { walkTest.noteLink(device, connected: false) }
+        let id = device.id
+        statsCharacteristics[id] = nil
+        // Cleared with its siblings. A CBCharacteristic is invalidated by the
+        // disconnect, and the peripheral identifier is stable -- so a stale
+        // entry survives into the next connection, where pollBattery can use it
+        // in the window between didConnect and characteristic discovery.
+        // `.connected` is true a round trip before the map is rewritten.
+        batteryCharacteristics[id] = nil
+        linkParamsCharacteristics[id] = nil
+        configCharacteristics[id] = nil
     }
 
     /// Take the central off the air so this device can advertise as a Sophon
@@ -449,6 +498,9 @@ final class SophonHub: NSObject {
         // requests as well as established links.
         for device in devices {
             central.cancelPeripheralConnection(device.peripheral)
+            // Logged here: the state is set before the cancel's callback lands,
+            // and linkLost then sees nothing connected (#339 review, finding 1).
+            if device.state == .connected { walkTest.noteLink(device, connected: false) }
             device.state = .disconnected(reason: "simulator mode")
             device.endSession()
         }
@@ -649,26 +701,17 @@ extension SophonHub: CBCentralManagerDelegate {
         let reason = error?.localizedDescription
         Task { @MainActor in
             guard let device = self.byID[peripheral.identifier] else { return }
-            device.state = .disconnected(reason: reason)
-            device.endSession()
-            self.log.info("disconnected \(device.displayName, privacy: .public)")
-            self.walkTest.noteLink(device, connected: false)
-            self.statsCharacteristics[peripheral.identifier] = nil
-            // Cleared with its siblings. A CBCharacteristic is invalidated by the
-            // disconnect that produced this callback, and the peripheral
-            // identifier is stable -- so a stale entry survives into the next
-            // connection, where pollBattery can use it in the window between
-            // didConnect and characteristic discovery. `.connected` is true a
-            // round trip before the map is rewritten.
-            self.batteryCharacteristics[peripheral.identifier] = nil
-            self.linkParamsCharacteristics[peripheral.identifier] = nil
-            self.configCharacteristics[peripheral.identifier] = nil
+            self.linkLost(device, reason: reason)
 
             // Do not re-arm a link that was dropped on purpose. Without this,
             // suspend()'s cancels each bounce straight back into a connect() and
             // the phone reacquires the board's only connection slot while it is
             // supposed to be impersonating one.
             guard !self.isSuspended else { return }
+
+            // Nor with the radio off: connect() would be API misuse, and the
+            // scan's next sighting reconnects once it is back (#339).
+            guard self.managerState == .poweredOn else { return }
 
             // Nor one dropped for having no Sophon service. Re-arming there is
             // what produced the endless Connected/Disconnected cycle against a
