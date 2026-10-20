@@ -39,7 +39,7 @@ extension SophonHub {
             // The sensor's own entry, if the app has seen it advertise, gives
             // the recording its firmware and config (#335).
             let sensor = record.sensorName.flatMap { name in devices.first { $0.displayName == name } }
-            walkTest.record(record, from: device, sensor: sensor)
+            walkTest.record(record, from: device, sensor: sensor, gaps: device.takeLossGaps())
         }
     }
 }

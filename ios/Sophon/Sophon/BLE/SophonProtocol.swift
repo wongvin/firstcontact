@@ -340,6 +340,14 @@ nonisolated struct LoRaLinkRecord: Equatable, Sendable {
     /// Preset names, by id (LORA-PROTOCOL.md § Presets).
     static let presetNames = ["V0", "V1", "V3", "V3b", "V4", "V5", "V5b", "V6", "V6b"]
 
+    /// Samples per packet, `k`, by preset id (LORA-PROTOCOL.md § Presets), to
+    /// turn a gap in samples into a run of lost packets (#337).
+    static let presetSamplesPerPacket = [10, 10, 4, 2, 4, 10, 5, 4, 10]
+
+    var samplesPerPacket: Int? {
+        Int(preset) < Self.presetSamplesPerPacket.count ? Self.presetSamplesPerPacket[Int(preset)] : nil
+    }
+
     var presetName: String {
         Int(preset) < Self.presetNames.count ? Self.presetNames[Int(preset)] : "preset \(preset)"
     }
@@ -660,6 +668,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkBattery()
         checkConfig()
         checkMissingWindows()
+        checkLossHistogram()
     }
 
     private static func checkMotionFrame() {

@@ -2,6 +2,12 @@
 
 ## 2026-10-19
 
+### feat: walk-test CSV logs how LoRa losses cluster (#337)
+
+- **Each walk-test row now splits the lost motion samples into runs** of 1, 2, 3–4, 5–8 and 9+ LoRa packets (`loss_run_*`), from the gaps in the sensor's `seq` on the stream the gateway relays. App only; no firmware change.
+- `walktest-report.py` adds a **How losses cluster** table: per band, the share of lost samples in each run length and how much one repeated packet would recover. It also checks each window against the gateway's own `missing`.
+- This answers whether repeating the previous packet's samples is worth its 68% airtime cost.
+
 ### feat: walk-test CSV marks missing windows (#334)
 
 - **A window the app never received** now gets a `missing` row in the walk-test CSV, written before the next record, with its window number, when it was due and the latest position. A gap shows in the file instead of being inferred from the window numbers.

@@ -436,7 +436,29 @@ record arrives, so the boards and their configuration are known.
 `samples`, `missing`, `bad`, `wrong_peer`, `last_packet_ms`; § How the gateway
 maps onto the BLE protocol); the position (`lat`, `lon`, `h_accuracy_m`,
 `distance_m`, `fix_age_s`); the **sensor's** battery as the gateway relays it
-(`sensor_batt_mv`, `sensor_usb`, `sensor_charging`); and `event`.
+(`sensor_batt_mv`, `sensor_usb`, `sensor_charging`); how the window's losses
+clustered (`loss_run_1`, `loss_run_2`, `loss_run_3_4`, `loss_run_5_8`,
+`loss_run_9_plus`; below); and `event`.
+
+**Loss runs (#337).** The gateway relays every motion sample with the
+sensor's `seq`, which advances on every sample whether or not it was heard. A
+gap in `seq` on the stream the app receives is therefore a run of lost LoRa
+packets: the gap in samples ÷ the preset's `k`, rounded up, since a packet the
+sensor closes early carries fewer than `k`. Each `loss_run_*` column is the
+number of **samples** the app saw lost in runs of 1, 2, 3–4, 5–8 or 9 or more
+packets in that window, so the five add up to the window's loss as the app
+saw it:
+- **equal to `missing`:** every lost sample was lost on the LoRa link;
+- **more than `missing`:** the gateway's own Bluetooth queue overflowed and
+  dropped frames, which isn't LoRa loss;
+- **less:** a gap that arrived after the record was counted in the next window.
+
+Gaps while the app itself was suspended aren't counted. A `missing` row
+carries the runs seen during its 10 s. The columns are **empty** where the app
+didn't see the whole of a window's stream: the first record of a recording,
+and every row across a dropped link (the `missing` rows and the first record
+after it). They are empty too while the variants rotate, since `k` then
+changes packet by packet.
 
 **Row types:**
 

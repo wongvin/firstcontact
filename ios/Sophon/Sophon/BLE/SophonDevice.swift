@@ -749,6 +749,25 @@ final class SophonDevice: Identifiable {
     /// how brief it was -- which is what elapsed time alone cannot tell you.
     private var wasSuspended = false
 
+    /// Gaps in the motion stream since the last LoRa Link record, for the
+    /// walk-test loss histogram (#337). Behind a gateway each one is a run of
+    /// lost LoRa packets -- or, rarely, the gateway's own queue overflowing,
+    /// which the report separates out by comparing with the record's `missing`.
+    ///
+    /// Not the `seqGaps` rule: that calls any hole longer than 5 s an
+    /// interruption, but on a gateway a LoRa fade that long is still loss, and
+    /// the gateway counts it. Only a gap spanning the app's own suspension is
+    /// left out. Collected only from a board offering LoRa Link, whose records
+    /// drain it every 10 s; capped in case those records stop (#337 review).
+    @ObservationIgnored private(set) var lossGaps: [LossGap] = []
+    static let lossGapsLimit = 1_000
+
+    /// Hands over the gaps collected since the last call.
+    func takeLossGaps() -> [LossGap] {
+        defer { lossGaps = [] }
+        return lossGaps
+    }
+
     init(peripheral: CBPeripheral, advertisedName: String?) {
         self.id = peripheral.identifier
         self.peripheral = peripheral
@@ -891,6 +910,9 @@ final class SophonDevice: Identifiable {
             noteBoardRestart()
         } else if let previous = previousFrame {
             let missing = max(0, frame.gap(since: previous))
+            if missing > 0, !wasSuspended, offersLoRaLink == true, lossGaps.count < Self.lossGapsLimit {
+                lossGaps.append(LossGap(samples: missing, at: now))
+            }
             if missing > 0 {
                 let elapsed = lastFrameAt.map { now.timeIntervalSince($0) } ?? 0
                 // Two independent signals, because each covers the other's
@@ -957,6 +979,7 @@ final class SophonDevice: Identifiable {
         interruptions = 0
         framesDuringInterruptions = 0
         previousFrame = nil
+        lossGaps = []
 
         // The next read re-establishes the baseline; until then `lostOnAir`
         // reports nil rather than a figure spanning two boots.
@@ -1027,6 +1050,7 @@ final class SophonDevice: Identifiable {
         framesDuringInterruptions = 0
         restartsWithoutDisconnect = 0
         previousFrame = nil
+        lossGaps = []
         lastFrame = nil
         lastFrameAt = nil
         attMTU = nil
@@ -1124,4 +1148,11 @@ final class SophonDevice: Identifiable {
         guard let tx = txThisSession else { return nil }
         return max(0, seqGapsAtStatsRead - Int(tx.noBuffer))
     }
+}
+
+/// One gap in a motion stream: how many samples were lost, and when the frame
+/// after it arrived (#337).
+nonisolated struct LossGap: Equatable, Sendable {
+    let samples: Int
+    let at: Date
 }
