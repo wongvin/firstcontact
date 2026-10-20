@@ -172,6 +172,7 @@ extension SophonProtocol {
     nonisolated static let smpServiceUUID = CBUUID(string: "8D53DC1D-1DB7-4CD3-868B-8A527460AA84")
 }
 
+#if DEBUG
 extension SophonProtocolSelfCheck {
     nonisolated static func checkConfig() {
         // PROTOCOL.md § Config frame: stored gateway, V3, +14 dBm, 915.5 MHz
@@ -224,3 +225,4 @@ extension SophonProtocolSelfCheck {
         assert(!bad.isValid, "900 MHz must be rejected")
     }
 }
+#endif

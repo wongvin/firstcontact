@@ -659,6 +659,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkUptimeFormat()
         checkBattery()
         checkConfig()
+        checkMissingWindows()
     }
 
     private static func checkMotionFrame() {

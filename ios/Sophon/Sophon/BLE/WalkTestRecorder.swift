@@ -62,6 +62,14 @@ final class WalkTestRecorder: NSObject {
     /// after them, in order; see `record(_:from:sensor:)`.
     @ObservationIgnored private var queue: [Queued] = []
     @ObservationIgnored private var inBackground = false
+    /// The last record written, to find the windows missed before the next.
+    @ObservationIgnored private var lastWindow: (number: UInt8, time: Date)?
+    /// Whether the gateway's link dropped since `lastWindow`: only then can a
+    /// restart have reset the counter.
+    @ObservationIgnored private var linkDroppedSinceWindow = false
+    /// The recording's fixes since the last record, so a `missing` row gets the
+    /// position the walker was at when that window was due.
+    @ObservationIgnored private var fixHistory: [CLLocation] = []
 
     override init() {
         authorization = manager.authorizationStatus
@@ -112,6 +120,9 @@ final class WalkTestRecorder: NSObject {
         self.note = note.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         session = nil
         gatewayID = nil
+        lastWindow = nil
+        linkDroppedSinceWindow = false
+        fixHistory = []
         pending = []
         queue = []
         // Each recording measures from its own origin: the first fix after
@@ -172,7 +183,10 @@ final class WalkTestRecorder: NSObject {
         guard isRecording, device.id == gatewayID else { return }
         // A record held for a Config read the dropped link will never answer
         // is written now, ahead of the event, so the rows stay in order.
-        if !connected { drain() }
+        if !connected {
+            drain()
+            linkDroppedSinceWindow = true
+        }
         logEvent(connected ? "connected" : "disconnected")
     }
 
@@ -261,8 +275,39 @@ final class WalkTestRecorder: NSObject {
             writePreamble(device: device, link: link, sensor: record.sensor, rotating: link.isWalkTest)
             session = key
         }
+        writeMissing(before: link, at: record.arrived)
         append(Self.line(record.row, columns: columns))
         rowCount += 1
+    }
+
+    /// One `missing` row for each window between the previous record and this
+    /// one (#334), so a gap shows in the file rather than having to be inferred
+    /// from the window numbers. A gateway restart isn't a gap: its counter
+    /// starts again, which the elapsed time tells apart (`missingWindows`).
+    ///
+    /// Not while the variants rotate: the gateway then sends several records
+    /// per 10 s window, so elapsed time no longer counts windows.
+    private func writeMissing(before link: LoRaLinkRecord, at time: Date) {
+        defer {
+            lastWindow = (link.window, time)
+            linkDroppedSinceWindow = false
+            // Keep only what a later gap could still need: the fix in force at
+            // this record and any after it.
+            if let current = fixHistory.lastIndex(where: { $0.timestamp <= time }) {
+                fixHistory.removeFirst(current)
+            }
+        }
+        guard let last = lastWindow, !link.isWalkTest else { return }
+        let count = Self.missingWindows(
+            from: last.number, at: last.time, to: link.window, at: time, restartPossible: linkDroppedSinceWindow)
+        guard count > 0 else { return }
+        for step in 1...count {
+            let due = last.time.addingTimeInterval(Self.windowSeconds * Double(step))
+            let row = Self.missingRow(
+                window: last.number &+ UInt8(truncatingIfNeeded: step), time: due,
+                fix: fixHistory.last { $0.timestamp <= due }, pin: pin)
+            append(Self.line(row, columns: columns))
+        }
     }
 
     // MARK: Events and files
@@ -344,6 +389,7 @@ extension WalkTestRecorder: CLLocationManagerDelegate {
             // Fixes with no horizontal accuracy are not positions.
             guard fix.horizontalAccuracy >= 0 else { return }
             self.lastFix = fix
+            if self.isRecording { self.fixHistory.append(fix) }
             if self.isRecording && self.pin == nil {
                 self.pin = fix
                 self.pinIsAutomatic = true
