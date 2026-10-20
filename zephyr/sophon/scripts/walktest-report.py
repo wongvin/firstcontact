@@ -12,7 +12,9 @@ Version 2 recordings (#335) open with a preamble of `# key: value` lines --
 the boards, their configuration, the pin, the walker's note -- and type each
 row: `window` rows are records, `event` rows are moments (background, link
 dropped, markers, pins). The preamble is printed at the top and the events at
-the bottom; only window rows are measured. Older recordings, with no preamble,
+the bottom; only window rows are measured. `missing` rows (#334) -- windows the gateway produced
+that the app never received -- are counted per band in their own column and
+kept out of LQ. Older recordings, with no preamble,
 read as before.
 
 LQ is pooled over a band (total samples received / total expected), not
@@ -161,24 +163,34 @@ def main() -> int:
 
     preamble, rows = read_recording(args.csv)
     events = [r for r in rows if r.get("type") == "event"]
+    missing = [r for r in rows if r.get("type") == "missing"]
     if preamble:
         rows = [r for r in rows if r.get("type") == "window"]
-        apply_preamble(preamble, rows)
+        apply_preamble(preamble, rows + missing)
     if not rows:
         print("no rows", file=sys.stderr)
         return 1
 
     fill_missing_distances(rows)
-    cells: dict[tuple[str, str, str], Cell] = defaultdict(Cell)
-    for row in rows:
+
+    def key_of(row: dict[str, str]) -> tuple[str, str, str]:
         distance = row.get("distance_m", "")
         accuracy = row.get("h_accuracy_m", "")
         if distance and accuracy and float(accuracy) <= args.max_accuracy:
             band = band_of(float(distance))
         else:
             band = "no position"
-        boost = "on" if row["rx_boost"] == "1" else "off"
-        cells[(band, row["preset"], boost)].add(row)
+        return band, row["preset"], "on" if row["rx_boost"] == "1" else "off"
+
+    cells: dict[tuple[str, str, str], Cell] = defaultdict(Cell)
+    for row in rows:
+        cells[key_of(row)].add(row)
+    # Windows the gateway produced but the app never received (#334). Counted
+    # beside the received ones, never in LQ: nothing is known of their link.
+    missed: dict[tuple[str, str, str], int] = defaultdict(int)
+    for row in missing:
+        missed[key_of(row)] += 1
+        cells.setdefault(key_of(row), Cell())
 
     walk_test = any(r["walk_test"] == "1" for r in rows)
     print(f"# Walk-test report: {args.csv}\n")
@@ -187,12 +199,18 @@ def main() -> int:
     if preamble:
         print()
     mode = " (walk-test mode)" if walk_test else ""
-    print(f"{len(rows)} records{mode}; pass = LQ >= {args.pass_lq:g}%\n")
+    gaps = f", {len(missing)} missed by the app (not in LQ)" if missing else ""
+    print(f"{len(rows)} records{mode}{gaps}; pass = LQ >= {args.pass_lq:g}%\n")
     print(
-        "| Distance | Preset | RX boost | Windows | LQ % "
+        "| Distance | Preset | RX boost | Windows | Missed | LQ % "
         "| Margin avg (dB) | Worst margin min (dB) | RSSI avg (dBm) | Bad | Pass |"
     )
-    print("|---|---|---|---|---|---|---|---|---|---|")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
+
+    def missed_text(*key: str) -> str:
+        # Version 1 files have no `missing` rows: an unknown count, not zero.
+        return str(missed[key]) if preamble else "—"
+
     for band, preset, boost in sorted(cells, key=lambda k: (band_sort_key(k[0]), k[1], k[2])):
         cell = cells[(band, preset, boost)]
         lq = cell.lq()
@@ -201,7 +219,8 @@ def main() -> int:
         rssi_avg = sum(cell.rssis) / len(cell.rssis) if cell.rssis else None
         verdict = "—" if lq is None else ("✓" if lq >= args.pass_lq else "✗")
         print(
-            f"| {band} | {preset} | {boost} | {cell.windows} | {fmt(lq, '.1f')} | "
+            f"| {band} | {preset} | {boost} | {cell.windows} | {missed_text(band, preset, boost)} | "
+            f"{fmt(lq, '.1f')} | "
             f"{fmt(margin_avg, '+.1f')} | {fmt(worst, '+.1f')} | {fmt(rssi_avg, '.0f')} | "
             f"{cell.bad} | {verdict} |"
         )

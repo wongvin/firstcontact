@@ -458,7 +458,26 @@ maps onto the BLE protocol); the position (`lat`, `lon`, `h_accuracy_m`,
   - `pin: <lat>,<lon> ±<acc> m`: a pin dropped by hand after rows were written. Later distances are from it;
   - `pin automatic: …`: the first fix, when it arrived after the first record;
   - `config changed`: the last row of a file that a configuration change closed.
-- `missing` is reserved for #334.
+- `missing`: a window the gateway produced that the app never received
+  (#334), written before the next record. It has the window number, the time
+  it was due (the previous record's time + 10 s per window), and the latest
+  fix **as of that time** with its age then, so it falls in the distance band
+  where it was missed. The link columns are empty, and `walktest-report.py`
+  counts it per band, never in LQ.
+  - The 8-bit window counter wraps every 256 windows; the elapsed time
+    supplies the whole wraps.
+  - A gateway restart starts the counter again and always drops the link. So
+    only across a `disconnected` does the app check the jump against the
+    clock: one the clock can't account for is a restart and gets no `missing`
+    rows. On a link that stayed up, the jump is trusted, so a record
+    delivered late still counts its gap.
+  - One case stays ambiguous until #333's boot ID: a restart when the counter
+    was a few windows short of wrapping reads as those few windows missed.
+  - Not written while the variants rotate: the gateway then sends several
+    records per 10 s window.
+  - They are written when the next record reveals the gap, so they follow
+    any event rows logged during the outage (`disconnected`, `connected`)
+    although their times are earlier. Sort by `time` for a strict timeline.
 
 **One configuration per file.** If any of these differ from the open file's
 preamble, the app ends that file with a `config changed` event and continues in

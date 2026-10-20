@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-10-19
+
+### feat: walk-test CSV marks missing windows (#334)
+
+- **A window the app never received** now gets a `missing` row in the walk-test CSV, written before the next record, with its window number, when it was due and the latest position. A gap shows in the file instead of being inferred from the window numbers.
+- The 8-bit window counter's wraps come from the elapsed time. A restart, which always drops the link, is told apart from a gap by the clock, but only across a disconnect, so a late record on a live link still counts its gap. Each row's position is the fix that was current when the window was due. A DEBUG self-check covers the arithmetic.
+- `walktest-report.py` counts missing windows per distance band in a Missed column, outside LQ.
+- The Release build compiles again: the DEBUG-only self-check extensions, including #329's config check, now sit inside `#if DEBUG`.
+
 ## 2026-10-18
 
 ### fix: reconnect after Bluetooth is turned off and on (#339)

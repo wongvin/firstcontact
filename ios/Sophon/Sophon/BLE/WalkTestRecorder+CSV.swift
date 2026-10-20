@@ -155,6 +155,44 @@ extension WalkTestRecorder {
         return row
     }
 
+    /// How often a gateway sends a record outside variant rotation.
+    nonisolated static let windowSeconds: TimeInterval = 10
+
+    /// The windows missed between a record numbered `previous` and the next,
+    /// numbered `window`; 0 for a restart or a repeat (#334).
+    ///
+    /// The counter is 8-bit, so the jump is known only modulo 256; the elapsed
+    /// time supplies the whole wraps.
+    ///
+    /// - Parameter restartPossible: whether the gateway's link dropped between
+    ///   the two records. A restart always drops it. Without a drop the jump is
+    ///   trusted as it is, so a record delivered late or bunched with another
+    ///   still counts its gap. With a drop, a jump the clock can't account for
+    ///   is the counter starting again, not a gap. One case stays ambiguous until
+    ///   #333's boot ID: a restart when the counter was a few windows short of
+    ///   wrapping reads as those few windows missed.
+    nonisolated static func missingWindows(
+        from previous: UInt8, at previousTime: Date, to window: UInt8, at time: Date, restartPossible: Bool
+    ) -> Int {
+        let jump = Int(window &- previous)
+        let steps = (time.timeIntervalSince(previousTime) / windowSeconds).rounded()
+        let wraps = max(0, Int(((steps - Double(jump)) / 256).rounded()))
+        let count = jump + 256 * wraps
+        guard count >= 1 else { return 0 }
+        if restartPossible, abs(Double(count) - steps) > 1.5 { return 0 }
+        return count - 1
+    }
+
+    /// A window the gateway produced but the app never received: its number,
+    /// when it was due, and the latest fix *as of then*, with its age then --
+    /// so the row lands in the distance band where it was missed, not where the
+    /// walker was when the gap came to light. The link columns are empty.
+    static func missingRow(window: UInt8, time: Date, fix: CLLocation?, pin: CLLocation?) -> [String: String] {
+        var row = ["type": "missing", "time": timestamp(time), "window": String(window)]
+        row.merge(positionFields(fix: fix, pin: pin, now: time)) { $1 }
+        return row
+    }
+
     /// A moment rather than a window: the type, the time, the latest position and
     /// what happened. Every link column stays empty.
     static func eventRow(_ event: PendingEvent) -> [String: String] {
@@ -284,3 +322,28 @@ extension WalkTestRecorder {
         return parts.joined(separator: " · ")
     }
 }
+
+#if DEBUG
+extension SophonProtocolSelfCheck {
+    /// The gap arithmetic behind the walk-test `missing` rows (#334), on the
+    /// cases the 2026-10-18 bench recordings produced.
+    nonisolated static func checkMissingWindows() {
+        let start = Date(timeIntervalSince1970: 0)
+        func count(_ previous: UInt8, _ window: UInt8, after seconds: TimeInterval, dropped: Bool = true) -> Int {
+            WalkTestRecorder.missingWindows(
+                from: previous, at: start, to: window, at: start + seconds, restartPossible: dropped)
+        }
+        assert(count(8, 9, after: 10) == 0, "consecutive windows are no gap")
+        assert(count(8, 10, after: 22) == 1, "one window lost; the reconnect read lands off-cadence")
+        assert(count(8, 19, after: 112) == 10, "the 2026-10-19 bench outage: 10 windows")
+        assert(count(250, 4, after: 100) == 9, "a gap across the 8-bit wrap")
+        assert(count(255, 0, after: 10) == 0, "the wrap itself is no gap")
+        assert(count(15, 0, after: 18) == 0, "a gateway restart starts the counter again: no gap")
+        assert(count(8, 8, after: 1) == 0, "a repeated record is no gap")
+        assert(count(10, 12, after: 2580) == 257, "a gap longer than the counter: 258 windows on the clock")
+        assert(count(10, 12, after: 0.5, dropped: false) == 1, "bunched delivery on a live link still counts")
+        assert(count(10, 12, after: 35, dropped: false) == 1, "a late record on a live link still counts")
+        assert(count(10, 12, after: 0.5) == 0, "across a drop, a jump the clock denies is a restart")
+    }
+}
+#endif
