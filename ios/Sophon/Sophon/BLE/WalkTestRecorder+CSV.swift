@@ -86,6 +86,8 @@ extension WalkTestRecorder {
     struct HeldRecord {
         let arrived: Date
         let link: LoRaLinkRecord
+        /// Motion-stream gaps seen since the previous record (#337).
+        let gaps: [LossGap]
         let device: SophonDevice
         let sensor: SophonDevice?
         let row: [String: String]
@@ -112,12 +114,16 @@ extension WalkTestRecorder {
     ]
     static let positionColumns = ["lat", "lon", "h_accuracy_m", "distance_m", "fix_age_s"]
     static let batteryColumns = ["sensor_batt_mv", "sensor_usb", "sensor_charging"]
+    /// Samples lost in runs of 1, 2, 3–4, 5–8 and 9 or more LoRa packets (#337).
+    /// Samples, not run counts, so the five add up to the window's loss as the
+    /// app saw it, which the report checks against the gateway's `missing`.
+    static let lossColumns = ["loss_run_1", "loss_run_2", "loss_run_3_4", "loss_run_5_8", "loss_run_9_plus"]
 
     /// The header. While the variants rotate, preset, SF and RX boost change per
     /// record, so they become columns; otherwise they are in the preamble.
     static func columns(rotating: Bool) -> [String] {
         ["type", "time", "window"] + (rotating ? ["preset", "sf", "rx_boost"] : [])
-            + linkColumns + positionColumns + batteryColumns + ["event"]
+            + linkColumns + positionColumns + batteryColumns + lossColumns + ["event"]
     }
 
     // MARK: Rows
@@ -153,6 +159,33 @@ extension WalkTestRecorder {
             row["sensor_charging"] = battery.charging.map { $0 ? "1" : "0" } ?? ""
         }
         return row
+    }
+
+    /// Lost samples per run-length bucket: a gap of `samples` is a run of
+    /// ⌈samples ÷ k⌉ packets. A packet closed early by the sensor carries fewer
+    /// than `k` samples, hence rounding up.
+    nonisolated static func lossHistogram(_ gaps: [LossGap], samplesPerPacket perPacket: Int) -> [Int] {
+        var buckets = [0, 0, 0, 0, 0]
+        for gap in gaps where gap.samples > 0 {
+            let packets = (gap.samples + perPacket - 1) / perPacket
+            let bucket = switch packets {
+            case 1: 0
+            case 2: 1
+            case 3...4: 2
+            case 5...8: 3
+            default: 4
+            }
+            buckets[bucket] += gap.samples
+        }
+        return buckets
+    }
+
+    /// The histogram's columns for a row. Empty while the variants rotate: `k`
+    /// then changes packet by packet, so a gap can't be turned into packets.
+    static func lossFields(_ gaps: [LossGap], link: LoRaLinkRecord) -> [String: String] {
+        guard !link.isWalkTest, let perPacket = link.samplesPerPacket else { return [:] }
+        let buckets = lossHistogram(gaps, samplesPerPacket: perPacket)
+        return Dictionary(uniqueKeysWithValues: zip(lossColumns, buckets.map(String.init)))
     }
 
     /// How often a gateway sends a record outside variant rotation.
@@ -344,6 +377,17 @@ extension SophonProtocolSelfCheck {
         assert(count(10, 12, after: 0.5, dropped: false) == 1, "bunched delivery on a live link still counts")
         assert(count(10, 12, after: 35, dropped: false) == 1, "a late record on a live link still counts")
         assert(count(10, 12, after: 0.5) == 0, "across a drop, a jump the clock denies is a restart")
+    }
+
+    /// The loss histogram (#337): samples by run length, at V6's k = 4.
+    nonisolated static func checkLossHistogram() {
+        let now = Date(timeIntervalSince1970: 0)
+        let gaps = [4, 4, 8, 3, 12, 16, 20, 36, 40].map { LossGap(samples: $0, at: now) }
+        let buckets = WalkTestRecorder.lossHistogram(gaps, samplesPerPacket: 4)
+        // 1 packet: 4 + 4 + 3 (a short packet); 2: 8; 3–4: 12 + 16; 5–8: 20; 9+: 36 + 40.
+        assert(buckets == [11, 8, 28, 20, 76], "loss histogram buckets")
+        assert(buckets.reduce(0, +) == gaps.map(\.samples).reduce(0, +), "buckets must add up to the loss")
+        assert(WalkTestRecorder.lossHistogram([], samplesPerPacket: 4) == [0, 0, 0, 0, 0], "no gaps, no loss")
     }
 }
 #endif

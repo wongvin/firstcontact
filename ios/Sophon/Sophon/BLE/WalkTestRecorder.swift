@@ -201,7 +201,7 @@ final class WalkTestRecorder: NSObject {
     ///
     /// - Parameter sensor: the hub's entry for the sensor the gateway locked
     ///   onto, if the app has seen it, for its firmware and config.
-    func record(_ link: LoRaLinkRecord, from device: SophonDevice, sensor: SophonDevice?) {
+    func record(_ link: LoRaLinkRecord, from device: SophonDevice, sensor: SophonDevice?, gaps: [LossGap] = []) {
         guard isRecording else { return }
         // A recording follows one gateway: the first it hears from. Another
         // board still connected would otherwise alternate keys and split the
@@ -210,7 +210,7 @@ final class WalkTestRecorder: NSObject {
         guard device.id == gatewayID else { return }
         let now = Date()
         let record = HeldRecord(
-            arrived: now, link: link, device: device, sensor: sensor,
+            arrived: now, link: link, gaps: gaps, device: device, sensor: sensor,
             row: Self.windowRow(link, battery: device.battery, fix: lastFix, pin: pin, now: now))
         // After a reconnect the session reset clears the config and re-reads
         // it, and the LoRa Link read can land first. The record waits for it,
@@ -275,8 +275,16 @@ final class WalkTestRecorder: NSObject {
             writePreamble(device: device, link: link, sensor: record.sensor, rotating: link.isWalkTest)
             session = key
         }
-        writeMissing(before: link, at: record.arrived)
-        append(Self.line(record.row, columns: columns))
+        // The loss runs need the whole of a window's stream. Not known for the
+        // first record of a recording (gaps from before Start are mixed in),
+        // nor across a dropped link (the session reset discards the gaps
+        // before it, and none arrive during it): those rows leave the columns
+        // empty rather than claim no loss (#337 review, findings 1, 3 and 4).
+        let complete = lastWindow != nil && !linkDroppedSinceWindow
+        let ownGaps = writeMissing(before: link, at: record.arrived, gaps: record.gaps, complete: complete)
+        var row = record.row
+        if complete { row.merge(Self.lossFields(ownGaps, link: link)) { $1 } }
+        append(Self.line(row, columns: columns))
         rowCount += 1
     }
 
@@ -287,7 +295,14 @@ final class WalkTestRecorder: NSObject {
     ///
     /// Not while the variants rotate: the gateway then sends several records
     /// per 10 s window, so elapsed time no longer counts windows.
-    private func writeMissing(before link: LoRaLinkRecord, at time: Date) {
+    ///
+    /// The motion-stream gaps seen since the previous record are shared out by
+    /// time: each `missing` row takes those that arrived in its 10 s, and the
+    /// rest -- returned -- belong to the record itself (#337).
+    @discardableResult
+    private func writeMissing(
+        before link: LoRaLinkRecord, at time: Date, gaps: [LossGap], complete: Bool
+    ) -> [LossGap] {
         defer {
             lastWindow = (link.window, time)
             linkDroppedSinceWindow = false
@@ -297,17 +312,22 @@ final class WalkTestRecorder: NSObject {
                 fixHistory.removeFirst(current)
             }
         }
-        guard let last = lastWindow, !link.isWalkTest else { return }
+        guard let last = lastWindow, !link.isWalkTest else { return gaps }
         let count = Self.missingWindows(
             from: last.number, at: last.time, to: link.window, at: time, restartPossible: linkDroppedSinceWindow)
-        guard count > 0 else { return }
+        guard count > 0 else { return gaps }
+        var start = last.time
         for step in 1...count {
             let due = last.time.addingTimeInterval(Self.windowSeconds * Double(step))
-            let row = Self.missingRow(
+            var row = Self.missingRow(
                 window: last.number &+ UInt8(truncatingIfNeeded: step), time: due,
                 fix: fixHistory.last { $0.timestamp <= due }, pin: pin)
+            let window = gaps.filter { $0.at > start && $0.at <= due }
+            if complete { row.merge(Self.lossFields(window, link: link)) { $1 } }
             append(Self.line(row, columns: columns))
+            start = due
         }
+        return gaps.filter { $0.at > start }
     }
 
     // MARK: Events and files

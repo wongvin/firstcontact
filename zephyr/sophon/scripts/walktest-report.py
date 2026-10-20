@@ -12,7 +12,14 @@ Version 2 recordings (#335) open with a preamble of `# key: value` lines --
 the boards, their configuration, the pin, the walker's note -- and type each
 row: `window` rows are records, `event` rows are moments (background, link
 dropped, markers, pins). The preamble is printed at the top and the events at
-the bottom; only window rows are measured. `missing` rows (#334) -- windows the gateway produced
+the bottom; only window rows are measured. From #337, each row also splits the samples the app saw lost into runs of
+1, 2, 3-4, 5-8 and 9+ LoRa packets (`loss_run_*`). The loss table shows, per
+band, the share of lost samples in each, and how much one repeated packet
+would have recovered (runs of exactly 1). Each window's runs are checked
+against the gateway's own `missing`: more on the app's side means the
+gateway's Bluetooth queue dropped frames, which isn't LoRa loss.
+
+`missing` rows (#334) -- windows the gateway produced
 that the app never received -- are counted per band in their own column and
 kept out of LQ. Older recordings, with no preamble,
 read as before.
@@ -143,6 +150,44 @@ def apply_preamble(preamble: list[str], rows: list[dict[str, str]]) -> None:
             row.setdefault("rx_boost", "1" if boost and boost.group(1) == "on" else "0")
 
 
+LOSS_COLUMNS = ["loss_run_1", "loss_run_2", "loss_run_3_4", "loss_run_5_8", "loss_run_9_plus"]
+
+
+def print_loss_table(rows: list[dict[str, str]], key_of) -> None:
+    """How the lost samples cluster, per band (#337), with the cross-check."""
+    rows = [r for r in rows if all(r.get(c, "") != "" for c in LOSS_COLUMNS)]
+    if not rows:
+        return
+    agree = more = fewer = 0
+    bands: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0, 0, 0, 0])
+    for row in rows:
+        runs = [int(row[c]) for c in LOSS_COLUMNS]
+        app, gateway = sum(runs), int(row["missing"] or 0)
+        if app == gateway:
+            agree += 1
+        elif app > gateway:
+            more += 1
+        else:
+            fewer += 1
+        cell = bands[key_of(row)[0]]
+        for i, n in enumerate(runs):
+            cell[i] += n
+        cell[5] += gateway
+    print("\n## How losses cluster\n")
+    print(
+        f"Cross-check: {agree} of {len(rows)} windows match the gateway's `missing` exactly; "
+        f"{more} saw more lost on the app's side (the gateway's Bluetooth queue dropping "
+        f"frames), {fewer} fewer (a gap counted in the next window).\n"
+    )
+    print("| Distance | Lost (gateway) | Lost (app) | 1 pkt | 2 | 3–4 | 5–8 | 9+ | One repeat recovers |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for band in sorted(bands, key=band_sort_key):
+        cell = bands[band]
+        app = sum(cell[:5])
+        shares = [f"{100 * n / app:.0f}%" if app else "—" for n in cell[:5]]
+        print(f"| {band} | {cell[5]} | {app} | " + " | ".join(shares) + f" | {shares[0]} |")
+
+
 def fmt(value: float | None, spec: str) -> str:
     return "—" if value is None else format(value, spec)
 
@@ -224,6 +269,7 @@ def main() -> int:
             f"{fmt(margin_avg, '+.1f')} | {fmt(worst, '+.1f')} | {fmt(rssi_avg, '.0f')} | "
             f"{cell.bad} | {verdict} |"
         )
+    print_loss_table(rows, key_of)
     if events:
         print("\n## Events\n")
         print("| Time (UTC) | Event | Distance (m) |")
