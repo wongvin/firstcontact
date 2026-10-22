@@ -38,6 +38,14 @@ nonisolated struct SophonConfig: Equatable, Sendable {
     var txDbm: Int8
     var freqHz: UInt32
     var peerID: UInt16
+    /// The gateway's stats window in seconds (#344), or ``windowDefault``. On
+    /// the wire it is the role byte's high nibble, so no frame grows.
+    var windowSeconds: UInt8
+
+    /// "The build's 10 s", and the windows the editor offers.
+    static let windowDefault: UInt8 = 0
+    static let windowBuildSeconds: UInt8 = 10
+    static let windowRange: ClosedRange<UInt8> = 1...10
 
     static let defaults = SophonConfig(
         role: .auto, preset: presetDefault, txDbm: txDefault, freqHz: freqDefault, peerID: 0)
@@ -45,7 +53,8 @@ nonisolated struct SophonConfig: Equatable, Sendable {
     /// The nine bytes role…peer, shared by the read and the write.
     static let fieldsSize = 9
 
-    init(role: Role, preset: UInt8, txDbm: Int8, freqHz: UInt32, peerID: UInt16) {
+    init(role: Role, preset: UInt8, txDbm: Int8, freqHz: UInt32, peerID: UInt16, windowSeconds: UInt8 = windowDefault) {
+        self.windowSeconds = windowSeconds
         self.role = role
         self.preset = preset
         self.txDbm = txDbm
@@ -57,8 +66,9 @@ nonisolated struct SophonConfig: Equatable, Sendable {
     init?(fields bytes: ArraySlice<UInt8>) {
         guard bytes.count == Self.fieldsSize else { return nil }
         let raw = Array(bytes)
-        guard let role = Role(rawValue: raw[0]) else { return nil }
+        guard let role = Role(rawValue: raw[0] & 0x0F) else { return nil }
         self.role = role
+        windowSeconds = raw[0] >> 4
         preset = raw[1]
         txDbm = Int8(bitPattern: raw[2])
         freqHz = UInt32(raw[3]) | UInt32(raw[4]) << 8 | UInt32(raw[5]) << 16 | UInt32(raw[6]) << 24
@@ -66,7 +76,7 @@ nonisolated struct SophonConfig: Equatable, Sendable {
     }
 
     var fields: [UInt8] {
-        [role.rawValue, preset, UInt8(bitPattern: txDbm),
+        [role.rawValue | windowSeconds << 4, preset, UInt8(bitPattern: txDbm),
          UInt8(freqHz & 0xFF), UInt8(freqHz >> 8 & 0xFF), UInt8(freqHz >> 16 & 0xFF), UInt8(freqHz >> 24),
          UInt8(peerID & 0xFF), UInt8(peerID >> 8)]
     }
@@ -77,6 +87,7 @@ nonisolated struct SophonConfig: Equatable, Sendable {
         (preset == Self.presetDefault || Int(preset) < LoRaLinkRecord.presetNames.count)
             && (txDbm == Self.txDefault || Self.txRange.contains(txDbm))
             && (freqHz == Self.freqDefault || Self.freqRange.contains(freqHz))
+            && (windowSeconds == Self.windowDefault || Self.windowRange.contains(windowSeconds))
     }
 
     var presetLabel: String {
@@ -86,6 +97,10 @@ nonisolated struct SophonConfig: Equatable, Sendable {
     }
 
     var txLabel: String { txDbm == Self.txDefault ? "Preset's own" : "\(txDbm) dBm" }
+
+    var windowLabel: String {
+        windowSeconds == Self.windowDefault ? "Build default (\(Self.windowBuildSeconds) s)" : "\(windowSeconds) s"
+    }
 
     var freqLabel: String {
         freqHz == Self.freqDefault ? "Build default" : String(format: "%.3f MHz", Double(freqHz) / 1e6)
@@ -98,7 +113,8 @@ nonisolated struct SophonConfig: Equatable, Sendable {
 /// PROTOCOL.md § Config frame, 20 bytes.
 nonisolated struct ConfigState: Equatable, Sendable {
     static let wireSize = 20
-    static let version: UInt8 = 1
+    /// Version 2 (#344): the role byte's high nibble carries the stats window.
+    static let version: UInt8 = 2
 
     /// What flash holds: the config the next restart will run.
     let stored: SophonConfig
@@ -175,13 +191,13 @@ extension SophonProtocol {
 #if DEBUG
 extension SophonProtocolSelfCheck {
     nonisolated static func checkConfig() {
-        // PROTOCOL.md § Config frame: stored gateway, V3, +14 dBm, 915.5 MHz
-        // (0x36916BE0), peer 0x86F0; active gateway, V3, +14 dBm, the same
-        // frequency, peer 0x86F0; status radio | forced | from flash (0x19).
+        // PROTOCOL.md § Config frame (version 2): stored gateway with a 1 s
+        // stats window (role byte 0x13), V3, +14 dBm, 915.5 MHz (0x36916BE0),
+        // peer 0x86F0; active the same; status radio | forced | from flash (0x19).
         let wire = Data([
-            0x01,                                                     // version
-            0x03, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86,     // stored
-            0x03, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86,     // active
+            0x02,                                                     // version
+            0x13, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86,     // stored
+            0x13, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86,     // active
             0x19,                                                     // status
         ])
         guard let state = ConfigState(wire) else {
@@ -192,6 +208,8 @@ extension SophonProtocolSelfCheck {
         assert(state.stored.txDbm == 14, "tx power misread")
         assert(state.stored.freqHz == 915_500_000, "frequency byte-swapped")
         assert(state.stored.peerID == 0x86F0, "peer byte-swapped")
+        assert(state.stored.windowSeconds == 1 && state.active.windowSeconds == 1,
+               "the stats window is the role byte's high nibble")
         assert(state.radioPresent && !state.imuPresent && state.roleForced && state.fromFlash
                && !state.restartPending && !state.guardTripped, "status bits misread")
         assert(state.supportedRoles == [.auto, .direct, .gateway], "a radio without an IMU cannot be a sensor")
@@ -199,10 +217,10 @@ extension SophonProtocolSelfCheck {
         assert(ConfigState(wire.dropLast()) == nil, "short frame must be rejected")
         assert(ConfigState(wire + Data([0])) == nil, "long frame must be rejected")
         var badVersion = wire
-        badVersion[0] = 2
-        assert(ConfigState(badVersion) == nil, "an unknown version must be dropped")
+        badVersion[0] = 1
+        assert(ConfigState(badVersion) == nil, "a version 1 read is no longer understood")
         var badRole = wire
-        badRole[1] = 4
+        badRole[1] = 0x14
         assert(ConfigState(badRole) == nil, "an unknown role must be dropped")
         var negative = wire
         negative[3] = 0xF7 // -9 dBm
@@ -210,10 +228,10 @@ extension SophonProtocolSelfCheck {
 
         // The write: the same config, restart requested.
         let request = ConfigRequest(config: state.stored, restart: true, restoreDefaults: false)
-        assert(request.encoded == Data([0x01, 0x03, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86, 0x01, 0x00]),
+        assert(request.encoded == Data([0x02, 0x13, 0x02, 0x0E, 0xE0, 0x6B, 0x91, 0x36, 0xF0, 0x86, 0x01, 0x00]),
                "ConfigRequest does not encode PROTOCOL.md's byte vector")
         let reset = ConfigRequest(config: .defaults, restart: true, restoreDefaults: true)
-        assert(reset.encoded == Data([0x01, 0x00, 0xFF, 0x7F, 0, 0, 0, 0, 0, 0, 0x03, 0x00]),
+        assert(reset.encoded == Data([0x02, 0x00, 0xFF, 0x7F, 0, 0, 0, 0, 0, 0, 0x03, 0x00]),
                "restore defaults must encode the sentinels and both flags")
 
         assert(SophonConfig.defaults.isValid, "defaults must be valid")
@@ -223,6 +241,9 @@ extension SophonProtocolSelfCheck {
         bad = .defaults
         bad.freqHz = 900_000_000
         assert(!bad.isValid, "900 MHz must be rejected")
+        bad = .defaults
+        bad.windowSeconds = 11
+        assert(!bad.isValid, "an 11 s window must be rejected")
     }
 }
 #endif

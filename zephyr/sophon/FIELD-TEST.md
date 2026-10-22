@@ -171,6 +171,11 @@ while driving.
    its `lora tx` lines: send errors would show there.
 2. Mount the antenna on the vehicle roof, connect it to the receiver, and power
    the receiver from the pack inside the vehicle.
+   - **Set the receiver's Stats window to 1 s:** in the app, open the receiver,
+     then **Configuration › Edit… › Stats window › 1 s**, and **Save and
+     restart**. At driving speed a 10 s window smears each record over about
+     250 m; 1 s is about 25 m (#344). Set it back to **Build default** after
+     the drive.
 3. Before leaving, with the vehicle **next to the building**, connect the app
    to the receiver and wait for **Link quality** 100%.
 4. **Start walk-test recording**, then **Drop pin here (at the sensor)** while

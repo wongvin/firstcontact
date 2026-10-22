@@ -41,7 +41,9 @@ LOG_MODULE_REGISTER(sophon_config, LOG_LEVEL_INF);
 #define SETTINGS_KEY "sophon/cfg"
 
 /* The stored record: a version byte, then the config as on the wire. */
-#define RECORD_VERSION 1
+/* Version 2 (#344) carries window_s in the role byte's high nibble. A version 1
+ * record has 0 there ("default"), so it loads unchanged: no migration. */
+#define RECORD_VERSION 2
 #define RECORD_SIZE    10
 
 /*
@@ -67,6 +69,7 @@ static const struct sophon_config defaults = {
 	.tx_dbm = SOPHON_CONFIG_TX_DEFAULT,
 	.freq_hz = SOPHON_CONFIG_FREQ_DEFAULT,
 	.peer_id = CONFIG_SOPHON_LORA_PEER_ID,
+	.window_s = SOPHON_CONFIG_WINDOW_DEFAULT,
 };
 
 static struct k_spinlock lock;
@@ -100,13 +103,16 @@ static bool config_valid(const struct sophon_config *c)
 	    (c->freq_hz < SOPHON_CONFIG_FREQ_MIN_HZ || c->freq_hz > SOPHON_CONFIG_FREQ_MAX_HZ)) {
 		return false;
 	}
+	if (c->window_s > SOPHON_CONFIG_WINDOW_MAX_S) {
+		return false;
+	}
 	return true;
 }
 
 /* The nine bytes role..peer, shared by the record, the write and the read. */
 static void pack_fields(const struct sophon_config *c, uint8_t out[9])
 {
-	out[0] = c->role;
+	out[0] = (uint8_t)((c->role & 0x0F) | (c->window_s << 4));
 	out[1] = c->preset;
 	out[2] = (uint8_t)c->tx_dbm;
 	sys_put_le32(c->freq_hz, &out[3]);
@@ -115,7 +121,8 @@ static void pack_fields(const struct sophon_config *c, uint8_t out[9])
 
 static void unpack_fields(const uint8_t in[9], struct sophon_config *c)
 {
-	c->role = in[0];
+	c->role = in[0] & 0x0F;
+	c->window_s = in[0] >> 4;
 	c->preset = in[1];
 	c->tx_dbm = (int8_t)in[2];
 	c->freq_hz = sys_get_le32(&in[3]);
@@ -125,7 +132,7 @@ static void unpack_fields(const uint8_t in[9], struct sophon_config *c)
 static bool config_equal(const struct sophon_config *a, const struct sophon_config *b)
 {
 	return a->role == b->role && a->preset == b->preset && a->tx_dbm == b->tx_dbm &&
-	       a->freq_hz == b->freq_hz && a->peer_id == b->peer_id;
+	       a->freq_hz == b->freq_hz && a->peer_id == b->peer_id && a->window_s == b->window_s;
 }
 
 /* ------------------------------------------------------------- persistence */
@@ -145,7 +152,7 @@ static int load_cb(const char *key, size_t len, settings_read_cb read_cb, void *
 		LOG_WRN("stored config unreadable (%u bytes) -- using defaults", (unsigned int)len);
 		return 0;
 	}
-	if (rec[0] != RECORD_VERSION) {
+	if (rec[0] != 1 && rec[0] != RECORD_VERSION) {
 		LOG_WRN("stored config version %u unknown -- using defaults", rec[0]);
 		return 0;
 	}
@@ -258,8 +265,9 @@ void sophon_config_init(void)
 		boot_from_flash = found;
 	}
 
-	LOG_INF("config: role %u, preset %u, tx %d, freq %u, peer %04X (%s)", boot.role,
-		sophon_config_preset_id(), boot.tx_dbm, sophon_config_freq_hz(), boot.peer_id,
+	LOG_INF("config: role %u, preset %u, tx %d, freq %u, peer %04X, window %u s (%s)",
+		boot.role, sophon_config_preset_id(), boot.tx_dbm, sophon_config_freq_hz(),
+		boot.peer_id, sophon_config_window_s(),
 		guard_tripped ? "guard tripped"
 		: found       ? "from flash"
 			      : "defaults");
@@ -287,6 +295,12 @@ int8_t sophon_config_tx_override(void)
 	return boot.tx_dbm;
 }
 
+uint8_t sophon_config_window_s(void)
+{
+	return boot.window_s == SOPHON_CONFIG_WINDOW_DEFAULT ? SOPHON_CONFIG_WINDOW_BUILD_S
+							     : boot.window_s;
+}
+
 void sophon_config_set_hardware(bool radio, bool imu, bool forced)
 {
 	hw_radio = radio;
@@ -304,7 +318,8 @@ uint8_t sophon_config_write(const uint8_t *buf, uint16_t len)
 	if (len != SOPHON_CONFIG_WRITE_SIZE) {
 		return BT_ATT_ERR_INVALID_ATTRIBUTE_LEN;
 	}
-	if (buf[0] != SOPHON_CONFIG_VERSION || buf[11] != 0) {
+	/* Version 1 writes are still taken: their high nibble is 0, the default. */
+	if ((buf[0] != 1 && buf[0] != SOPHON_CONFIG_VERSION) || buf[11] != 0) {
 		return BT_ATT_ERR_VALUE_NOT_ALLOWED;
 	}
 	unpack_fields(&buf[1], &c);
@@ -364,6 +379,7 @@ void sophon_config_read(uint8_t out[SOPHON_CONFIG_READ_SIZE])
 								: (preset ? preset->tx_dbm : 0);
 	active.freq_hz = sophon_config_freq_hz();
 	active.peer_id = role == SOPHON_ROLE_GATEWAY ? lora_link_peer_id() : boot.peer_id;
+	active.window_s = sophon_config_window_s();
 
 	status |= hw_radio ? SOPHON_CONFIG_STATUS_RADIO : 0;
 	status |= hw_imu ? SOPHON_CONFIG_STATUS_IMU : 0;

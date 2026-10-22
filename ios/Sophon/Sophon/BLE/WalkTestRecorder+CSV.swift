@@ -195,10 +195,11 @@ extension WalkTestRecorder {
         return Dictionary(uniqueKeysWithValues: zip(lossColumns, buckets.map(String.init)))
     }
 
-    /// A record's window number and when it arrived.
+    /// A record's window number, when it arrived, and its window length.
     nonisolated struct WindowMark: Sendable {
         let number: UInt16
         let time: Date
+        let windowSeconds: TimeInterval
     }
 
     /// The windows missed between a record numbered `previous` and the next,
@@ -215,13 +216,24 @@ extension WalkTestRecorder {
     ///   windows the old boot had counted (LORA-LINK-V2-PLAN.md § Why no boot
     ///   ID). Only a restart within about one window of the previous boot slips
     ///   through, as at most one false row.
+    ///
+    /// The windows are counted in the **previous** record's length: those are
+    /// the windows that went missing (#344). The restart test allows the larger
+    /// of 1.5 windows and 3 s: each record's number is fixed when its window
+    /// closes, and a read after a reconnect arrives at most about a window
+    /// later, so a real gap agrees with the clock to within that. A restart
+    /// comes back short by the old boot's windows plus the reboot itself, so
+    /// only one within about that margin of the previous boot slips through.
     nonisolated static func missingWindows(
-        from previous: WindowMark, to next: WindowMark, windowSeconds: TimeInterval, restartPossible: Bool
+        from previous: WindowMark, to next: WindowMark, restartPossible: Bool
     ) -> Int {
+        let windowSeconds = previous.windowSeconds
         let jump = Int(next.number &- previous.number)
         guard jump >= 1, windowSeconds > 0 else { return 0 }
-        let steps = (next.time.timeIntervalSince(previous.time) / windowSeconds).rounded()
-        if restartPossible, abs(Double(jump) - steps) > 1.5 { return 0 }
+        let elapsed = next.time.timeIntervalSince(previous.time)
+        let steps = (elapsed / windowSeconds).rounded()
+        let tolerance = max(1.5 * windowSeconds, 3)
+        if restartPossible, abs(Double(jump) * windowSeconds - elapsed) > tolerance { return 0 }
         // A jump far beyond anything the clock allows isn't a gap on any path:
         // never write thousands of rows on the strength of the counter alone.
         if Double(jump) > steps + 10 { return 0 }
@@ -375,10 +387,13 @@ extension SophonProtocolSelfCheck {
     /// cases the 2026-10-18 bench recordings produced.
     nonisolated static func checkMissingWindows() {
         let start = Date(timeIntervalSince1970: 0)
-        func count(_ previous: UInt16, _ window: UInt16, after seconds: TimeInterval, dropped: Bool = true) -> Int {
+        func count(
+            _ previous: UInt16, _ window: UInt16, after seconds: TimeInterval,
+            dropped: Bool = true, length: TimeInterval = 10
+        ) -> Int {
             WalkTestRecorder.missingWindows(
-                from: .init(number: previous, time: start), to: .init(number: window, time: start + seconds),
-                windowSeconds: 10, restartPossible: dropped)
+                from: .init(number: previous, time: start, windowSeconds: length),
+                to: .init(number: window, time: start + seconds, windowSeconds: length), restartPossible: dropped)
         }
         assert(count(8, 9, after: 10) == 0, "consecutive windows are no gap")
         assert(count(8, 10, after: 22) == 1, "one window lost; the reconnect read lands off-cadence")
@@ -392,10 +407,15 @@ extension SophonProtocolSelfCheck {
         assert(count(10, 12, after: 35, dropped: false) == 1, "a late record on a live link still counts")
         assert(count(10, 12, after: 0.5) == 0, "across a drop, a jump the clock denies is a restart")
         assert(count(10, 9_000, after: 20, dropped: false) == 0, "a jump the clock can't allow is never a gap")
+        assert(count(8, 19, after: 11.2, length: 1) == 10, "1 s windows (#344) count by the window length")
+        assert(count(8, 30, after: 22.5, length: 1) == 21, "a 22 s Bluetooth outage at 1 s windows: 21 missed")
+        assert(count(8, 12, after: 5, length: 1) == 3, "at 1 s, a reconnect read a second late is still a gap")
+        assert(count(7, 18, after: 20, length: 1) == 0, "at 1 s, a quick second restart is still a restart")
+        assert(count(500, 40, after: 45, length: 1) == 0, "at 1 s, a restart is the counter coming back short")
         assert(WalkTestRecorder.missingWindows(
-            from: .init(number: 8, time: start), to: .init(number: 19, time: start + 11.2),
-            windowSeconds: 1, restartPossible: true) == 10,
-               "1 s windows (#344) count by the record's own window length")
+            from: .init(number: 8, time: start, windowSeconds: 1),
+            to: .init(number: 4, time: start + 30, windowSeconds: 10), restartPossible: true) == 0,
+               "changing the window takes a restart, and its counter comes back low: no rows")
     }
 
     /// The loss histogram (#337): samples by run length, at V6's k = 4.

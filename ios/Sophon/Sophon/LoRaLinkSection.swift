@@ -23,7 +23,7 @@ struct LoRaLinkSection: View {
                 // stop arriving: a green 100 % about a link nobody is measuring any
                 // more reads as a current verdict (#309 review, finding 5).
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let stale = (device.loraRecordAge(asOf: context.date) ?? 0) > SophonDevice.loraRecordStaleAfter
+                    let stale = (device.loraRecordAge(asOf: context.date) ?? 0) > device.loraRecordStaleAfter
                     LabeledContent("Link quality") {
                         Text((record.linkQuality.map { String(format: "%.1f %%", $0) } ?? "Nothing heard")
                              + (stale ? " (stale)" : ""))
@@ -49,7 +49,7 @@ struct LoRaLinkSection: View {
                     let age = device.loraRecordAge(asOf: context.date)
                     LabeledContent("Updated") {
                         Text(age.map { SophonDevice.ageText($0) + " ago" } ?? "—")
-                            .foregroundStyle((age ?? 0) > SophonDevice.loraRecordStaleAfter ? .orange : .secondary)
+                            .foregroundStyle((age ?? 0) > device.loraRecordStaleAfter ? .orange : .secondary)
                     }
                 }
                 LabeledContent("Sensor") { Text(record.sensorName ?? "Not locked yet") }
@@ -74,7 +74,8 @@ struct LoRaLinkSection: View {
             } header: {
                 Text("LoRa link")
             } footer: {
-                Text("The sensor's radio link to this gateway, measured by the gateway over 10 s windows. "
+                Text("The sensor's radio link to this gateway, measured by the gateway over "
+                     + "\(record.windowSeconds) s windows. "
                      + "Margin is SNR above the level where packets stop decoding; the worst packet's margin "
                      + "is the one to watch, because fades lose packets while the average still looks "
                      + "healthy. The RSSI row above is this phone's Bluetooth link "

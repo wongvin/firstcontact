@@ -351,9 +351,9 @@ should present it to about two decimal places in volts and no further.
 **20 bytes, little-endian**, from the LoRa Link characteristic (#309). Only a
 **LoRa gateway** (#303) fills it. It describes the **sensor → gateway LoRa
 link**: the leg the app cannot otherwise see. The phone ↔ gateway BLE link is
-still the RSSI and Link Params rows. One record per window, 10 s until #344
-makes it configurable, the same window as the gateway's console line. It is
-notified when the window closes and can be read for the latest on reconnect.
+still the RSSI and Link Params rows. One record per window: 10 s by default,
+or 1–10 s set from the app (#344; § Config frame). It is notified when the
+window closes and can be read for the latest on reconnect.
 
 **Version 2** (#333; firmware 2.29.0). The design and the reasons for each
 field are in [LORA-LINK-V2-PLAN.md](LORA-LINK-V2-PLAN.md). Every u16 is 2-byte
@@ -463,7 +463,7 @@ The same nine bytes appear in the write and twice in the read, little-endian:
 
 | Offset | Size | Type | Field | Values |
 |---|---|---|---|---|
-| 0 | 1 | `u8` | `role` | 0 **auto** · 1 direct · 2 sensor · 3 gateway |
+| 0 | 1 | `u8` | `role` · `window_s` | bits 0–3 `role`: 0 **auto** · 1 direct · 2 sensor · 3 gateway. Bits 4–7 `window_s`, the **gateway's stats window** (#344): 0 = the build's default (10 s) · 1–10 seconds |
 | 1 | 1 | `u8` | `preset` | 0–8 (V0…V6b, LORA-PROTOCOL.md § Presets) · `0xFF` = the build's default |
 | 2 | 1 | `i8` | `tx_dbm` | −9…+22 · `0x7F` = the preset's own power |
 | 3 | 4 | `u32` | `freq_hz` | 902 250 000…927 750 000 · 0 = the build's default |
@@ -473,11 +473,17 @@ The same nine bytes appear in the write and twice in the read, little-endian:
 hardware, as LORA-PROTOCOL.md § Roles describes. It is the default. The other
 roles override detection until changed.
 
+**`window_s`** shares the role byte, so no frame grows (Config version 2,
+#344). It sets the length of the gateway's LoRa Link window: every record then
+covers that many seconds, and its `window_s` field says so (§ LoRa Link
+frame). A sensor and a direct board ignore it. A version 1 frame or stored
+record has 0 there, the default, so both still load unchanged.
+
 ### Write: 12 bytes, with response
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | `version`, 1 |
+| 0 | 1 | `version`, 2. Version 1 is still accepted; its `window_s` is 0, the default |
 | 1 | 9 | the fields above |
 | 10 | 1 | `flags`: bit 0 **restart** (reboot once saved) · bit 1 **defaults** (erase the stored config; the fields are ignored) · other bits 0 |
 | 11 | 1 | reserved, 0 |
@@ -499,9 +505,9 @@ client should treat any write error as "refused", then re-read.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | `version`, 1 |
+| 0 | 1 | `version`, 2 |
 | 1 | 9 | **stored**: what flash holds, the config the next restart runs |
-| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm` and `freq_hz` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto |
+| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm`, `freq_hz` and `window_s` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto |
 | 19 | 1 | `status` |
 
 | `status` bit | Meaning |
@@ -514,18 +520,18 @@ client should treat any write error as "refused", then re-read.
 | 5 | **boot-loop guard tripped**: after three boots in a row that never came up, the stored config is ignored for this boot. It is kept, not erased |
 
 **Worked example** (the app's DEBUG self-check uses this vector): a gateway
-forced from the app, preset V3, +14 dBm, 915.5 MHz, peer `0x86F0`, nothing
-pending:
+forced from the app with a **1 s stats window**, preset V3, +14 dBm,
+915.5 MHz, peer `0x86F0`, nothing pending:
 
 ```
-01                              version
-03 02 0E E0 6B 91 36 F0 86      stored: gateway, V3, +14 dBm, 915 500 000 Hz, 86F0
-03 02 0E E0 6B 91 36 F0 86      active: the same
+02                              version
+13 02 0E E0 6B 91 36 F0 86      stored: window 1 s · gateway, V3, +14 dBm, 915 500 000 Hz, 86F0
+13 02 0E E0 6B 91 36 F0 86      active: the same
 19                              status: radio | forced | from flash
 ```
 
-Writing that config with **restart** is `01 03 02 0E E0 6B 91 36 F0 86 01 00`.
-**Restore defaults** is `01 00 FF 7F 00 00 00 00 00 00 03 00`.
+Writing that config with **restart** is `02 13 02 0E E0 6B 91 36 F0 86 01 00`.
+**Restore defaults** is `02 00 FF 7F 00 00 00 00 00 00 03 00`.
 
 ### Storage and recovery
 
