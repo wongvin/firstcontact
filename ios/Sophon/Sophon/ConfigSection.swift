@@ -29,6 +29,8 @@ struct ConfigSection: View {
                     LabeledContent("Frequency") { Text(state.active.freqLabel) }
                     if device.loraLink != nil || state.active.role == .gateway {
                         LabeledContent("Peer") { Text(state.active.peerLabel) }
+                        // Resolved: the board reports the window it runs (#344).
+                        LabeledContent("Stats window") { Text("\(state.active.windowSeconds) s") }
                     }
                     if state.restartPending {
                         LabeledContent("After restart") {
@@ -117,7 +119,8 @@ struct ConfigSection: View {
     ]
 
     static func summary(_ config: SophonConfig) -> String {
-        "\(config.role.label), \(config.presetLabel), TX \(config.txLabel), \(config.freqLabel)"
+        "\(config.role.label), \(config.presetLabel), TX \(config.txLabel), \(config.freqLabel), "
+            + "window \(config.windowLabel)"
     }
 }
 
@@ -210,6 +213,17 @@ private struct ConfigEditor: View {
                                 .tag(UInt8(index))
                         }
                     }
+                    // The gateway's measurement window (#344): 1 s for a drive, where
+                    // 10 s smears a record over ~250 m. Only a board with a radio
+                    // can be a gateway, so only it is offered the choice.
+                    if state.radioPresent {
+                        Picker("Stats window", selection: $config.windowSeconds) {
+                            Text("Build default (10 s)").tag(SophonConfig.windowDefault)
+                            ForEach(Array(SophonConfig.windowRange), id: \.self) { seconds in
+                                Text("\(seconds) s").tag(seconds)
+                            }
+                        }
+                    }
                     Toggle("Set frequency", isOn: $freqOverride)
                     if freqOverride {
                         Stepper(value: $freqMHz, in: 902.25...927.75, step: 0.25) {
@@ -228,7 +242,8 @@ private struct ConfigEditor: View {
                     Text("""
                         Both ends of a link need the same spreading factor and frequency: change the sensor \
                         and the gateway together. Peer is the sensor's XXXX from Sophon-XXXX; leave it empty \
-                        to accept the first sensor heard.
+                        to accept the first sensor heard. The stats window is the gateway's: 1 s suits a \
+                        drive; each window then holds about 54 samples, so its figures are coarser.
                         """)
                 }
 

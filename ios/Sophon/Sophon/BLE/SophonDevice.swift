@@ -323,9 +323,13 @@ final class SophonDevice: Identifiable {
         loraLinkAt.map { now.timeIntervalSince($0) }
     }
 
-    /// A record is due every 10 s; past this, the BLE side has stopped
-    /// delivering them, whatever the LoRa link is doing.
-    static let loraRecordStaleAfter: TimeInterval = 15
+    /// A record is due every window (10 s by default, down to 1 s, #344); past
+    /// one and a half windows, the BLE side has stopped delivering them,
+    /// whatever the LoRa link is doing. At least 3 s, so a 1 s window isn't
+    /// marked stale by ordinary delivery jitter.
+    var loraRecordStaleAfter: TimeInterval {
+        max(3, 1.5 * TimeInterval(loraLink?.windowSeconds ?? SophonConfig.windowBuildSeconds))
+    }
 
     /// Total age of the battery reading: how old it was when the board sent it,
     /// plus how long ago this app received it.
@@ -639,7 +643,7 @@ final class SophonDevice: Identifiable {
     /// The last ``loraLinkHistoryCount`` records, oldest first, for sparklines.
     private(set) var loraLinkHistory: [LoRaLinkRecord] = []
 
-    /// Five minutes of 10 s windows.
+    /// 30 windows: five minutes at 10 s, half a minute at 1 s (#344).
     static let loraLinkHistoryCount = 30
 
     /// Sums over this session's records, so the counters survive the window.

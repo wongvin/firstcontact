@@ -117,6 +117,20 @@ and the gateway together. Measured at the desk with only the gateway moved
 signal leaked through, which looks like a weak link rather than a
 misconfiguration.
 
+**Stats window (#344):** the gateway measures its LoRa Link figures over a
+window of 1–10 s, 10 s by default, set from the app like the other parameters
+and applied at the next restart. It's the gateway's alone: a sensor sends every
+sample whatever it is. Use **1 s** in a vehicle (FIELD-TEST.md scenario 2),
+where 10 s smears a record over about 250 m at 90 km/h.
+- **Each window is a smaller sample at 1 s:** about 54 samples in about 13
+  packets at V6, so LQ moves in steps of about 2% and the worst margin is the
+  minimum over 13 packets rather than 134. Don't compare 1 s and 10 s figures
+  directly; the walk-test file records the window, and a change of window
+  starts a new file.
+- **The console thins out:** below 10 s the gateway logs every
+  (10 ÷ window)-th window, so about one line per 10 s. Every record still goes
+  to the app.
+
 ## LoRa variables
 
 **Radio settings** (both ends must agree unless noted):

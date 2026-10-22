@@ -245,7 +245,11 @@ def main() -> int:
         print()
     mode = " (walk-test mode)" if walk_test else ""
     gaps = f", {len(missing)} missed by the app (not in LQ)" if missing else ""
-    print(f"{len(rows)} records{mode}{gaps}; pass = LQ >= {args.pass_lq:g}%\n")
+    # The window length (#344): figures from 1 s and 10 s windows aren't
+    # comparable, and a recording never mixes them (a change starts a new file).
+    window = re.search(r"window (\d+) s", preamble_value(preamble, "gateway config"))
+    window_text = f"{window.group(1)} s windows" if window else "10 s windows"
+    print(f"{len(rows)} records of {window_text}{mode}{gaps}; pass = LQ >= {args.pass_lq:g}%\n")
     print(
         "| Distance | Preset | RX boost | Windows | Missed | LQ % "
         "| Margin avg (dB) | Worst margin min (dB) | RSSI avg (dBm) | Bad | Pass |"

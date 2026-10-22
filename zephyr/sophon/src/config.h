@@ -39,12 +39,23 @@ struct sophon_config {
 	int8_t tx_dbm;    /* SOPHON_CONFIG_TX_MIN..MAX_DBM, or SOPHON_CONFIG_TX_DEFAULT */
 	uint32_t freq_hz; /* SOPHON_CONFIG_FREQ_MIN..MAX_HZ, or SOPHON_CONFIG_FREQ_DEFAULT */
 	uint16_t peer_id; /* 0 = lock onto the first sensor heard */
+	/* Gateway stats window, seconds (#344): 1..SOPHON_CONFIG_WINDOW_MAX_S, or
+	 * SOPHON_CONFIG_WINDOW_DEFAULT. On the wire it is the role byte's high
+	 * nibble (PROTOCOL.md § Config frame), so no frame grows. */
+	uint8_t window_s;
 };
+
+#define SOPHON_CONFIG_WINDOW_DEFAULT 0
+#define SOPHON_CONFIG_WINDOW_MAX_S   10
+/* What "default" means: the 10 s window every board used before #344. */
+#define SOPHON_CONFIG_WINDOW_BUILD_S 10
 
 /* Wire sizes and bits: PROTOCOL.md § Config frame. */
 #define SOPHON_CONFIG_WRITE_SIZE 12
 #define SOPHON_CONFIG_READ_SIZE  20
-#define SOPHON_CONFIG_VERSION    1
+/* Version 2 (#344): the role byte's high nibble carries window_s. A version 1
+ * write has 0 there, which is "default", so it is still accepted. */
+#define SOPHON_CONFIG_VERSION    2
 
 #define SOPHON_CONFIG_FLAG_RESTART  BIT(0)
 #define SOPHON_CONFIG_FLAG_DEFAULTS BIT(1)
@@ -71,6 +82,8 @@ uint8_t sophon_config_preset_id(void);
 uint32_t sophon_config_freq_hz(void);
 /* The TX power override, or SOPHON_CONFIG_TX_DEFAULT for the preset's own. */
 int8_t sophon_config_tx_override(void);
+/* The gateway's stats window this boot, in seconds: 1..10, the default resolved. */
+uint8_t sophon_config_window_s(void);
 
 /*
  * Record what the hardware turned out to be, once the role is fixed. Writes are

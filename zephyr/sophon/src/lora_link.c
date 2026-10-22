@@ -38,8 +38,13 @@ static const struct device *const lora_dev = DEVICE_DT_GET(DT_NODELABEL(lora0));
 
 static const struct lora_preset *preset;
 
-/* Stats are logged every STATS_PERIOD_MS and reset, like a rate. */
+/* Stats are logged every stats period and reset, like a rate. The sensor's is
+ * always 10 s; the gateway's is its window, 1-10 s from the config (#344). */
 #define STATS_PERIOD_MS 10000
+static uint32_t stats_period_ms = STATS_PERIOD_MS;
+/* Under 10 s windows the gateway logs every log_every-th window, so the
+ * console stays at one line per ~10 s whatever the window. */
+static uint32_t log_every = 1;
 
 /*
  * Nominal sample period, rounded up from the measured 18.4 ms (54.3 Hz). The
@@ -412,7 +417,7 @@ static void gateway_build_record(uint32_t rx)
 	r[0] = LORA_LINK_RECORD_VERSION;
 	/* preset id bits 0-3; window length in seconds bits 4-7 (#344 makes it
 	 * configurable; fixed at the 10 s stats period until then). */
-	r[1] = (uint8_t)((preset->id & 0x0F) | ((STATS_PERIOD_MS / 1000) << 4));
+	r[1] = (uint8_t)((preset->id & 0x0F) | ((stats_period_ms / 1000) << 4));
 	sys_put_le16(peer_id, &r[2]);
 	sys_put_le16(record_window++, &r[4]);
 	r[6] = rx ? clamp_i8(gw_stats.rssi_sum / (int32_t)rx) : 0;
@@ -501,9 +506,19 @@ static void gateway_stats_log(void)
 	uint32_t rx = gw_stats.packets + gw_stats.bad + gw_stats.wrong_peer;
 	uint32_t expected = gw_stats.samples + gw_stats.missing;
 	uint32_t lq_x10 = expected ? (gw_stats.samples * 1000U) / expected : 0;
+	static uint32_t since_log;
 
+	/* Every window's record goes out; only the console is thinned. */
 	gateway_build_record(rx);
 
+	if (++since_log < log_every) {
+		goto reset;
+	}
+	since_log = 0;
+	if (log_every > 1) {
+		LOG_INF("lora rx (%u s windows, every %uth logged):", stats_period_ms / 1000,
+			log_every);
+	}
 	if (rx == 0) {
 		LOG_INF("lora rx: nothing heard");
 	} else {
@@ -515,6 +530,7 @@ static void gateway_stats_log(void)
 			gw_stats.rssi_min, gw_stats.snr_sum / (int32_t)rx, gw_stats.snr_min,
 			dio1_kicks);
 	}
+reset:
 	memset(&gw_stats, 0, sizeof(gw_stats));
 	gw_stats.rssi_min = INT16_MAX;
 	gw_stats.snr_min = INT8_MAX;
@@ -536,7 +552,7 @@ static void stats_handler(struct k_work *work)
 	} else {
 		gateway_stats_log();
 	}
-	(void)k_work_schedule(&stats_work, K_MSEC(STATS_PERIOD_MS));
+	(void)k_work_schedule(&stats_work, K_MSEC(stats_period_ms));
 }
 
 int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
@@ -591,8 +607,12 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 			return err;
 		}
 		(void)k_work_schedule(&watchdog_work, K_MSEC(WATCHDOG_PERIOD_MS));
+
+		/* The gateway's window, from the config at boot (#344). */
+		stats_period_ms = sophon_config_window_s() * 1000U;
+		log_every = STATS_PERIOD_MS / stats_period_ms;
 	}
 
-	(void)k_work_schedule(&stats_work, K_MSEC(STATS_PERIOD_MS));
+	(void)k_work_schedule(&stats_work, K_MSEC(stats_period_ms));
 	return 0;
 }

@@ -2,6 +2,12 @@
 
 ## 2026-10-21
 
+### feat: configurable LoRa stats window, down to 1 s (#344)
+
+- **Firmware 2.30.0:** the gateway's LoRa Link window is a setting, 1–10 s (10 s by default), stored with the other LoRa parameters and applied on restart. It lives in the Config role byte's high nibble, so no frame grows; Config is version 2, and version 1 writes and stored records still load. Below 10 s the console logs about once per 10 s; every record still goes to the app.
+- **App:** a **Stats window** picker in the Configuration editor, the active window in the section. The walk-test gap check counts in the previous record's window and tolerates 15 s of delivery jitter. Staleness and the LoRa link footer follow the window.
+- PROTOCOL.md § Config frame (version 2, worked example with a 1 s window), LORA-PROTOCOL.md, FIELD-TEST.md scenario 2 (set 1 s before driving), TEST-PLAN 6.30.
+
 ### feat: LoRa Link record version 2 (#333)
 
 - **Firmware 2.29.0:** the gateway sends version 2 of the LoRa Link record. Still 20 bytes, every u16 aligned, the spare byte last.
