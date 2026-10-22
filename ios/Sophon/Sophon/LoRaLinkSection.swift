@@ -38,9 +38,9 @@ struct LoRaLinkSection: View {
                 LabeledContent("LoRa SNR") { Text(snrText(record)) }
                 DistanceRow(recorder: recorder)
                 LabeledContent("Last packet") {
-                    Text(record.heard
-                         ? "\(record.lastPacketMillis) ms before the window closed" : "None this window")
-                        .foregroundStyle(record.lastPacketMillis > 1000 || !record.heard ? .orange : .primary)
+                    Text(!record.heard ? "None this window"
+                         : record.lastPacketMillis.map { "\($0) ms before the window closed" } ?? "25.5 s or more")
+                        .foregroundStyle((record.lastPacketMillis ?? .max) > 1000 || !record.heard ? .orange : .primary)
                 }
                 // Its own timeline: the record's age is the only value here that
                 // moves between records, and only a TimelineView may read the
@@ -59,7 +59,7 @@ struct LoRaLinkSection: View {
                 }
                 LabeledContent("This session") {
                     Text("\(device.loraSessionSamples) samples · \(device.loraSessionMissing) missing · "
-                         + "\(device.loraSessionBad) bad")
+                         + "\(device.loraSessionBad)\(device.loraSessionBadSaturated ? "+" : "") bad")
                         .font(.callout.monospacedDigit())
                 }
                 if device.loraRecordsMissed > 0 {

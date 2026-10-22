@@ -2,6 +2,20 @@
 
 ## 2026-10-21
 
+### feat: LoRa Link record version 2 (#333)
+
+- **Firmware 2.29.0:** the gateway sends version 2 of the LoRa Link record. Still 20 bytes, every u16 aligned, the spare byte last.
+  - `window` widens to 16 bits.
+  - The window length (`window_s`, 10 s until #344) and the noise floor (`noise_min`/`noise_median`, `0x7F` until #336) are added.
+  - `lq_x10` is dropped, since the app computes it from `samples` and `missing`.
+  - `last_packet`, `bad` and `wrong_peer` are narrowed.
+- **App:**
+  - parses version 2 only;
+  - the walk-test gap check drops its wrap handling;
+  - `missing` rows use the record's window length;
+  - the CSV gains `noise_min`/`noise_median`, and the preamble records the window length.
+- PROTOCOL.md § LoRa Link frame is rewritten for version 2 with a worked example; LORA-LINK-V2-PLAN.md is marked implemented.
+
 ### docs: design for LoRa Link record version 2 (#333)
 
 - **New `zephyr/sophon/LORA-LINK-V2-PLAN.md`:** version 2 of the gateway's LoRa Link record. Still 20 bytes, with u16 fields aligned and one spare byte last. It widens `window` to 16 bits and adds the stats window length (#344) and the noise floor (#336). It drops `lq_x10`, which is derivable, and narrows `last_packet`, `bad` and `wrong_peer`.

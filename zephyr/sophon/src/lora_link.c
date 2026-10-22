@@ -233,7 +233,8 @@ static struct {
 static struct k_spinlock record_lock;
 static uint8_t record[LORA_LINK_RECORD_SIZE];
 static bool record_valid;
-static uint8_t record_window;
+/* 16 bits (#333): about 7.6 days of 10 s windows before it wraps. */
+static uint16_t record_window;
 static int64_t last_rx_ms = -1; /* any packet, good or bad */
 
 /* From the stored config at start (#329); 0 locks onto the first sensor heard. */
@@ -383,40 +384,51 @@ static int8_t clamp_i8(int32_t v)
 	return (int8_t)CLAMP(v, INT8_MIN, INT8_MAX);
 }
 
-static uint8_t sat_u8(uint32_t v)
+/* Saturating packers for the narrowed version 2 fields (#333). */
+static uint8_t sat_u4(uint32_t v)
 {
-	return (uint8_t)MIN(v, UINT8_MAX);
+	return (uint8_t)MIN(v, 15U);
+}
+
+static uint8_t last_packet_ds(int64_t age_ms)
+{
+	/* 100 ms units; 255 = 25.5 s or more, or no packet yet. */
+	return age_ms < 0 || age_ms >= 25500 ? 255 : (uint8_t)(age_ms / 100);
 }
 
 /*
- * The LoRa Link record (#309): this window's stats, laid out as PROTOCOL.md
- * § LoRa Link frame. Built on the system work queue, read from the Bluetooth
- * RX thread, hence the lock.
+ * The LoRa Link record, version 2 (#333; LORA-LINK-V2-PLAN.md), laid out as
+ * PROTOCOL.md § LoRa Link frame: still 20 bytes, every u16 2-byte aligned, the
+ * spare byte last. Link quality is no longer sent: it is samples / (samples +
+ * missing), which every consumer computes. Built on the system work queue,
+ * read from the Bluetooth RX thread, hence the lock.
  */
-static void gateway_build_record(uint32_t rx, uint32_t expected)
+static void gateway_build_record(uint32_t rx)
 {
 	uint8_t r[LORA_LINK_RECORD_SIZE];
-	int64_t age = last_rx_ms < 0 ? INT64_MAX : k_uptime_get() - last_rx_ms;
-	uint16_t lq_x10 = expected ? (uint16_t)((gw_stats.samples * 1000U) / expected) : 0xFFFF;
+	int64_t age = last_rx_ms < 0 ? -1 : k_uptime_get() - last_rx_ms;
 	k_spinlock_key_t key;
 
-	r[0] = 1; /* version */
-	r[1] = preset->id;
-	/* bit 0 RX boost (fixed on here; the walk test A/Bs it), bit 2 heard,
-	 * bits 4-7 SF. Bit 1, a walk-test record, is set only by walk-test mode. */
-	r[2] = BIT(0) | (rx ? BIT(2) : 0) | (uint8_t)(preset->sf << 4);
-	r[3] = record_window++;
-	sys_put_le16(lq_x10, &r[4]);
+	r[0] = LORA_LINK_RECORD_VERSION;
+	/* preset id bits 0-3; window length in seconds bits 4-7 (#344 makes it
+	 * configurable; fixed at the 10 s stats period until then). */
+	r[1] = (uint8_t)((preset->id & 0x0F) | ((STATS_PERIOD_MS / 1000) << 4));
+	sys_put_le16(peer_id, &r[2]);
+	sys_put_le16(record_window++, &r[4]);
 	r[6] = rx ? clamp_i8(gw_stats.rssi_sum / (int32_t)rx) : 0;
 	r[7] = rx ? clamp_i8(gw_stats.rssi_min) : 0;
 	r[8] = rx ? clamp_i8(gw_stats.snr_sum / (int32_t)rx) : 0;
 	r[9] = rx ? clamp_i8(gw_stats.snr_min) : 0;
 	sys_put_le16((uint16_t)MIN(gw_stats.samples, UINT16_MAX), &r[10]);
 	sys_put_le16((uint16_t)MIN(gw_stats.missing, UINT16_MAX), &r[12]);
-	r[14] = sat_u8(gw_stats.bad);
-	r[15] = sat_u8(gw_stats.wrong_peer);
-	sys_put_le16((uint16_t)MIN(age, UINT16_MAX), &r[16]);
-	sys_put_le16(peer_id, &r[18]);
+	r[14] = last_packet_ds(age);
+	r[15] = LORA_LINK_NOISE_UNMEASURED; /* noise_min, until #336 */
+	r[16] = LORA_LINK_NOISE_UNMEASURED; /* noise_median, until #336 */
+	r[17] = (uint8_t)(sat_u4(gw_stats.bad) | (sat_u4(gw_stats.wrong_peer) << 4));
+	/* bit 0 RX boost (fixed on here; the walk test A/Bs it), bit 2 heard,
+	 * bits 4-7 SF. Bit 1, a walk-test record, is set only by walk-test mode. */
+	r[18] = BIT(0) | (rx ? BIT(2) : 0) | (uint8_t)(preset->sf << 4);
+	r[19] = 0; /* reserved */
 
 	key = k_spin_lock(&record_lock);
 	memcpy(record, r, sizeof(record));
@@ -490,7 +502,7 @@ static void gateway_stats_log(void)
 	uint32_t expected = gw_stats.samples + gw_stats.missing;
 	uint32_t lq_x10 = expected ? (gw_stats.samples * 1000U) / expected : 0;
 
-	gateway_build_record(rx, expected);
+	gateway_build_record(rx);
 
 	if (rx == 0) {
 		LOG_INF("lora rx: nothing heard");

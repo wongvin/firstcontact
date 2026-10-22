@@ -31,7 +31,13 @@ extension SophonHub {
     func ingestLoRaLinkValue(_ data: Data, from id: UUID) {
         guard !data.isEmpty else { return }
         guard let record = LoRaLinkRecord(data) else {
-            Self.loraLog.error("malformed LoRa Link record (\(data.count, privacy: .public) bytes)")
+            // Version 1 is a gateway on firmware older than 2.29.0, not a fault
+            // (#333 dropped it): say so, so the log points at the fix.
+            if data.count == LoRaLinkRecord.wireSize, data.first == 1 {
+                Self.loraLog.error("LoRa Link record version 1: update the gateway to firmware 2.29.0 or later")
+            } else {
+                Self.loraLog.error("malformed LoRa Link record (\(data.count, privacy: .public) bytes)")
+            }
             return
         }
         guard let device = devices.first(where: { $0.id == id }) else { return }

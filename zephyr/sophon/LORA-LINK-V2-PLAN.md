@@ -1,8 +1,8 @@
 # LoRa Link record, version 2
 
-Design for #333 (serving #344 and #336). Not yet implemented: PROTOCOL.md
-§ LoRa Link frame still describes version 1, which is what the firmware sends
-today. Agreed on 2026-10-21.
+Design for #333 (serving #344 and #336), agreed on 2026-10-21. **Implemented
+in firmware 2.29.0**: PROTOCOL.md § LoRa Link frame is the reference for the
+layout; this records why each field is where it is.
 
 ## Context
 

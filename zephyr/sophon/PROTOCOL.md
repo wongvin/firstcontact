@@ -348,36 +348,63 @@ should present it to about two decimal places in volts and no further.
 
 ## LoRa Link frame
 
-> **Version 2 is designed but not yet implemented:** see
-> [LORA-LINK-V2-PLAN.md](LORA-LINK-V2-PLAN.md) (#333). It widens `window` to
-> 16 bits, adds the stats window length (`window_s`, #344) and the noise floor
-> (#336), and drops `lq_x10`, which is derivable; it stays at 20 bytes. Version
-> 1, below, is what the firmware sends today.
-
 **20 bytes, little-endian**, from the LoRa Link characteristic (#309). Only a
 **LoRa gateway** (#303) fills it. It describes the **sensor → gateway LoRa
 link**: the leg the app cannot otherwise see. The phone ↔ gateway BLE link is
-still the RSSI and Link Params rows. One record per 10 s window, the same window
-as the gateway's console line. It is notified when the window closes and can be
-read for the latest on reconnect.
+still the RSSI and Link Params rows. One record per window, 10 s until #344
+makes it configurable, the same window as the gateway's console line. It is
+notified when the window closes and can be read for the latest on reconnect.
+
+**Version 2** (#333; firmware 2.29.0). The design and the reasons for each
+field are in [LORA-LINK-V2-PLAN.md](LORA-LINK-V2-PLAN.md). Every u16 is 2-byte
+aligned and the spare byte is last. Version 1, which sent `lq_x10` and an 8-bit
+`window`, is no longer read.
 
 | Offset | Size | Type | Field | Meaning |
 |---|---|---|---|---|
-| 0 | 1 | `u8` | `version` | `1`. Parsers drop any other value |
-| 1 | 1 | `u8` | `preset` | air-rate preset id (LORA-PROTOCOL.md § Presets). In a walk-test record, the variant |
-| 2 | 1 | `u8` | `flags` | bit 0 RX boost on · bit 1 walk-test record · bit 2 **heard** (any packet this window) · bits 4–7 spreading factor |
-| 3 | 1 | `u8` | `window` | rolling counter, +1 per record, so a missed notify is visible |
-| 4 | 2 | `u16` | `lq_x10` | link quality ×10: samples received ÷ expected. **`0xFFFF` = nothing expected** (nothing heard) |
+| 0 | 1 | `u8` | `version` | `2`. Parsers drop any other value |
+| 1 | 1 | `u8` | `preset` · `window_s` | bits 0–3: air-rate preset id (LORA-PROTOCOL.md § Presets; in a walk-test record, the variant). Bits 4–7: the window length in seconds, 1–10 (10 until #344) |
+| 2 | 2 | `u16` | `sensor_id` | the sensor's id: the `XXXX` of its `Sophon-XXXX` name. 0 before one is locked |
+| 4 | 2 | `u16` | `window` | rolling counter from 0 at boot, +1 per record, so a missed notify is visible |
 | 6 | 1 | `i8` | `rssi_avg` | dBm, over the window's packets |
 | 7 | 1 | `i8` | `rssi_min` | dBm |
 | 8 | 1 | `i8` | `snr_avg` | dB |
 | 9 | 1 | `i8` | `snr_min` | dB |
 | 10 | 2 | `u16` | `samples` | samples received |
 | 12 | 2 | `u16` | `missing` | samples lost, from `seq` gaps between packets |
-| 14 | 1 | `u8` | `bad` | packets that failed to decode, saturating at 255 |
-| 15 | 1 | `u8` | `wrong_peer` | packets from another sensor, saturating at 255 |
-| 16 | 2 | `u16` | `last_packet_ms` | ms since the last packet, at the record's close, saturating |
-| 18 | 2 | `u16` | `sensor_id` | the sensor's id: the `XXXX` of its `Sophon-XXXX` name. 0 before one is locked |
+| 14 | 1 | `u8` | `last_packet` | time since the last packet at the record's close, in **100 ms** units. 255 = 25.5 s or more, or no packet yet |
+| 15 | 1 | `i8` | `noise_min` | the receiver's noise floor over the window, dBm. **`0x7F` = not measured** (until #336) |
+| 16 | 1 | `i8` | `noise_median` | dBm; `0x7F` = not measured (until #336) |
+| 17 | 1 | `u8` | `bad` · `wrong_peer` | bits 0–3: packets that failed to decode; bits 4–7: packets from another sensor. Each saturates at 15 |
+| 18 | 1 | `u8` | `flags` | bit 0 RX boost on · bit 1 walk-test record · bit 2 **heard** (any packet this window) · bit 3 spare · bits 4–7 spreading factor |
+| 19 | 1 | `u8` | `reserved` | 0 |
+
+**Link quality** is not sent: it is `samples ÷ (samples + missing)`, which is
+how the gateway computes it, and "nothing expected" when both are 0. The app
+shows it in tenths of a percent, truncated, matching the gateway console.
+
+**Worked example** (the app's DEBUG self-check uses these bytes):
+
+```
+02 A2 F0 86 2A 01 A0 9D 05 FE 12 02 03 00 03 7F 97 24 75 00
+```
+
+| Bytes | Field | Value |
+|---|---|---|
+| `02` | version | 2 |
+| `A2` | preset · window_s | preset 2 (V3), window 10 s |
+| `F0 86` | sensor_id | 0x86F0 (Sophon-86F0) |
+| `2A 01` | window | 298 |
+| `A0` `9D` | rssi_avg, rssi_min | −96, −99 dBm |
+| `05` `FE` | snr_avg, snr_min | +5, −2 dB |
+| `12 02` | samples | 530 |
+| `03 00` | missing | 3, so LQ = 530 ÷ 533 = 99.4% |
+| `03` | last_packet | 300 ms |
+| `7F` | noise_min | not measured |
+| `97` | noise_median | −105 dBm |
+| `24` | bad · wrong_peer | 4 bad, 2 wrong peer |
+| `75` | flags | RX boost, heard, SF7 |
+| `00` | reserved | |
 
 **RSSI and SNR are meaningful only when `heard` is set**; they read 0 otherwise.
 

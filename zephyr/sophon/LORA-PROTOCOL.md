@@ -422,7 +422,7 @@ record arrives, so the boards and their configuration are known.
 | `part`, `continues` | only in a continuation file: its part number and the previous file's name |
 | `app` | app version and build, phone model, iOS version |
 | `gateway` | name, firmware and hardware version |
-| `gateway config` | the active Config (PROTOCOL.md § Config frame): role and whether it was set from the app, preset, SF, TX power, frequency, stored peer, RX boost |
+| `gateway config` | the active Config (PROTOCOL.md § Config frame): role and whether it was set from the app, preset, SF, TX power, frequency, stored peer, RX boost, and the record's window length |
 | `sensor` | the sensor the gateway locked onto, with its firmware if the app has seen it advertise; `not locked` otherwise |
 | `sensor config` | only if the app read the sensor's Config this session |
 | `variant rotation` | `off`: one preset for the whole file. `on`: walk-test variant rotation (§ Walk-test mode), so preset, SF and RX boost become row columns |
@@ -434,7 +434,10 @@ record arrives, so the boards and their configuration are known.
 `preset`, `sf`, `rx_boost`; then the record's link figures (`heard`, `lq_pct`,
 `margin_db`, `margin_min_db`, `rssi_avg`, `rssi_min`, `snr_avg`, `snr_min`,
 `samples`, `missing`, `bad`, `wrong_peer`, `last_packet_ms`; § How the gateway
-maps onto the BLE protocol); the position (`lat`, `lon`, `h_accuracy_m`,
+maps onto the BLE protocol). `lq_pct` is computed by the app from `samples`
+and `missing` (PROTOCOL.md § LoRa Link frame); `last_packet_ms` is empty for
+"25.5 s or more, or none", and `bad` and `wrong_peer` saturate at 15. Then the receiver's noise floor (`noise_min`,
+`noise_median`, dBm; empty until #336 measures it); the position (`lat`, `lon`, `h_accuracy_m`,
 `distance_m`, `fix_age_s`); the **sensor's** battery as the gateway relays it
 (`sensor_batt_mv`, `sensor_usb`, `sensor_charging`); how the window's losses
 clustered (`loss_run_1`, `loss_run_2`, `loss_run_3_4`, `loss_run_5_8`,
@@ -482,21 +485,21 @@ changes packet by packet.
   - `config changed`: the last row of a file that a configuration change closed.
 - `missing`: a window the gateway produced that the app never received
   (#334), written before the next record. It has the window number, the time
-  it was due (the previous record's time + 10 s per window), and the latest
+  it was due (the previous record's time + one window length per window), and the latest
   fix **as of that time** with its age then, so it falls in the distance band
   where it was missed. The link columns are empty, and `walktest-report.py`
   counts it per band, never in LQ.
-  - The 8-bit window counter wraps every 256 windows; the elapsed time
-    supplies the whole wraps.
+  - The window counter is 16-bit (#333), so no realistic gap wraps it.
   - A gateway restart starts the counter again and always drops the link. So
     only across a `disconnected` does the app check the jump against the
     clock: one the clock can't account for is a restart and gets no `missing`
     rows. On a link that stayed up, the jump is trusted, so a record
     delivered late still counts its gap.
-  - One case stays ambiguous until #333's boot ID: a restart when the counter
-    was a few windows short of wrapping reads as those few windows missed.
+  - The one blind spot: a restart within about one window of the previous
+    boot falls short by too little to see, giving at most one false row
+    (LORA-LINK-V2-PLAN.md § Why no boot ID).
   - Not written while the variants rotate: the gateway then sends several
-    records per 10 s window.
+    records per window.
   - They are written when the next record reveals the gap, so they follow
     any event rows logged during the outage (`disconnected`, `connected`)
     although their times are earlier. Sort by `time` for a strict timeline.
