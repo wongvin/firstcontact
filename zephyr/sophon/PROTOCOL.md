@@ -348,6 +348,12 @@ should present it to about two decimal places in volts and no further.
 
 ## LoRa Link frame
 
+> **Version 2 is designed but not yet implemented:** see
+> [LORA-LINK-V2-PLAN.md](LORA-LINK-V2-PLAN.md) (#333). It widens `window` to
+> 16 bits, adds the stats window length (`window_s`, #344) and the noise floor
+> (#336), and drops `lq_x10`, which is derivable; it stays at 20 bytes. Version
+> 1, below, is what the firmware sends today.
+
 **20 bytes, little-endian**, from the LoRa Link characteristic (#309). Only a
 **LoRa gateway** (#303) fills it. It describes the **sensor → gateway LoRa
 link**: the leg the app cannot otherwise see. The phone ↔ gateway BLE link is

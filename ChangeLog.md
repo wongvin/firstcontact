@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-21
+
+### docs: design for LoRa Link record version 2 (#333)
+
+- **New `zephyr/sophon/LORA-LINK-V2-PLAN.md`:** version 2 of the gateway's LoRa Link record. Still 20 bytes, with u16 fields aligned and one spare byte last. It widens `window` to 16 bits and adds the stats window length (#344) and the noise floor (#336). It drops `lq_x10`, which is derivable, and narrows `last_packet`, `bad` and `wrong_peer`.
+- No boot ID: the 16-bit counter plus the app's clock check across a dropped link tells restarts apart. Version 1 is dropped. PROTOCOL.md § LoRa Link frame points to the design; not yet implemented.
+
 ## 2026-10-19
 
 ### feat: walk-test CSV logs how LoRa losses cluster (#337)
