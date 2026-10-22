@@ -311,6 +311,7 @@ final class SophonDevice: Identifiable {
         loraSessionSamples += Int(record.samples)
         loraSessionMissing += Int(record.missing)
         loraSessionBad += Int(record.badPackets)
+        if record.badPackets == LoRaLinkRecord.countCeiling, !loraSessionBadSaturated { loraSessionBadSaturated = true }
         return true
     }
 
@@ -645,6 +646,9 @@ final class SophonDevice: Identifiable {
     private(set) var loraSessionSamples = 0
     private(set) var loraSessionMissing = 0
     private(set) var loraSessionBad = 0
+    /// A window reported `bad` at version 2's ceiling of 15 (#333), so
+    /// `loraSessionBad` is a lower bound and is shown as one.
+    private(set) var loraSessionBadSaturated = false
 
     /// Records lost between the gateway and this app, from gaps in the window
     /// counter. Not LoRa loss: a missed BLE notify.
@@ -1065,6 +1069,7 @@ final class SophonDevice: Identifiable {
         loraSessionSamples = 0
         loraSessionMissing = 0
         loraSessionBad = 0
+        loraSessionBadSaturated = false
         loraRecordsMissed = 0
         // offersBattery deliberately NOT cleared -- it describes the GATT
         // database, which survives a reconnect. Same rule as offersLinkParams.

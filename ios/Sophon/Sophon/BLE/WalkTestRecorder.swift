@@ -63,7 +63,7 @@ final class WalkTestRecorder: NSObject {
     @ObservationIgnored private var queue: [Queued] = []
     @ObservationIgnored private var inBackground = false
     /// The last record written, to find the windows missed before the next.
-    @ObservationIgnored private var lastWindow: (number: UInt8, time: Date)?
+    @ObservationIgnored private var lastWindow: WindowMark?
     /// Whether the gateway's link dropped since `lastWindow`: only then can a
     /// restart have reset the counter.
     @ObservationIgnored private var linkDroppedSinceWindow = false
@@ -304,7 +304,7 @@ final class WalkTestRecorder: NSObject {
         before link: LoRaLinkRecord, at time: Date, gaps: [LossGap], complete: Bool
     ) -> [LossGap] {
         defer {
-            lastWindow = (link.window, time)
+            lastWindow = WindowMark(number: link.window, time: time)
             linkDroppedSinceWindow = false
             // Keep only what a later gap could still need: the fix in force at
             // this record and any after it.
@@ -314,13 +314,14 @@ final class WalkTestRecorder: NSObject {
         }
         guard let last = lastWindow, !link.isWalkTest else { return gaps }
         let count = Self.missingWindows(
-            from: last.number, at: last.time, to: link.window, at: time, restartPossible: linkDroppedSinceWindow)
+            from: last, to: WindowMark(number: link.window, time: time),
+            windowSeconds: TimeInterval(link.windowSeconds), restartPossible: linkDroppedSinceWindow)
         guard count > 0 else { return gaps }
         var start = last.time
         for step in 1...count {
-            let due = last.time.addingTimeInterval(Self.windowSeconds * Double(step))
+            let due = last.time.addingTimeInterval(TimeInterval(link.windowSeconds) * Double(step))
             var row = Self.missingRow(
-                window: last.number &+ UInt8(truncatingIfNeeded: step), time: due,
+                window: last.number &+ UInt16(truncatingIfNeeded: step), time: due,
                 fix: fixHistory.last { $0.timestamp <= due }, pin: pin)
             let window = gaps.filter { $0.at > start && $0.at <= due }
             if complete { row.merge(Self.lossFields(window, link: link)) { $1 } }

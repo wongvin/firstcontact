@@ -39,7 +39,8 @@ extension WalkTestRecorder {
             gateway = device.id
             sensorID = link.sensorID
             rotating = link.isWalkTest
-            radio = link.isWalkTest ? nil : [link.preset, link.spreadingFactor, link.rxBoost ? 1 : 0]
+            radio = link.isWalkTest
+                ? nil : [link.preset, link.spreadingFactor, link.rxBoost ? 1 : 0, link.windowSeconds]
             config = device.config.map { state in
                 [Int64(state.active.role.rawValue), Int64(state.active.preset), Int64(state.active.txDbm),
                  Int64(state.active.freqHz)]
@@ -114,6 +115,8 @@ extension WalkTestRecorder {
     ]
     static let positionColumns = ["lat", "lon", "h_accuracy_m", "distance_m", "fix_age_s"]
     static let batteryColumns = ["sensor_batt_mv", "sensor_usb", "sensor_charging"]
+    /// The receiver's noise floor (#336); empty until the gateway measures it.
+    static let noiseColumns = ["noise_min", "noise_median"]
     /// Samples lost in runs of 1, 2, 3–4, 5–8 and 9 or more LoRa packets (#337).
     /// Samples, not run counts, so the five add up to the window's loss as the
     /// app saw it, which the report checks against the gateway's `missing`.
@@ -123,7 +126,7 @@ extension WalkTestRecorder {
     /// record, so they become columns; otherwise they are in the preamble.
     static func columns(rotating: Bool) -> [String] {
         ["type", "time", "window"] + (rotating ? ["preset", "sf", "rx_boost"] : [])
-            + linkColumns + positionColumns + batteryColumns + lossColumns + ["event"]
+            + linkColumns + noiseColumns + positionColumns + batteryColumns + lossColumns + ["event"]
     }
 
     // MARK: Rows
@@ -150,7 +153,11 @@ extension WalkTestRecorder {
             "missing": String(link.missing),
             "bad": String(link.badPackets),
             "wrong_peer": String(link.wrongPeerPackets),
-            "last_packet_ms": String(link.lastPacketMillis),
+            // Empty for "25.5 s or more, or no packet yet": version 2 can't tell
+            // those apart, and a number would read as a measurement.
+            "last_packet_ms": link.lastPacketMillis.map(String.init) ?? "",
+            "noise_min": link.noiseMin.map(String.init) ?? "",
+            "noise_median": link.noiseMedian.map(String.init) ?? "",
         ]
         row.merge(positionFields(fix: fix, pin: pin, now: now)) { $1 }
         if let battery {
@@ -188,39 +195,44 @@ extension WalkTestRecorder {
         return Dictionary(uniqueKeysWithValues: zip(lossColumns, buckets.map(String.init)))
     }
 
-    /// How often a gateway sends a record outside variant rotation.
-    nonisolated static let windowSeconds: TimeInterval = 10
+    /// A record's window number and when it arrived.
+    nonisolated struct WindowMark: Sendable {
+        let number: UInt16
+        let time: Date
+    }
 
     /// The windows missed between a record numbered `previous` and the next,
-    /// numbered `window`; 0 for a restart or a repeat (#334).
+    /// numbered `window`; 0 for a restart or a repeat (#334, #333).
     ///
-    /// The counter is 8-bit, so the jump is known only modulo 256; the elapsed
-    /// time supplies the whole wraps.
+    /// The counter is 16-bit (#333), so no realistic gap wraps it; the
+    /// wrap-safe subtraction still costs nothing.
     ///
     /// - Parameter restartPossible: whether the gateway's link dropped between
     ///   the two records. A restart always drops it. Without a drop the jump is
     ///   trusted as it is, so a record delivered late or bunched with another
     ///   still counts its gap. With a drop, a jump the clock can't account for
-    ///   is the counter starting again, not a gap. One case stays ambiguous until
-    ///   #333's boot ID: a restart when the counter was a few windows short of
-    ///   wrapping reads as those few windows missed.
+    ///   is the counter starting again, not a gap: it comes back short by the
+    ///   windows the old boot had counted (LORA-LINK-V2-PLAN.md § Why no boot
+    ///   ID). Only a restart within about one window of the previous boot slips
+    ///   through, as at most one false row.
     nonisolated static func missingWindows(
-        from previous: UInt8, at previousTime: Date, to window: UInt8, at time: Date, restartPossible: Bool
+        from previous: WindowMark, to next: WindowMark, windowSeconds: TimeInterval, restartPossible: Bool
     ) -> Int {
-        let jump = Int(window &- previous)
-        let steps = (time.timeIntervalSince(previousTime) / windowSeconds).rounded()
-        let wraps = max(0, Int(((steps - Double(jump)) / 256).rounded()))
-        let count = jump + 256 * wraps
-        guard count >= 1 else { return 0 }
-        if restartPossible, abs(Double(count) - steps) > 1.5 { return 0 }
-        return count - 1
+        let jump = Int(next.number &- previous.number)
+        guard jump >= 1, windowSeconds > 0 else { return 0 }
+        let steps = (next.time.timeIntervalSince(previous.time) / windowSeconds).rounded()
+        if restartPossible, abs(Double(jump) - steps) > 1.5 { return 0 }
+        // A jump far beyond anything the clock allows isn't a gap on any path:
+        // never write thousands of rows on the strength of the counter alone.
+        if Double(jump) > steps + 10 { return 0 }
+        return jump - 1
     }
 
     /// A window the gateway produced but the app never received: its number,
     /// when it was due, and the latest fix *as of then*, with its age then --
     /// so the row lands in the distance band where it was missed, not where the
     /// walker was when the gap came to light. The link columns are empty.
-    static func missingRow(window: UInt8, time: Date, fix: CLLocation?, pin: CLLocation?) -> [String: String] {
+    static func missingRow(window: UInt16, time: Date, fix: CLLocation?, pin: CLLocation?) -> [String: String] {
         var row = ["type": "missing", "time": timestamp(time), "window": String(window)]
         row.merge(positionFields(fix: fix, pin: pin, now: time)) { $1 }
         return row
@@ -351,6 +363,7 @@ extension WalkTestRecorder {
         }
         if let link {
             parts.append(link.isWalkTest ? "rotating" : "RX boost \(link.rxBoost ? "on" : "off")")
+            parts.append("window \(link.windowSeconds) s")
         }
         return parts.joined(separator: " · ")
     }
@@ -362,21 +375,27 @@ extension SophonProtocolSelfCheck {
     /// cases the 2026-10-18 bench recordings produced.
     nonisolated static func checkMissingWindows() {
         let start = Date(timeIntervalSince1970: 0)
-        func count(_ previous: UInt8, _ window: UInt8, after seconds: TimeInterval, dropped: Bool = true) -> Int {
+        func count(_ previous: UInt16, _ window: UInt16, after seconds: TimeInterval, dropped: Bool = true) -> Int {
             WalkTestRecorder.missingWindows(
-                from: previous, at: start, to: window, at: start + seconds, restartPossible: dropped)
+                from: .init(number: previous, time: start), to: .init(number: window, time: start + seconds),
+                windowSeconds: 10, restartPossible: dropped)
         }
         assert(count(8, 9, after: 10) == 0, "consecutive windows are no gap")
         assert(count(8, 10, after: 22) == 1, "one window lost; the reconnect read lands off-cadence")
         assert(count(8, 19, after: 112) == 10, "the 2026-10-19 bench outage: 10 windows")
-        assert(count(250, 4, after: 100) == 9, "a gap across the 8-bit wrap")
-        assert(count(255, 0, after: 10) == 0, "the wrap itself is no gap")
+        assert(count(250, 260, after: 100) == 9, "no wrap at 256 any more")
+        assert(count(65530, 4, after: 100) == 9, "the 16-bit wrap is still subtracted safely")
         assert(count(15, 0, after: 18) == 0, "a gateway restart starts the counter again: no gap")
+        assert(count(5, 12, after: 120) == 0, "a restart counted forwards: 7 against 12 on the clock")
         assert(count(8, 8, after: 1) == 0, "a repeated record is no gap")
-        assert(count(10, 12, after: 2580) == 257, "a gap longer than the counter: 258 windows on the clock")
         assert(count(10, 12, after: 0.5, dropped: false) == 1, "bunched delivery on a live link still counts")
         assert(count(10, 12, after: 35, dropped: false) == 1, "a late record on a live link still counts")
         assert(count(10, 12, after: 0.5) == 0, "across a drop, a jump the clock denies is a restart")
+        assert(count(10, 9_000, after: 20, dropped: false) == 0, "a jump the clock can't allow is never a gap")
+        assert(WalkTestRecorder.missingWindows(
+            from: .init(number: 8, time: start), to: .init(number: 19, time: start + 11.2),
+            windowSeconds: 1, restartPossible: true) == 10,
+               "1 s windows (#344) count by the record's own window length")
     }
 
     /// The loss histogram (#337): samples by run length, at V6's k = 4.

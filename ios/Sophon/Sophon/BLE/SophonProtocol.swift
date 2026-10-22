@@ -238,39 +238,54 @@ nonisolated struct BatteryReading: Equatable, Sendable {
 
 }
 
-/// One 10 s window of a gateway's LoRa link statistics (#309).
+/// One window of a gateway's LoRa link statistics (#309), 10 s until #344.
 ///
-/// Mirrors PROTOCOL.md § LoRa Link frame: 20 bytes, little-endian. It describes
-/// the **sensor → gateway LoRa link**, the leg this app cannot otherwise see. The
-/// RSSI and Link Params rows describe the phone ↔ gateway BLE link instead.
+/// Mirrors PROTOCOL.md § LoRa Link frame, version 2 (#333): 20 bytes,
+/// little-endian, every u16 2-byte aligned. It describes the **sensor → gateway
+/// LoRa link**, the leg this app cannot otherwise see. The RSSI and Link Params
+/// rows describe the phone ↔ gateway BLE link instead.
 ///
-/// Exact length, unlike ``BatteryReading``: the record already fills one notify
-/// at ATT MTU 23, so it cannot grow without a version bump. A zero-length read is
-/// the board saying it is not a gateway, and is handled before this is built.
+/// Exact length, unlike ``BatteryReading``: the record fills one notify at ATT
+/// MTU 23, so it cannot grow without a version bump. Version 1 is no longer
+/// read: every board was reflashed with version 2. A zero-length read is the
+/// board saying it is not a gateway, and is handled before this is built.
 nonisolated struct LoRaLinkRecord: Equatable, Sendable {
     static let wireSize = 20
-    static let supportedVersion: UInt8 = 1
+    static let supportedVersion: UInt8 = 2
+    /// `noise_min`/`noise_median` before #336 measures them.
+    static let noiseUnmeasured: Int8 = 0x7F
+    /// Where `bad` and `wrong_peer` saturate: a 15 means 15 or more.
+    static let countCeiling: UInt8 = 15
+    /// The window lengths a gateway can report (#344).
+    static let windowRange: ClosedRange<UInt8> = 1...10
 
     let preset: UInt8
-    let rxBoost: Bool
-    let isWalkTest: Bool
-    /// Any packet arrived in the window. RSSI and SNR mean nothing without it.
-    let heard: Bool
-    let spreadingFactor: UInt8
-    /// Rolling, +1 per record; a jump means a notify was missed.
-    let window: UInt8
-    /// Link quality in tenths of a percent, or nil when nothing was expected.
-    let linkQualityTenths: UInt16?
+    /// The window this record covers, in seconds.
+    let windowSeconds: UInt8
+    let sensorID: UInt16
+    /// Rolling, +1 per record; a jump means a notify was missed. 16 bits, so it
+    /// wraps only after about 7.6 days of 10 s windows.
+    let window: UInt16
     let rssiAvg: Int8
     let rssiMin: Int8
     let snrAvg: Int8
     let snrMin: Int8
     let samples: UInt16
     let missing: UInt16
+    /// Time since the last packet at the window's close, in 100 ms units; 255 is
+    /// 25.5 s or more, or no packet yet.
+    let lastPacketTenths: UInt8
+    /// The receiver's noise floor over the window, in dBm, or nil until #336.
+    let noiseMin: Int8?
+    let noiseMedian: Int8?
+    /// Each saturates at 15.
     let badPackets: UInt8
     let wrongPeerPackets: UInt8
-    let lastPacketMillis: UInt16
-    let sensorID: UInt16
+    let rxBoost: Bool
+    let isWalkTest: Bool
+    /// Any packet arrived in the window. RSSI and SNR mean nothing without it.
+    let heard: Bool
+    let spreadingFactor: UInt8
 
     init?(_ data: Data) {
         guard data.count == Self.wireSize else { return nil }
@@ -280,29 +295,43 @@ nonisolated struct LoRaLinkRecord: Equatable, Sendable {
 
         func u16(_ offset: Int) -> UInt16 { UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8) }
         func i8(_ offset: Int) -> Int8 { Int8(bitPattern: bytes[offset]) }
+        func noise(_ offset: Int) -> Int8? { i8(offset) == Self.noiseUnmeasured ? nil : i8(offset) }
 
-        preset = bytes[1]
-        rxBoost = bytes[2] & 0x01 != 0
-        isWalkTest = bytes[2] & 0x02 != 0
-        heard = bytes[2] & 0x04 != 0
-        spreadingFactor = bytes[2] >> 4
-        window = bytes[3]
-        let lq = u16(4)
-        linkQualityTenths = lq == 0xFFFF ? nil : lq
+        guard Self.windowRange.contains(bytes[1] >> 4) else { return nil }
+        preset = bytes[1] & 0x0F
+        windowSeconds = bytes[1] >> 4
+        sensorID = u16(2)
+        window = u16(4)
         rssiAvg = i8(6)
         rssiMin = i8(7)
         snrAvg = i8(8)
         snrMin = i8(9)
         samples = u16(10)
         missing = u16(12)
-        badPackets = bytes[14]
-        wrongPeerPackets = bytes[15]
-        lastPacketMillis = u16(16)
-        sensorID = u16(18)
+        lastPacketTenths = bytes[14]
+        noiseMin = noise(15)
+        noiseMedian = noise(16)
+        badPackets = bytes[17] & 0x0F
+        wrongPeerPackets = bytes[17] >> 4
+        rxBoost = bytes[18] & 0x01 != 0
+        isWalkTest = bytes[18] & 0x02 != 0
+        heard = bytes[18] & 0x04 != 0
+        spreadingFactor = bytes[18] >> 4
     }
 
-    /// Link quality as a percentage, or nil when nothing was expected.
-    var linkQuality: Double? { linkQualityTenths.map { Double($0) / 10 } }
+    /// Link quality as a percentage: samples received ÷ expected, or nil when
+    /// nothing was expected. Computed: version 2 doesn't send it (#333).
+    var linkQuality: Double? {
+        let expected = Int(samples) + Int(missing)
+        guard expected > 0 else { return nil }
+        // Tenths, truncated, exactly as the gateway's console figure.
+        return Double(Int(samples) * 1000 / expected) / 10
+    }
+
+    /// Milliseconds since the last packet, or nil for 25.5 s or more, or none.
+    var lastPacketMillis: Int? {
+        lastPacketTenths == 255 ? nil : Int(lastPacketTenths) * 100
+    }
 
     /// The SNR below which this spreading factor stops demodulating
     /// (LORA-UPDATED-PLAN.md § LoRa variables).
@@ -734,56 +763,62 @@ nonisolated enum SophonProtocolSelfCheck {
     }
 
     private static func checkLoRaLink() {
-        // Hand-transcribed from PROTOCOL.md § LoRa Link frame, every multi-byte
-        // field asymmetric so a byte swap cannot pass.
+        // Hand-transcribed from PROTOCOL.md § LoRa Link frame (version 2), every
+        // multi-byte field asymmetric so a byte swap cannot pass.
         let wire = Data([
-            0x01,       // version            @0
-            0x02,       // preset V3          @1
-            0x75,       // boost, heard, SF7  @2
-            0x2A,       // window 42          @3
-            0xE4, 0x03, // lq_x10 996         @4
-            0xA0,       // rssi_avg -96       @6
-            0x9D,       // rssi_min -99       @7
-            0x05,       // snr_avg  +5        @8
-            0xFE,       // snr_min  -2        @9
-            0x12, 0x02, // samples 530        @10
-            0x03, 0x00, // missing 3          @12
-            0x04,       // bad 4              @14
-            0x00,       // wrong_peer 0       @15
-            0x2C, 0x01, // last_packet 300 ms @16
-            0xF0, 0x86, // sensor 0x86F0      @18
+            0x02,       // version 2                    @0
+            0xA2,       // preset V3 (2), window 10 s   @1
+            0xF0, 0x86, // sensor 0x86F0                @2
+            0x2A, 0x01, // window 298                   @4
+            0xA0,       // rssi_avg -96                 @6
+            0x9D,       // rssi_min -99                 @7
+            0x05,       // snr_avg  +5                  @8
+            0xFE,       // snr_min  -2                  @9
+            0x12, 0x02, // samples 530                  @10
+            0x03, 0x00, // missing 3                    @12
+            0x03,       // last packet 300 ms           @14
+            0x7F,       // noise_min: not measured      @15
+            0x97,       // noise_median -105 dBm        @16
+            0x24,       // bad 4, wrong_peer 2          @17
+            0x75,       // boost, heard, SF7            @18
+            0x00,       // reserved                     @19
         ])
         guard let record = LoRaLinkRecord(wire) else {
             assertionFailure("LoRaLinkRecord rejected a valid 20-byte record")
             return
         }
-        assert(record.preset == 2 && record.presetName == "V3", "preset misread")
+        assert(record.preset == 2 && record.presetName == "V3" && record.windowSeconds == 10, "byte 1 misread")
+        assert(record.sensorID == 0x86F0 && record.sensorName == "Sophon-86F0", "sensor id byte-swapped")
+        assert(record.window == 298, "16-bit window byte-swapped")
         assert(record.rxBoost && record.heard && !record.isWalkTest && record.spreadingFactor == 7, "flags misread")
-        assert(record.window == 42, "window misread")
-        assert(record.linkQualityTenths == 996 && record.linkQuality == 99.6, "lq decoded byte-swapped")
+        assert(record.linkQuality == 99.4, "LQ is samples / (samples + missing), in truncated tenths")
         assert(record.rssiAvg == -96 && record.rssiMin == -99, "RSSI sign or offset wrong")
         assert(record.snrAvg == 5 && record.snrMin == -2, "SNR sign or offset wrong")
         assert(record.samples == 530 && record.missing == 3, "sample counts byte-swapped")
-        assert(record.badPackets == 4 && record.wrongPeerPackets == 0, "packet counts misread")
-        assert(record.lastPacketMillis == 300, "last packet age byte-swapped")
-        assert(record.sensorID == 0x86F0 && record.sensorName == "Sophon-86F0", "sensor id byte-swapped")
+        assert(record.badPackets == 4 && record.wrongPeerPackets == 2, "bad / wrong peer nibbles swapped")
+        assert(record.lastPacketMillis == 300, "last packet is 100 ms units")
+        assert(record.noiseMin == nil && record.noiseMedian == -105, "0x7F is 'not measured'; noise is signed")
         assert(record.marginDB == 12.5, "margin should be SNR 5 - SNRlim(SF7) -7.5")
         assert(record.worstMarginDB == 5.5, "worst margin should be SNR min -2 - SNRlim(SF7) -7.5")
         assert(LoRaLinkRecord(wire.dropLast()) == nil, "short record must be rejected")
         assert(LoRaLinkRecord(wire + Data([0x00])) == nil, "long record must be rejected")
         assert(LoRaLinkRecord(Data()) == nil, "zero bytes is 'not a gateway', not a record")
         var nothing = wire
-        nothing[4] = 0xFF; nothing[5] = 0xFF; nothing[2] = 0x71
+        nothing[10] = 0; nothing[11] = 0; nothing[12] = 0; nothing[13] = 0; nothing[14] = 0xFF; nothing[18] = 0x71
         let quiet = LoRaLinkRecord(nothing)
-        assert(quiet?.linkQuality == nil && quiet?.marginDB == nil, "0xFFFF / unheard must read as no data")
+        assert(quiet?.linkQuality == nil && quiet?.marginDB == nil && quiet?.lastPacketMillis == nil,
+               "nothing expected / unheard / no packet must read as no data")
         var walk = wire
-        walk[2] = 0x77 // + walk-test bit
+        walk[18] = 0x77 // + walk-test bit
         let walkRecord = LoRaLinkRecord(walk)
         assert(walkRecord?.isWalkTest == true && walkRecord?.rxBoost == true && walkRecord?.heard == true,
                "walk-test flag read from the wrong bit")
-        var v2 = wire
-        v2[0] = 0x02
-        assert(LoRaLinkRecord(v2) == nil, "an unknown version must be dropped")
+        var v1 = wire
+        v1[0] = 0x01
+        assert(LoRaLinkRecord(v1) == nil, "version 1 is no longer read (#333)")
+        var noWindow = wire
+        noWindow[1] = 0x02
+        assert(LoRaLinkRecord(noWindow) == nil, "a window length outside 1–10 is malformed")
     }
 
     private static func checkBattery() {

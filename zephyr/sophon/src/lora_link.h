@@ -41,7 +41,10 @@ bool lora_link_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags);
  * One per 10 s stats window, 20 bytes so it fits a single notify at ATT MTU
  * 23. False until the first window has closed, and always false off-gateway.
  */
-#define LORA_LINK_RECORD_SIZE 20
+#define LORA_LINK_RECORD_SIZE      20
+/* PROTOCOL.md § LoRa Link frame; version 2 since #333. */
+#define LORA_LINK_RECORD_VERSION   2
+#define LORA_LINK_NOISE_UNMEASURED 0x7F
 bool lora_link_record(uint8_t out[LORA_LINK_RECORD_SIZE]);
 
 /*
