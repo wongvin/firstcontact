@@ -589,6 +589,15 @@ private struct DeviceDetailView: View {
                     between two iOS devices — so this is reported from the data rather than from the link.
                     """)
             }
+            if device.advertisesAsSensor, !device.isReleasedByUser, device.isStaleReleased {
+                // A sensor is watched like a released board (#351), so it can go
+                // stale too; the hidden Connect button needs the same explanation.
+                Text("""
+                    Not heard from. This sensor has stopped advertising: it is off, out of range, or another \
+                    device has connected to it. It will be dropped from the list when you go back, and \
+                    listed again under Sensors if it returns.
+                    """)
+            }
             if case .released = device.linkStatus(asOf: now) {
                 if device.isStaleReleased {
                     Text("""

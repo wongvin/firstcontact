@@ -487,10 +487,20 @@ final class SophonDevice: Identifiable {
     /// views that read it redraw when it flips.
     private(set) var isStaleReleased = false
 
+    /// Whether this board's presence is judged from its advertisements: a
+    /// board the user released, or one listed under Sensors that the app isn't
+    /// connected to (#351). Both stay listed only while they keep advertising;
+    /// a board the app holds is judged by its link instead.
+    var isWatchedForSilence: Bool { (isReleasedByUser || advertisesAsSensor) && !isHeld }
+
     /// Recomputes ``isStaleReleased``. Called by the sweep, not by a view.
+    ///
+    /// Covers a sensor the app isn't holding as well as a released board
+    /// (#351), so a sensor powered off leaves the list instead of staying
+    /// "Discovered" forever.
     func evaluateStaleness(asOf now: Date = Date()) {
         let stale: Bool
-        if !isReleasedByUser || isHeld {
+        if !isWatchedForSilence {
             stale = false
         } else if let lastSeenAt {
             stale = now.timeIntervalSince(lastSeenAt) > Self.releasedSilenceThreshold

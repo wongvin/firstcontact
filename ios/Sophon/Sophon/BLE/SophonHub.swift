@@ -117,7 +117,7 @@ final class SophonHub: NSObject {
     /// for our silence rather than theirs.
     private func restampReleased() {
         let now = Date()
-        for device in devices where device.isReleasedByUser {
+        for device in devices where device.isWatchedForSilence {
             device.lastSeenAt = now
         }
     }
@@ -190,6 +190,10 @@ final class SophonHub: NSObject {
     /// advertises again it is discovered fresh and auto-connects with no special
     /// case anywhere.
     func forget(_ device: SophonDevice) {
+        // A connect re-armed for a sensor being configured may still be pending,
+        // and iOS never times one out: cancel it, or the board is taken when it
+        // returns with no device left to receive it (#351 review, finding 4).
+        central.cancelPeripheralConnection(device.peripheral)
         byID[device.id] = nil
         devices.removeAll { $0.id == device.id }
         statsCharacteristics[device.id] = nil
@@ -218,7 +222,9 @@ final class SophonHub: NSObject {
         // actually listening -- otherwise it measures our own silence and forgets
         // peripherals for it (#241). radio == .ready is exactly "the scan is
         // running": applyRadioState sets it there and nowhere else.
-        let wantSweep = radio == .ready && devices.contains { $0.isReleasedByUser }
+        // Released boards and unheld sensors alike (#351): both are listed only
+        // while they keep advertising.
+        let wantSweep = radio == .ready && devices.contains { $0.isWatchedForSilence }
 
         guard wantSweep else {
             sweepTask?.cancel()
@@ -360,7 +366,7 @@ final class SophonHub: NSObject {
     /// callbacks. Resolving them in one place means the answer cannot depend on
     /// which one happened to fire last, which is exactly the bug that appears
     /// when a second condition is bolted into the state callback.
-    private func applyRadioState() {
+    func applyRadioState() {
         let wantScan = (managerState == .poweredOn) && !isSuspended
 
         // RSSI polling is decided here too, for the reason this function exists:
@@ -382,7 +388,10 @@ final class SophonHub: NSObject {
         // its liveness actually has to be watched (#235). With it off, iOS
         // consolidates repeat sightings into one discovery event, which is why
         // lastSeenAt cannot be trusted outside this window.
-        let wantDuplicates = devices.contains { $0.isReleasedByUser }
+        // A sensor the app isn't holding is watched like a released board (#351):
+        // without duplicates iOS reports it once, and its silence can't be seen.
+        // That costs a callback per advertisement while one is listed.
+        let wantDuplicates = devices.contains { $0.isWatchedForSilence }
 
         if wantScan {
             if radio != .ready || scanningWithDuplicates != wantDuplicates {
@@ -454,6 +463,11 @@ final class SophonHub: NSObject {
     /// Everything a lost link invalidates, shared by didDisconnectPeripheral and
     /// the radio going off (#339).
     private func linkLost(_ device: SophonDevice, reason: String?) {
+        // The link was evidence the board was there up to now, and a board
+        // stops advertising while connected, so its last sighting predates the
+        // link. Judged against that, a sensor would be forgotten the instant
+        // it's let go, before it can advertise again (#351 review, finding 1).
+        device.lastSeenAt = Date()
         // Mirrors where `connected` is logged (didConnect), so the walk-test log
         // pairs them: not for a connect that never completed, and once per
         // loss, however many callbacks report it (#339 review, finding 2).
@@ -588,7 +602,7 @@ extension SophonHub: CBCentralManagerDelegate {
                 // backgrounded Sophon keeps re-advertising with no name, and
                 // clobbering the good one would rename it to the phone's own
                 // device name mid-session.
-                if let advertisedName { device.displayName = advertisedName }
+                if let advertisedName, device.displayName != advertisedName { device.displayName = advertisedName }
             } else {
                 device = SophonDevice(peripheral: peripheral, advertisedName: advertisedName)
                 self.byID[peripheral.identifier] = device
@@ -613,8 +627,11 @@ extension SophonHub: CBCentralManagerDelegate {
                 device.advertisementKeys.formUnion(keySet)
             }
 
-            if let identity { device.identity = identity }
-            if let txPower { device.txPower = txPower }
+            // Guarded like advertisementKeys above: with duplicate reporting on,
+            // which it now is whenever a sensor is listed (#351), these arrive
+            // tens of times a second, and an equal write still redraws.
+            if let identity, device.identity != identity { device.identity = identity }
+            if let txPower, device.txPower != txPower { device.txPower = txPower }
             self.noteRoleAdvertised(device, sensor: sensorAdvert, sophon: advertisesSophon)
 
             // Before the released-guard below, deliberately: this is the only
@@ -690,6 +707,8 @@ extension SophonHub: CBCentralManagerDelegate {
         let reason = error?.localizedDescription
         Task { @MainActor in
             self.byID[peripheral.identifier]?.state = .disconnected(reason: reason)
+            // No longer held, so watched for silence again (#351 review, finding 6).
+            self.applyRadioState()
         }
     }
 
@@ -702,6 +721,8 @@ extension SophonHub: CBCentralManagerDelegate {
         Task { @MainActor in
             guard let device = self.byID[peripheral.identifier] else { return }
             self.linkLost(device, reason: reason)
+            // A sensor no longer held is watched for silence again (#351).
+            if device.advertisesAsSensor { self.applyRadioState() }
 
             // Do not re-arm a link that was dropped on purpose. Without this,
             // suspend()'s cancels each bounce straight back into a connect() and
@@ -734,6 +755,7 @@ extension SophonHub: CBCentralManagerDelegate {
             if device.expectingSensorRestart {
                 device.expectingSensorRestart = false
                 device.advertisesAsSensor = true
+                self.applyRadioState() // now watched for silence (#351 review, finding 2)
                 return
             }
             if device.advertisesAsSensor, !device.sensorSessionRequested { return }

@@ -2,6 +2,12 @@
 
 ## 2026-10-22
 
+### fix: a sensor turned off leaves the Sensors list (#351)
+
+- **A board listed under Sensors** is now watched for silence like a released board: duplicate sightings are on while one is listed, and the sweep drops it about 15 s after it stops advertising. Before, it stayed "Discovered" forever.
+- **A sensor let go after a connection isn't forgotten on the spot:** the link counts as a sighting.
+- **Also:** a stale sensor's detail screen explains its missing Connect button; `forget` cancels any pending connect; per-advertisement writes are guarded, so the faster sightings don't redraw every row.
+
 ### feat: app shows a record version mismatch (#346)
 
 - **LoRa Link and Config frames in a version this app doesn't read** are now explained on screen instead of only logged:
