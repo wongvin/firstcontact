@@ -290,6 +290,7 @@ final class SophonDevice: Identifiable {
     /// needed for invalidation either.
     @discardableResult
     func ingestLoRaLink(_ record: LoRaLinkRecord) -> Bool {
+        if loraLinkMismatch != nil { loraLinkMismatch = nil }
         // The read straight after a (re)connect returns the gateway's latest
         // record, which may be the one already notified. Not new data, and it
         // must not become a second walk-test row.
@@ -630,6 +631,8 @@ final class SophonDevice: Identifiable {
 
     /// The config read failed: an answer, not still loading.
     var configReadFailed = false
+    /// The Config read came back in a version this app doesn't read (#346).
+    var configMismatch: VersionMismatch?
 
     /// The latest LoRa Link record, or nil until a gateway sends one. Nil on a
     /// direct board for good, which is what keeps the LoRa section off screen
@@ -657,6 +660,9 @@ final class SophonDevice: Identifiable {
     /// Records lost between the gateway and this app, from gaps in the window
     /// counter. Not LoRa loss: a missed BLE notify.
     private(set) var loraRecordsMissed = 0
+    /// LoRa Link records arrive in a version this app doesn't read (#346).
+    /// Cleared by the next record it does read, and with the session.
+    var loraLinkMismatch: VersionMismatch?
 
     /// The last record ingested, kept across `resetLinkStats()` on purpose. The
     /// window counter lives on the gateway's uptime, not this app's session, so
@@ -1051,6 +1057,7 @@ final class SophonDevice: Identifiable {
         configWritePending = false
         configWriteError = nil
         configReadFailed = false
+        configMismatch = nil
         configAwaitingStore = nil
         framesReceived = 0
         seqGaps = 0
@@ -1075,6 +1082,7 @@ final class SophonDevice: Identifiable {
         loraSessionBad = 0
         loraSessionBadSaturated = false
         loraRecordsMissed = 0
+        loraLinkMismatch = nil
         // offersBattery deliberately NOT cleared -- it describes the GATT
         // database, which survives a reconnect. Same rule as offersLinkParams.
         // offersLinkParams is deliberately NOT cleared here. It describes the

@@ -387,6 +387,32 @@ nonisolated struct LoRaLinkRecord: Equatable, Sendable {
     }
 }
 
+/// A versioned frame from a board that this app doesn't read (#346): older
+/// firmware, or firmware newer than the app. The fix differs, so the app says
+/// which, instead of only dropping the frame.
+nonisolated enum VersionMismatch: Equatable, Sendable {
+    /// The board's firmware predates the version this app reads.
+    case older(UInt8)
+    /// The board's firmware is newer than this app.
+    case newer(UInt8)
+
+    /// Nil when the versions match.
+    static func check(received: UInt8, supported: UInt8) -> VersionMismatch? {
+        received == supported ? nil : received < supported ? .older(received) : .newer(received)
+    }
+
+    /// One sentence for the user. `frame` names what the board sends, and
+    /// `firmware` the first firmware that sends the version this app reads.
+    func message(frame: String, firmware: String) -> String {
+        switch self {
+        case .older(let version):
+            "This board sends \(frame) version \(version). Update its firmware over the air to \(firmware) or later."
+        case .newer(let version):
+            "This board sends \(frame) version \(version), newer than this app reads. Update the Sophon app."
+        }
+    }
+}
+
 /// What a Sophon says about itself before you connect.
 ///
 /// Parsed from `CBAdvertisementDataManufacturerDataKey`. Mirrors
@@ -693,6 +719,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkIdentity()
         checkLinkParams()
         checkLoRaLink()
+        checkVersionMismatch()
         checkUptimeFormat()
         checkBattery()
         checkConfig()
@@ -760,6 +787,16 @@ nonisolated enum SophonProtocolSelfCheck {
                "TxStats wire layout disagrees with PROTOCOL.md")
         assert(TxStats(expected) == stats,
                "TxStats does not decode its own PROTOCOL.md byte vector")
+    }
+
+    private static func checkVersionMismatch() {
+        assert(VersionMismatch.check(received: 2, supported: 2) == nil, "a match is no mismatch")
+        assert(VersionMismatch.check(received: 1, supported: 2) == .older(1), "an older version is older")
+        assert(VersionMismatch.check(received: 3, supported: 2) == .newer(3), "a newer version is newer")
+        let older = VersionMismatch.older(1).message(frame: "LoRa Link", firmware: "2.29.0")
+        assert(older.contains("Update its firmware"), "older firmware is the board's to update")
+        let newer = VersionMismatch.newer(3).message(frame: "LoRa Link", firmware: "2.29.0")
+        assert(newer.contains("Update the Sophon app"), "newer firmware means the app is behind")
     }
 
     private static func checkLoRaLink() {
