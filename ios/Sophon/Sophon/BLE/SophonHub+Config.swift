@@ -137,9 +137,11 @@ extension SophonHub {
     func noteRoleAdvertised(_ device: SophonDevice, sensor: Bool, sophon: Bool) {
         if sensor, !device.advertisesAsSensor {
             device.advertisesAsSensor = true
+            applyRadioState() // a sensor's silence is watched (#351)
         } else if sophon, device.advertisesAsSensor {
             device.advertisesAsSensor = false
             device.sensorSessionRequested = false
+            applyRadioState()
         }
     }
 }
