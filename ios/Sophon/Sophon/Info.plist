@@ -59,6 +59,47 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 
+	<!-- Firmware images for over-the-air updates (#357). scripts/airdrop-fw.sh
+	     sends the signed MCUboot image as a .sophonfw file, and these keys make
+	     AirDrop and Files offer "Open in Sophon". A type of its own rather than
+	     .bin, which is too generic to claim. The app keeps the image in
+	     Application Support, not Documents, so it does not appear in Files. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.wongvin.sophon.firmware</string>
+			<key>UTTypeDescription</key>
+			<string>Sophon firmware image</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>sophonfw</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Sophon firmware image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.wongvin.sophon.firmware</string>
+			</array>
+		</dict>
+	</array>
+
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Keeps Sophon running while it streams motion in the background. During a LoRa walk-test recording, saves your position with each link reading on this iPhone, so range can be measured against distance. Nothing is sent anywhere unless you share the recording.</string>
 

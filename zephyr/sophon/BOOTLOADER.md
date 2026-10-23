@@ -500,6 +500,39 @@ Three things about it that are not obvious:
   backgrounded iOS app reclaims the board in the gap after the upload and the run
   fails partway. Force-quit it, do not merely disconnect.
 
+### From the iPhone (#357)
+
+The Sophon app runs the same cycle over the link it already holds, so nothing
+has to be force-quit and the board need not come to the desk:
+
+1. `scripts/airdrop-fw.sh` copies the latest MCUboot build to
+   `build-mcuboot/sophon-<version>.sophonfw` and opens the AirDrop window. Pick
+   the iPhone; it offers to open the file in Sophon, which keeps it (one image,
+   the last received) after checking its header and SHA-256.
+2. Any connected board advertising firmware older than the held image shows
+   **Update to &lt;version&gt;** under Configuration, beside #346's warning when
+   its Config frame is also older than the app reads. The comparison is the
+   advertised major.minor, so an equal minor is never offered.
+3. The app uploads with Nordic's iOSMcuManagerLibrary in **test-only** mode,
+   resets the board, waits for the swap, and reads back slot 0: the new version,
+   on trial, or the old one if it reverted.
+
+A cancelled upload of the same image **resumes**: the board keeps the upload's
+SHA-256 and offset in RAM and answers the next first chunk with how far it got
+(`zephyr_img_mgmt.c`). A restart, or a different image, starts again at 0.
+
+**The app never confirms.** The board keeps the image by its own rule, on its
+first delivered frame or LoRa send, exactly as after `flash-ota.sh`. Before
+uploading, the app refuses a board whose running image is still on trial, or
+that has an update pending: in those states the library would confirm the
+running image, or reset the board, on its own to free the spare slot.
+
+nRF Connect Device Manager, built on the same library, refuses to upload below
+an MTU of 73. That floor is in the library's `setMtu()`, which an MTU chosen by
+hand goes through; the upload itself sends each packet at the board's
+reassembly-buffer size (from MCUmgr parameters), split into writes of whatever
+iOS negotiated, 20 bytes here. The app never sets an MTU.
+
 ### Why the application cannot simply stay at 0x27000
 
 An MCUboot image is `header ‖ vectors ‖ code ‖ signature TLVs`, and the header is

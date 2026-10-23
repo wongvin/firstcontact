@@ -33,6 +33,10 @@ final class SophonHub: NSObject {
     /// Internal, not private, for `SophonHub+Config.swift` (#329).
     var configCharacteristics: [UUID: CBCharacteristic] = [:]
     let walkTest = WalkTestRecorder() // #309: hub-owned so a recording outlives the detail view
+    /// The image this iPhone holds, and the update using it (#357). Hub-owned
+    /// like `walkTest`: an update outlives leaving the detail view.
+    let firmware = FirmwareStore()
+    let updater = FirmwareUpdater()
 
     /// Peripherals that accepted a connection but had no Sophon service behind
     /// it. Tracked so the disconnect they are about to get is not treated as a

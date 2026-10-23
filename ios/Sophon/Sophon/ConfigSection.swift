@@ -8,6 +8,12 @@ import SwiftUI
 /// running and which are only stored.
 struct ConfigSection: View {
     let device: SophonDevice
+    /// The over-the-air update (#357), offered on a board older than the held
+    /// image and beside the version warning.
+    let firmware: FirmwareStore
+    let updater: FirmwareUpdater
+    let recording: Bool
+    let onUpdate: () -> Void
     /// Opens the editor on this snapshot. The sheet itself is attached by the
     /// detail view, outside its List (see ``View/configEditor(item:device:onWrite:)``).
     let onEdit: (EditTarget) -> Void
@@ -39,7 +45,8 @@ struct ConfigSection: View {
                         .foregroundStyle(.orange)
                     }
                     Button("Edit…") { onEdit(EditTarget(state: state)) }
-                        .disabled(!device.state.isConnected || device.configWritePending)
+                        .disabled(!device.state.isConnected || device.configWritePending
+                                  || updater.phase(for: device)?.isBusy == true)
                 } else if let mismatch = device.configMismatch {
                     // Config version 2 arrived with 2.30.0 (#344).
                     Text(mismatch.message(frame: "Config", firmware: "2.30.0")).foregroundStyle(.orange)
@@ -50,6 +57,8 @@ struct ConfigSection: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                FirmwareUpdateRows(device: device, firmware: firmware, updater: updater,
+                                   warned: firmwareWarning, recording: recording, onUpdate: onUpdate)
                 if device.configWritePending {
                     LabeledContent("Saving") { ProgressView() }
                 }
@@ -86,6 +95,12 @@ struct ConfigSection: View {
                 Text("Changes are stored on the board and take effect when it restarts.")
             }
         }
+    }
+
+    /// The warning above is the older-firmware one (#346).
+    private var firmwareWarning: Bool {
+        guard device.config == nil, case .older = device.configMismatch else { return false }
+        return true
     }
 
     private func roleText(_ state: ConfigState) -> String {

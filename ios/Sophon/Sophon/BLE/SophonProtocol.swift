@@ -419,8 +419,9 @@ nonisolated enum VersionMismatch: Equatable, Sendable {
 /// `struct sophon_mfg_data` in `zephyr/sophon/src/version.h`; any change there
 /// needs the same change here.
 ///
-/// Every field is **display-only**. Nothing branches on them — in particular,
-/// connection policy must not, because an iOS peripheral cannot advertise
+/// Every field is **display-only**, except that the firmware version decides
+/// whether an update is offered (#357). Nothing else branches on them — in
+/// particular, connection policy must not, because an iOS peripheral cannot advertise
 /// manufacturer data at all, so the simulator never has any of this.
 nonisolated struct SophonIdentity: Equatable, Sendable {
     /// Minimum, not exact. Trailing bytes are ignored so that appending a field
@@ -463,6 +464,13 @@ nonisolated struct SophonIdentity: Equatable, Sendable {
         hardwareVersion = bytes[5]
         firmwareMajor = bytes[6]
         firmwareMinor = bytes[7]
+    }
+
+    /// The same identity on other firmware: what the board will advertise
+    /// after an over-the-air update (#357).
+    func withFirmware(major: UInt8, minor: UInt8) -> SophonIdentity {
+        SophonIdentity(scanRspVersion: scanRspVersion, deviceType: deviceType,
+                       hardwareVersion: hardwareVersion, firmwareMajor: major, firmwareMinor: minor)
     }
 
     init(scanRspVersion: UInt8, deviceType: UInt16, hardwareVersion: UInt8,
@@ -725,6 +733,8 @@ nonisolated enum SophonProtocolSelfCheck {
         checkConfig()
         checkMissingWindows()
         checkLossHistogram()
+        checkFirmwareImage()
+        checkFirmwareRefusals()
     }
 
     private static func checkMotionFrame() {
