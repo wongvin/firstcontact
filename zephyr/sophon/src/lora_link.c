@@ -226,6 +226,25 @@ static struct {
 	int8_t snr_min;
 } gw_stats;
 
+/*
+ * The receiver's noise floor (#336; NOISE-FLOOR-PLAN.md). The radio's
+ * instantaneous RSSI is sampled once in the middle of the quiet gap after each
+ * received packet. After a packet is lost -- or fails its CRC, which never
+ * reaches gateway_rx -- sampling stays in step with the sensor's schedule, at
+ * each expected gap centre, for NOISE_LOCKED_MS; only after that much silence
+ * does it run free every NOISE_IDLE_MS. A free-running timer would drift onto
+ * packets still being sent (#336 review). Samples are binned in 1 dB steps so
+ * each window's minimum and median come out without keeping them. System work
+ * queue only, like all other radio access here, so no lock.
+ */
+#define NOISE_IDLE_MS   100
+#define NOISE_LOCKED_MS 1000
+#define NOISE_BINS      128 /* bin i holds -i dBm; -127 dBm and below share 127 */
+static uint32_t noise_gap_delay_ms;
+static uint32_t noise_period_ms; /* the sensor's packet period at this preset */
+static uint16_t noise_hist[NOISE_BINS];
+static uint16_t noise_count;
+
 static struct k_spinlock relay_lock;
 static struct {
 	bool valid;
@@ -327,6 +346,88 @@ static void store_status(const struct lora_status *s)
 	}
 }
 
+/* SX126x GetRssiInst: opcode 0x15, then the status byte, then RssiInst; the
+ * power is -RssiInst / 2 dBm. Valid in receive mode, and harmless to it. */
+static int radio_rssi_inst(int16_t *dbm)
+{
+	uint8_t tx[3] = {0x15, 0x00, 0x00};
+	uint8_t rx[3] = {0};
+	const struct spi_buf tx_buf = {.buf = tx, .len = sizeof(tx)};
+	const struct spi_buf rx_buf = {.buf = rx, .len = sizeof(rx)};
+	const struct spi_buf_set tx_set = {.buffers = &tx_buf, .count = 1};
+	const struct spi_buf_set rx_set = {.buffers = &rx_buf, .count = 1};
+	int err;
+
+	for (int i = 0; gpio_pin_get_dt(&lora_busy) > 0; i++) {
+		if (i >= 100) {
+			return -EBUSY;
+		}
+		k_busy_wait(100);
+	}
+	err = spi_transceive_dt(&lora_spi, &tx_set, &rx_set);
+	if (err == 0) {
+		*dbm = -(int16_t)(rx[2] / 2);
+	}
+	return err;
+}
+
+static void noise_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(noise_work, noise_handler);
+
+static void noise_handler(struct k_work *work)
+{
+	int64_t now = k_uptime_get();
+	int64_t quiet_for = last_rx_ms < 0 ? INT64_MAX : now - last_rx_ms;
+	int16_t dbm;
+
+	ARG_UNUSED(work);
+
+	if (radio_rssi_inst(&dbm) == 0 && noise_count < UINT16_MAX) {
+		noise_hist[MIN(-dbm, NOISE_BINS - 1)]++;
+		noise_count++;
+	}
+
+	/*
+	 * A received packet reschedules this mid-gap (gateway_rx). Until one
+	 * does, aim at the next gap the sensor's schedule predicts; after
+	 * NOISE_LOCKED_MS of silence nobody is sending, and any time will do.
+	 */
+	if (quiet_for < NOISE_LOCKED_MS && noise_period_ms > 0) {
+		int64_t m = (quiet_for - noise_gap_delay_ms) / noise_period_ms + 1;
+		int64_t next = last_rx_ms + noise_gap_delay_ms + m * noise_period_ms;
+
+		(void)k_work_schedule(&noise_work, K_MSEC(MAX(next - now, 1)));
+	} else {
+		(void)k_work_schedule(&noise_work, K_MSEC(NOISE_IDLE_MS));
+	}
+}
+
+/* This window's noise minimum and median, in dBm, or 0x7F with no samples. */
+static void noise_summary(uint8_t *min_out, uint8_t *median_out)
+{
+	uint32_t seen = 0;
+
+	*min_out = LORA_LINK_NOISE_UNMEASURED;
+	*median_out = LORA_LINK_NOISE_UNMEASURED;
+	if (noise_count == 0) {
+		return;
+	}
+	/* Quietest first: the highest bin is the lowest power. */
+	for (int i = NOISE_BINS - 1; i >= 0; i--) {
+		if (noise_hist[i] == 0) {
+			continue;
+		}
+		if (*min_out == LORA_LINK_NOISE_UNMEASURED) {
+			*min_out = (uint8_t)(int8_t)(-i);
+		}
+		seen += noise_hist[i];
+		if (seen * 2 >= noise_count) {
+			*median_out = (uint8_t)(int8_t)(-i);
+			return;
+		}
+	}
+}
+
 static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, int16_t rssi,
 		       int8_t snr, void *user_data)
 {
@@ -337,6 +438,8 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 	ARG_UNUSED(user_data);
 
 	last_rx_ms = k_uptime_get();
+	/* The next noise sample goes mid-gap, before the next packet starts. */
+	(void)k_work_reschedule(&noise_work, K_MSEC(noise_gap_delay_ms));
 	gw_stats.rssi_sum += rssi;
 	gw_stats.snr_sum += snr;
 	gw_stats.rssi_min = MIN(gw_stats.rssi_min, rssi);
@@ -427,8 +530,7 @@ static void gateway_build_record(uint32_t rx)
 	sys_put_le16((uint16_t)MIN(gw_stats.samples, UINT16_MAX), &r[10]);
 	sys_put_le16((uint16_t)MIN(gw_stats.missing, UINT16_MAX), &r[12]);
 	r[14] = last_packet_ds(age);
-	r[15] = LORA_LINK_NOISE_UNMEASURED; /* noise_min, until #336 */
-	r[16] = LORA_LINK_NOISE_UNMEASURED; /* noise_median, until #336 */
+	noise_summary(&r[15], &r[16]);
 	r[17] = (uint8_t)(sat_u4(gw_stats.bad) | (sat_u4(gw_stats.wrong_peer) << 4));
 	/* bit 0 RX boost (fixed on here; the walk test A/Bs it), bit 2 heard,
 	 * bits 4-7 SF. Bit 1, a walk-test record, is set only by walk-test mode. */
@@ -519,19 +621,26 @@ static void gateway_stats_log(void)
 		LOG_INF("lora rx (%u s windows, every %uth logged):", stats_period_ms / 1000,
 			log_every);
 	}
+	uint8_t nmin;
+	uint8_t nmed;
+
+	noise_summary(&nmin, &nmed);
 	if (rx == 0) {
-		LOG_INF("lora rx: nothing heard");
+		LOG_INF("lora rx: nothing heard; noise min %d median %d dBm", (int8_t)nmin,
+			(int8_t)nmed);
 	} else {
 		LOG_INF("lora rx: %u pkts, %u bad, %u wrong peer; %u samples, %u missing, "
-			"LQ %u.%u%%; RSSI avg %d min %d, SNR avg %d min %d; %u DIO1 recoveries "
-			"total",
+			"LQ %u.%u%%; RSSI avg %d min %d, SNR avg %d min %d; noise min %d median %d "
+			"dBm; %u DIO1 recoveries total",
 			gw_stats.packets, gw_stats.bad, gw_stats.wrong_peer, gw_stats.samples,
 			gw_stats.missing, lq_x10 / 10, lq_x10 % 10, gw_stats.rssi_sum / (int32_t)rx,
 			gw_stats.rssi_min, gw_stats.snr_sum / (int32_t)rx, gw_stats.snr_min,
-			dio1_kicks);
+			(int8_t)nmin, (int8_t)nmed, dio1_kicks);
 	}
 reset:
 	memset(&gw_stats, 0, sizeof(gw_stats));
+	memset(noise_hist, 0, sizeof(noise_hist));
+	noise_count = 0;
 	gw_stats.rssi_min = INT16_MAX;
 	gw_stats.snr_min = INT8_MAX;
 }
@@ -611,6 +720,19 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 		/* The gateway's window, from the config at boot (#344). */
 		stats_period_ms = sophon_config_window_s() * 1000U;
 		log_every = STATS_PERIOD_MS / stats_period_ms;
+
+		/*
+		 * Noise samples go in the middle of the quiet gap between this
+		 * preset's packets: the sensor sends one every k samples (k x 18.4
+		 * ms at 54.3 Hz), each on air for the airtime (NOISE-FLOOR-PLAN.md).
+		 */
+		uint32_t period_ms = preset->k * 184U / 10U;
+		uint32_t air_ms = lora_airtime(lora_dev, lora_preset_full_len(preset));
+
+		noise_gap_delay_ms = period_ms > air_ms ? (period_ms - air_ms) / 2 : 1;
+		noise_period_ms = period_ms;
+		LOG_INF("noise floor sampled %u ms after each packet", noise_gap_delay_ms);
+		(void)k_work_schedule(&noise_work, K_MSEC(NOISE_IDLE_MS));
 	}
 
 	(void)k_work_schedule(&stats_work, K_MSEC(stats_period_ms));

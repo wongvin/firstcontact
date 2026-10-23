@@ -798,6 +798,10 @@ nonisolated enum SophonProtocolSelfCheck {
         assert(record.badPackets == 4 && record.wrongPeerPackets == 2, "bad / wrong peer nibbles swapped")
         assert(record.lastPacketMillis == 300, "last packet is 100 ms units")
         assert(record.noiseMin == nil && record.noiseMedian == -105, "0x7F is 'not measured'; noise is signed")
+        var measured = wire
+        measured[15] = 0x94 // noise_min -108 dBm (#336)
+        assert(LoRaLinkRecord(measured)?.noiseMin == -108 && LoRaLinkRecord(measured)?.noiseMedian == -105,
+               "a measured noise floor reads both fields")
         assert(record.marginDB == 12.5, "margin should be SNR 5 - SNRlim(SF7) -7.5")
         assert(record.worstMarginDB == 5.5, "worst margin should be SNR min -2 - SNRlim(SF7) -7.5")
         assert(LoRaLinkRecord(wire.dropLast()) == nil, "short record must be rejected")

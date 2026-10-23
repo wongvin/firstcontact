@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-22
+
+### feat: gateway measures its noise floor (#336)
+
+- **Firmware 2.31.1:** the gateway samples the SX1262's instantaneous RSSI over SPI on the system work queue, as the DIO1 watchdog does.
+  - **When:** once in the middle of the quiet gap after each received packet, timed from its preset's period and airtime; every 100 ms when nothing has been heard.
+  - **What it reports:** each LoRa Link record carries the window's noise minimum and median, from a 1 dB histogram. The console line shows them too.
+- **App:** a **Noise floor** row in the LoRa link section, and "dB above noise" on the RSSI row.
+- **Report and docs:** `walktest-report.py` adds a Noise floor table per band with signal over noise. The design is in NOISE-FLOOR-PLAN.md, with a timing diagram per preset; also PROTOCOL.md and LORA-PROTOCOL.md § Noise floor.
+
 ## 2026-10-21
 
 ### feat: configurable LoRa stats window, down to 1 s (#344)

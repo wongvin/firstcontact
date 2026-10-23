@@ -19,6 +19,11 @@ would have recovered (runs of exactly 1). Each window's runs are checked
 against the gateway's own `missing`: more on the app's side means the
 gateway's Bluetooth queue dropped frames, which isn't LoRa loss.
 
+From #336, the gateway samples its own noise floor between packets: the
+noise table gives, per band, the lowest noise seen, the median, and the
+signal over noise (RSSI minus the median noise), an estimate independent of
+LoRa's own SNR.
+
 `missing` rows (#334) -- windows the gateway produced
 that the app never received -- are counted per band in their own column and
 kept out of LQ. Older recordings, with no preamble,
@@ -150,6 +155,32 @@ def apply_preamble(preamble: list[str], rows: list[dict[str, str]]) -> None:
             row.setdefault("rx_boost", "1" if boost and boost.group(1) == "on" else "0")
 
 
+def print_noise_table(rows: list[dict[str, str]], key_of) -> None:
+    """The receiver's noise floor per band (#336), and the signal above it."""
+    rows = [r for r in rows if r.get("noise_min") and r.get("noise_median")]
+    if not rows:
+        return
+    bands: dict[str, dict[str, list[int]]] = defaultdict(lambda: {"min": [], "med": [], "rssi": []})
+    for row in rows:
+        cell = bands[key_of(row)[0]]
+        cell["min"].append(int(row["noise_min"]))
+        cell["med"].append(int(row["noise_median"]))
+        if row.get("rssi_avg"):
+            cell["rssi"].append(int(row["rssi_avg"]))
+    print("\n## Noise floor\n")
+    print("Sampled between packets (NOISE-FLOOR-PLAN.md). The thermal floor for 500 kHz with a "
+          "6 dB noise figure is about -111 dBm.\n")
+    print("| Distance | Windows | Noise min (dBm) | Noise median (dBm) | RSSI avg (dBm) | Signal over noise (dB) |")
+    print("|---|---|---|---|---|---|")
+    for band in sorted(bands, key=band_sort_key):
+        cell = bands[band]
+        median = sorted(cell["med"])[len(cell["med"]) // 2]
+        rssi = sum(cell["rssi"]) / len(cell["rssi"]) if cell["rssi"] else None
+        signal = rssi - median if rssi is not None else None
+        print(f"| {band} | {len(cell['med'])} | {min(cell['min'])} | {median} | "
+              f"{fmt(rssi, '.0f')} | {fmt(signal, '+.0f')} |")
+
+
 LOSS_COLUMNS = ["loss_run_1", "loss_run_2", "loss_run_3_4", "loss_run_5_8", "loss_run_9_plus"]
 
 
@@ -274,6 +305,7 @@ def main() -> int:
             f"{cell.bad} | {verdict} |"
         )
     print_loss_table(rows, key_of)
+    print_noise_table(rows, key_of)
     if events:
         print("\n## Events\n")
         print("| Time (UTC) | Event | Distance (m) |")

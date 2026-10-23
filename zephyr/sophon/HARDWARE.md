@@ -582,3 +582,31 @@ gateway's RSSI pegged at 0 dBm, the top of the scale.
 
 Local copies of all three datasheets (SX1261/2, Wio-SX1262, BQ25101) are kept
 in `datasheets/`, which is gitignored: they are not ours to redistribute.
+
+### Receiver noise floor (#336)
+
+Measured on 2026-10-22 with 0FAA (base XIAO + Wio-SX1262, the kit's
+antenna) on firmware 2.31.1, which samples the radio's instantaneous RSSI
+between packets (LORA-PROTOCOL.md § Noise floor; NOISE-FLOOR-PLAN.md). 20 one-second
+windows per setup, no sensor transmitting unless noted, antenna in the same place:
+
+| Setup | Noise min | Median of the window medians |
+|---|---|---|
+| Mac's USB-C, sensor 4D88 transmitting at 100% LQ | −108 dBm | −105.5 dBm |
+| Mac's USB-C, nothing transmitting | −107 dBm | −105 dBm |
+| USB power pack, no host | −106 dBm | −104 dBm |
+| iPhone's USB-C, phone 30 cm or more away | −107 dBm | −105 dBm |
+| iPhone's USB-C, **phone and cable laid against the antenna** | −107 dBm | −105 dBm |
+
+- **The phone and its cable add nothing measurable,** even touching the
+  antenna, and neither does the computer's USB.
+- **The receiver's own floor is about −105 dBm**, about 6 dB above the
+  −111 dBm estimate for 500 kHz with a 6 dB noise figure. That gap belongs to
+  the SX1262 and the Wio carrier, or to how the chip reports RSSI. It
+  shouldn't be read as interference.
+- **A second sensor on the same channel raises the median sharply:** with 4D88
+  and 86F0 both on air, the median read about −58 dBm, because one sensor's
+  packets land in the other's gaps.
+- The 2026-10-18 walk's inferred −104 dBm floor is the same receiver floor,
+  not noise from the phone. On that walk the phone wasn't in the same pocket
+  as the antenna anyway.
