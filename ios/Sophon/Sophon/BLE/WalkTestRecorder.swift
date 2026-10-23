@@ -62,6 +62,7 @@ final class WalkTestRecorder: NSObject {
     /// after them, in order; see `record(_:from:sensor:)`.
     @ObservationIgnored private var queue: [Queued] = []
     @ObservationIgnored private var inBackground = false
+    @ObservationIgnored private var unsupportedLogged = false
     /// The last record written, to find the windows missed before the next.
     @ObservationIgnored private var lastWindow: WindowMark?
     /// Whether the gateway's link dropped since `lastWindow`: only then can a
@@ -121,6 +122,7 @@ final class WalkTestRecorder: NSObject {
         session = nil
         gatewayID = nil
         lastWindow = nil
+        unsupportedLogged = false
         linkDroppedSinceWindow = false
         fixHistory = []
         pending = []
@@ -188,6 +190,18 @@ final class WalkTestRecorder: NSObject {
             linkDroppedSinceWindow = true
         }
         logEvent(connected ? "connected" : "disconnected")
+    }
+
+    /// The recording's gateway sends LoRa Link records in a version this app
+    /// doesn't read (#346). Logged once per recording, since every record after
+    /// it would say the same.
+    func noteUnsupportedRecord(_ version: UInt8, from device: SophonDevice) {
+        guard isRecording, !unsupportedLogged else { return }
+        // Like a readable record, the first gateway heard is the recording's.
+        if gatewayID == nil { gatewayID = device.id }
+        guard device.id == gatewayID else { return }
+        unsupportedLogged = true
+        logEvent("lora link version \(version) not supported")
     }
 
     /// Distance from the pin to the latest fix, if both exist.

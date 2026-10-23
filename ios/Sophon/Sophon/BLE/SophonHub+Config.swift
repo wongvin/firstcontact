@@ -26,6 +26,12 @@ extension SophonHub {
     func ingestConfigValue(_ data: Data, from id: UUID) {
         guard let state = ConfigState(data) else {
             Self.configLog.error("malformed config (\(data.count, privacy: .public) bytes)")
+            // A version this app doesn't read is a mismatch to explain (#346).
+            if data.count == ConfigState.wireSize, let version = data.first,
+               let mismatch = VersionMismatch.check(received: version, supported: ConfigState.version),
+               let device = devices.first(where: { $0.id == id }), device.configMismatch != mismatch {
+                device.configMismatch = mismatch
+            }
             // An answer all the same: nothing better is coming this session
             // (#335 review, finding 3).
             configReadFailed(id)
@@ -33,6 +39,7 @@ extension SophonHub {
         }
         guard let device = devices.first(where: { $0.id == id }) else { return }
         if device.config != state { device.config = state }
+        if device.configMismatch != nil { device.configMismatch = nil }
         if device.configReadFailed { device.configReadFailed = false }
 
         // The authoritative check that this link isn't one the app took by

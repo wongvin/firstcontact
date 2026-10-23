@@ -31,10 +31,20 @@ extension SophonHub {
     func ingestLoRaLinkValue(_ data: Data, from id: UUID) {
         guard !data.isEmpty else { return }
         guard let record = LoRaLinkRecord(data) else {
-            // Version 1 is a gateway on firmware older than 2.29.0, not a fault
-            // (#333 dropped it): say so, so the log points at the fix.
-            if data.count == LoRaLinkRecord.wireSize, data.first == 1 {
-                Self.loraLog.error("LoRa Link record version 1: update the gateway to firmware 2.29.0 or later")
+            // A full-length record in a version this app doesn't read is a
+            // firmware/app mismatch, not a fault, and the fix depends on which
+            // side is behind: say so on screen, not only in the log (#346).
+            if data.count == LoRaLinkRecord.wireSize, let version = data.first,
+               let mismatch = VersionMismatch.check(received: version, supported: LoRaLinkRecord.supportedVersion),
+               let device = devices.first(where: { $0.id == id }) {
+                if device.loraLinkMismatch != mismatch {
+                    device.loraLinkMismatch = mismatch
+                    Self.loraLog.error("LoRa Link record version \(version, privacy: .public) not read by this app")
+                }
+                // Every time, not just on the first: a recording started after
+                // the message appeared must still log it (#346 review). The
+                // recorder logs it once per recording.
+                walkTest.noteUnsupportedRecord(version, from: device)
             } else {
                 Self.loraLog.error("malformed LoRa Link record (\(data.count, privacy: .public) bytes)")
             }

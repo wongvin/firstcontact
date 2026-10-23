@@ -84,6 +84,17 @@ struct LoRaLinkSection: View {
                      + "healthy. The RSSI row above is this phone's Bluetooth link "
                      + "to the gateway, not the LoRa link.")
             }
+        } else if let mismatch = device.loraLinkMismatch {
+            // Records arrive but this app can't read them (#346): say why, and
+            // which side to update, rather than looking like a quiet link.
+            Section("LoRa link") {
+                Text(mismatch.message(frame: "LoRa Link", firmware: "2.29.0"))
+                    .foregroundStyle(.orange)
+                if recorder.isRecording {
+                    DistanceRow(recorder: recorder)
+                    WalkTestControls(recorder: recorder, onPrompt: onPrompt)
+                }
+            }
         } else if recorder.isRecording {
             // A gateway that reconnected sends nothing for up to 10 s, and one
             // that came back without its Wio sends nothing at all. The recording

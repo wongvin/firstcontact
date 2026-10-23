@@ -2,6 +2,14 @@
 
 ## 2026-10-22
 
+### feat: app shows a record version mismatch (#346)
+
+- **LoRa Link and Config frames in a version this app doesn't read** are now explained on screen instead of only logged:
+  - an older board: "This board sends Config version 1. Update its firmware over the air to 2.30.0 or later.";
+  - a newer one: "…newer than this app reads. Update the Sophon app."
+- A walk-test recording logs `lora link version N not supported` once, instead of waiting for records forever.
+- The other versioned frames were checked: the advertised identity already flags an unrecognised version, and the motion frame has no version field of its own (#231).
+
 ### feat: gateway measures its noise floor (#336)
 
 - **Firmware 2.31.1:** the gateway samples the SX1262's instantaneous RSSI over SPI on the system work queue, as the DIO1 watchdog does.

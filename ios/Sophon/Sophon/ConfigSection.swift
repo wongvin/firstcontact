@@ -40,6 +40,9 @@ struct ConfigSection: View {
                     }
                     Button("Edit…") { onEdit(EditTarget(state: state)) }
                         .disabled(!device.state.isConnected || device.configWritePending)
+                } else if let mismatch = device.configMismatch {
+                    // Config version 2 arrived with 2.30.0 (#344).
+                    Text(mismatch.message(frame: "Config", firmware: "2.30.0")).foregroundStyle(.orange)
                 } else {
                     LabeledContent("Configuration") {
                         Text(device.configReadFailed ? "Couldn't read"
