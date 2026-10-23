@@ -364,7 +364,7 @@ aligned and the spare byte is last. Version 1, which sent `lq_x10` and an 8-bit
 |---|---|---|---|---|
 | 0 | 1 | `u8` | `version` | `2`. Parsers drop any other value |
 | 1 | 1 | `u8` | `preset` · `window_s` | bits 0–3: air-rate preset id (LORA-PROTOCOL.md § Presets; in a walk-test record, the variant). Bits 4–7: the window length in seconds, 1–10 (10 until #344) |
-| 2 | 2 | `u16` | `sensor_id` | the sensor's id: the `XXXX` of its `Sophon-XXXX` name. 0 before one is locked |
+| 2 | 2 | `u16` | `sensor_id` | the sensor's id: the `XXXX` of its `Sophon-XXXX` name. 0 before one is locked, and again after a lock is released (LORA-PROTOCOL.md § Locking onto a sensor) |
 | 4 | 2 | `u16` | `window` | rolling counter from 0 at boot, +1 per record, so a missed notify is visible |
 | 6 | 1 | `i8` | `rssi_avg` | dBm, over the window's packets |
 | 7 | 1 | `i8` | `rssi_min` | dBm |
@@ -375,7 +375,7 @@ aligned and the spare byte is last. Version 1, which sent `lq_x10` and an 8-bit
 | 14 | 1 | `u8` | `last_packet` | time since the last packet at the record's close, in **100 ms** units. 255 = 25.5 s or more, or no packet yet |
 | 15 | 1 | `i8` | `noise_min` | the receiver's noise floor over the window: the lowest of the samples taken between packets, dBm (firmware 2.31.1, #336; [NOISE-FLOOR-PLAN.md](NOISE-FLOOR-PLAN.md)). **`0x7F` = not measured**: older firmware, or no sample this window |
 | 16 | 1 | `i8` | `noise_median` | the median of those samples, dBm: ongoing interference raises it above the minimum. `0x7F` = not measured |
-| 17 | 1 | `u8` | `bad` · `wrong_peer` | bits 0–3: packets that failed to decode; bits 4–7: packets from another sensor. Each saturates at 15 |
+| 17 | 1 | `u8` | `bad` · `wrong_peer` | bits 0–3: packets that failed to decode; bits 4–7: packets from another sensor, whether named by its status trailer or betrayed by its `seq` (#350). Each saturates at 15 |
 | 18 | 1 | `u8` | `flags` | bit 0 RX boost on · bit 1 walk-test record · bit 2 **heard** (any packet this window) · bit 3 spare · bits 4–7 spreading factor |
 | 19 | 1 | `u8` | `reserved` | 0 |
 
@@ -507,7 +507,7 @@ client should treat any write error as "refused", then re-read.
 |---|---|---|
 | 0 | 1 | `version`, 2 |
 | 1 | 9 | **stored**: what flash holds, the config the next restart runs |
-| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm`, `freq_hz` and `window_s` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto |
+| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm`, `freq_hz` and `window_s` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto (0 while unlocked, #350) |
 | 19 | 1 | `status` |
 
 | `status` bit | Meaning |

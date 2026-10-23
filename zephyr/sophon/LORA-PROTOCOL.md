@@ -384,6 +384,40 @@ Delivery pacing: a packet's k frames arrive at once; the gateway queues them (32
 deep) and notifies one at a time, retrying after 10 ms when the ATT buffers are
 full rather than dropping.
 
+## Locking onto a sensor
+
+A gateway relays one sensor. With its peer set to **any** (0, the default), it
+locks onto the first sensor whose **status trailer** it hears; with a peer
+configured (PROTOCOL.md § Config frame), only that sensor. From firmware
+2.32.0 (#350):
+
+- **Only the locked sensor's packets are relayed.** A status trailer, about
+  once a second, names its sensor; the packets between don't. An untagged
+  packet is taken as the locked sensor's only if its `seq` continues that
+  sensor's stream: the gap since the last packet accepted is no more than the
+  elapsed time allows at 54.3 Hz, plus two packets' slack. Another sensor's
+  packets fall outside that and are counted as **wrong peer**.
+- **The stream's anchor is trusted for 5 s.** After 5 s with no packet
+  accepted, untagged packets wait for a status trailer from the locked sensor
+  to re-anchor. That status counts the gap as **missing** if it's within what
+  20 s allows (a fade); a bigger jump is the sensor's restart, re-anchored
+  without being counted.
+- **With no sensor locked**, untagged packets can't be attributed and are
+  dropped as wrong peer until a status trailer names a sensor, normally within
+  a second.
+- **A quiet sensor's lock is released.** With peer **any**, if the locked
+  sensor's status trailers stop for **5 s**, the gateway unlocks (`sensor_id`
+  reads 0) and locks onto the next sensor heard. If that's the same sensor
+  again, its stream continues, so a fade across the release is still counted.
+  A configured peer is never released.
+- **What this can't do:** two sensors whose `seq` happen to be within that
+  bound of each other, for example switched on within about half a second, can
+  still be mixed. Telling them apart for certain needs a sensor tag in every
+  packet (#354).
+
+Before 2.32.0 the lock lasted until the gateway restarted, and untagged packets
+were accepted from any sensor.
+
 ## Sensor BLE presence
 
 The sensor advertises only its `Sophon-XXXX` name and the MCUmgr SMP service —
