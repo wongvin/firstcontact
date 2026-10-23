@@ -411,9 +411,20 @@ configured (PROTOCOL.md § Config frame), only that sensor. From firmware
   again, its stream continues, so a fade across the release is still counted.
   A configured peer is never released.
 - **What this can't do:** two sensors whose `seq` happen to be within that
-  bound of each other, for example switched on within about half a second, can
-  still be mixed. Telling them apart for certain needs a sensor tag in every
-  packet (#354).
+  bound of each other, for example switched on within about half a second from
+  one power source, can still be mixed. That's accepted: two sensors on one
+  channel collide on air every few seconds anyway (seen on the bench,
+  2026-10-22), so a shared channel doesn't work whatever the gateway does. A
+  sensor tag in every packet was considered and rejected (#354).
+
+**One sensor per channel.** To run more than one sensor, give each
+sensor–gateway pair its own frequency: **Configuration › Edit… › Set
+frequency**, the same value on both boards of a pair (PROTOCOL.md § Config
+frame). Keep pairs at least 500 kHz apart, and more where the stepper allows:
+on #329's desk test a gateway only 500 kHz off still caught some of the
+other channel (LQ 8–13%). On separate channels a gateway never hears the other
+sensor, so there's nothing to mix or to collide with. Frequency hopping (#304)
+would cut collisions further but is a larger change.
 
 Before 2.32.0 the lock lasted until the gateway restarted, and untagged packets
 were accepted from any sensor.

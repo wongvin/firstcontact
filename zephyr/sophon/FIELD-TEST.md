@@ -120,6 +120,11 @@ To change a unit:
 Leave the preset and frequency at their defaults on both units, or change them
 on **both**: the link needs the same spreading factor and frequency at each end.
 
+**Power only the scenario's sensor.** A second sensor on the same channel
+collides with it on air every few seconds and blurs the results. If another
+sensor has to stay on, move it and its gateway to a frequency of their own
+(LORA-PROTOCOL.md § Locking onto a sensor).
+
 ## Before going out
 
 1. **Firmware:** both boards on the same release, with V6 as the default, and
