@@ -235,6 +235,7 @@ reach codegen, which is worth knowing before reformatting firmware again.
 ```bash
 scripts/build.sh                      # MCUboot via sysbuild (the default, #270)
 scripts/flash-ota.sh                  # app only, over the air (#271)
+scripts/airdrop-fw.sh                 # app only, over the air from the iPhone (#357)
 scripts/flash-swd.sh                  # bootloader + app, over a CMSIS-DAP probe
 
 SOPHON_BOOT=uf2 scripts/build.sh      # UF2, only for a board not yet migrated

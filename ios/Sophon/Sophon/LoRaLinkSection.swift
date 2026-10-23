@@ -12,6 +12,8 @@ import SwiftUI
 struct LoRaLinkSection: View {
     let device: SophonDevice
     let recorder: WalkTestRecorder
+    /// A firmware update is running (#357): its restart would cut a recording off.
+    var updating = false
     /// Asks for the note or a marker. The alert itself hangs off the detail
     /// view, outside its List (see ``View/walkTestPrompt(_:recorder:)``).
     let onPrompt: (WalkTestPrompt) -> Void
@@ -73,7 +75,7 @@ struct LoRaLinkSection: View {
                 if device.loraLinkHistory.count >= 2 {
                     sparklines
                 }
-                WalkTestControls(recorder: recorder, onPrompt: onPrompt)
+                WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
             } header: {
                 Text("LoRa link")
             } footer: {
@@ -92,7 +94,7 @@ struct LoRaLinkSection: View {
                     .foregroundStyle(.orange)
                 if recorder.isRecording {
                     DistanceRow(recorder: recorder)
-                    WalkTestControls(recorder: recorder, onPrompt: onPrompt)
+                    WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
                 }
             }
         } else if recorder.isRecording {
@@ -105,7 +107,7 @@ struct LoRaLinkSection: View {
                     Text("Waiting for a LoRa record from this board").foregroundStyle(.secondary)
                 }
                 DistanceRow(recorder: recorder)
-                WalkTestControls(recorder: recorder, onPrompt: onPrompt)
+                WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
             }
         }
     }
@@ -199,6 +201,7 @@ struct LoRaLinkSection: View {
 /// and charts change once per 10 s (#309 review, finding 3).
 private struct WalkTestControls: View {
     let recorder: WalkTestRecorder
+    let updating: Bool
     let onPrompt: (WalkTestPrompt) -> Void
 
     var body: some View {
@@ -213,6 +216,7 @@ private struct WalkTestControls: View {
             Button("Stop recording", role: .destructive) { recorder.stop() }
         } else {
             Button("Start walk-test recording") { onPrompt(.note) }
+                .disabled(updating)
             if !recorder.exportURLs.isEmpty {
                 ShareLink(items: recorder.exportURLs) {
                     Label(shareLabel, systemImage: "square.and.arrow.up")

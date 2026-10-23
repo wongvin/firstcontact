@@ -2,6 +2,14 @@
 
 ## 2026-10-22
 
+### feat: update a board's firmware from the iPhone (#357)
+
+- **`scripts/airdrop-fw.sh`** AirDrops the latest MCUboot build to an iPhone as a `.sophonfw` file. The Sophon app keeps it after checking its header and SHA-256.
+- **Update to <version>** appears under Configuration on any board advertising firmware older than the held image, beside #346's warning where there is one. The app uploads with Nordic's iOSMcuManagerLibrary in test-only mode over its own link, resets the board, and reads back what runs; the board confirms by its own rule, never the app.
+- After the update, the board's firmware version comes from the slot-0 read-back, so the Link section shows the new version without waiting for an advertisement the reconnect skips.
+- Refuses a board with an image on trial or an update pending, where the library would confirm or reset on its own. Shows progress, allows cancel during the upload.
+- BOOTLOADER.md § From the iPhone.
+
 ### docs: one sensor per LoRa channel (#350)
 
 - LORA-PROTOCOL.md § Locking onto a sensor states the rule: one sensor per channel, with each sensor–gateway pair given its own frequency from the app. Two sensors sharing a channel collide on air every few seconds, so the residual mixing #350 leaves is accepted, and tagging every packet (#354) was rejected.

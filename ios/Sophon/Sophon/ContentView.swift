@@ -46,6 +46,16 @@ struct ContentView: View {
             // toggle.
             .id(mode)
         }
+        // A firmware image AirDropped from the Mac, or opened from Files (#357).
+        .onOpenURL { hub.firmware.receive($0) }
+        .alert("Firmware", isPresented: Binding(
+            get: { hub.firmware.notice != nil },
+            set: { if !$0 { hub.firmware.notice = nil } }
+        )) {
+            Button("OK") {}
+        } message: {
+            Text(hub.firmware.notice ?? "")
+        }
         .onChange(of: mode, initial: true) { _, newMode in
             // One role down before the other comes up. Never both on air.
             switch newMode {
@@ -72,6 +82,10 @@ struct ContentView: View {
         } label: {
             Label(mode.label, systemImage: mode.icon)
         }
+        // Not while a board updates (#357): suspend() doesn't stop the update,
+        // which would keep the board's one connection while the phone
+        // advertises as a Sophon.
+        .disabled(hub.updater.isBusy)
     }
 }
 
@@ -124,6 +138,8 @@ private struct ViewerView: View {
             DeviceDetailView(
                 device: device,
                 walkTest: hub.walkTest,
+                firmware: hub.firmware,
+                updater: hub.updater,
                 onRefresh: { hub.refreshStats(device) },
                 onToggleConnection: {
                     if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
@@ -141,7 +157,11 @@ private struct ViewerView: View {
         // where the choice actually gets made (#233).
         .swipeActions(edge: .trailing) {
             if device.isHeld {
-                Button("Release") { hub.release(device) }.tint(.orange)
+                // Not mid-update (#357): the update's own link would keep the
+                // board taken while the list called it released.
+                if hub.updater.phase(for: device)?.isBusy != true {
+                    Button("Release") { hub.release(device) }.tint(.orange)
+                }
             } else if !device.isStaleReleased {
                 // Offered only while the board is actually reachable.
                 // connect() on iOS never times out, so on a board that has
@@ -264,6 +284,9 @@ private struct DeviceDetailView: View {
     let device: SophonDevice
     /// Hub-owned, so a recording survives leaving this screen (#309).
     let walkTest: WalkTestRecorder
+    /// Hub-owned, so an update survives leaving this screen (#357).
+    let firmware: FirmwareStore
+    let updater: FirmwareUpdater
     let onRefresh: () -> Void
     let onToggleConnection: () -> Void
     let onScreen: (Bool) -> Void
@@ -296,6 +319,9 @@ private struct DeviceDetailView: View {
     /// `configEditing`, so the alert hangs off the Group, not a List row.
     @State private var walkTestPrompt: WalkTestPrompt?
 
+    /// The update confirmation (#357), held here for the same reason.
+    @State private var confirmUpdate = false
+
     /// How often the Sophon's counters are re-read while this view is on screen.
     ///
     /// Polling rather than subscribing, and only while visible. A notify would
@@ -321,8 +347,8 @@ private struct DeviceDetailView: View {
                 HStack(alignment: .top, spacing: 0) {
                     List {
                         linkSection
-                        ConfigSection(device: device) { configEditing = $0 }
-                        LoRaLinkSection(device: device, recorder: walkTest) { walkTestPrompt = $0 }
+                        configSection
+                        LoRaLinkSection(device: device, recorder: walkTest, updating: updating) { walkTestPrompt = $0 }
                         framesSection
                     }
                     Divider()
@@ -334,8 +360,8 @@ private struct DeviceDetailView: View {
             } else {
                 List {
                     linkSection
-                    ConfigSection(device: device) { configEditing = $0 }
-                    LoRaLinkSection(device: device, recorder: walkTest) { walkTestPrompt = $0 }
+                    configSection
+                    LoRaLinkSection(device: device, recorder: walkTest, updating: updating) { walkTestPrompt = $0 }
                     framesSection
                     countersSection
                     motionSection
@@ -346,6 +372,9 @@ private struct DeviceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .configEditor(item: $configEditing, device: device, onWrite: onWriteConfig)
         .walkTestPrompt($walkTestPrompt, recorder: walkTest)
+        .firmwareUpdateConfirmation(isPresented: $confirmUpdate, device: device,
+                                    firmware: firmware, updater: updater,
+                                    recording: walkTest.isRecording)
         // Tell the hub not to sweep this one while it is being looked at. The
         // back chevron is what releases it, so the row disappears on return to
         // the list rather than out from under the reader (#235).
@@ -397,6 +426,14 @@ private struct DeviceDetailView: View {
                 }
             }
         }
+    }
+
+    /// This board is being updated (#357).
+    private var updating: Bool { updater.phase(for: device)?.isBusy == true }
+
+    private var configSection: some View {
+        ConfigSection(device: device, firmware: firmware, updater: updater, recording: walkTest.isRecording,
+                      onUpdate: { confirmUpdate = true }, onEdit: { configEditing = $0 })
     }
 
     @ViewBuilder private var linkSection: some View {
@@ -564,6 +601,7 @@ private struct DeviceDetailView: View {
                     Text(device.isHeld ? "Release board" : "Connect")
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
+                .disabled(updating)
             }
         } header: {
             Text("Link")

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5090A0B0C0D0E0F0020000A2 /* iOSMcuManagerLibrary in Frameworks */ = {isa = PBXBuildFile; productRef = 5090A0B0C0D0E0F0020000A1 /* iOSMcuManagerLibrary */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		5090A0B0C0D0E0F002000001 /* Sophon.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sophon.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5090A0B0C0D0E0F0020000A2 /* iOSMcuManagerLibrary in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 			);
 			name = Sophon;
 			packageProductDependencies = (
+				5090A0B0C0D0E0F0020000A1 /* iOSMcuManagerLibrary */,
 			);
 			productName = Sophon;
 			productReference = 5090A0B0C0D0E0F002000001 /* Sophon.app */;
@@ -108,6 +114,7 @@
 			mainGroup = 5090A0B0C0D0E0F002000050;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				5090A0B0C0D0E0F0020000A0 /* XCRemoteSwiftPackageReference "IOS-nRF-Connect-Device-Manager" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5090A0B0C0D0E0F002000051 /* Products */;
@@ -339,6 +346,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5090A0B0C0D0E0F0020000A0 /* XCRemoteSwiftPackageReference "IOS-nRF-Connect-Device-Manager" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/NordicSemiconductor/IOS-nRF-Connect-Device-Manager.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.14.9;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5090A0B0C0D0E0F0020000A1 /* iOSMcuManagerLibrary */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5090A0B0C0D0E0F0020000A0 /* XCRemoteSwiftPackageReference "IOS-nRF-Connect-Device-Manager" */;
+			productName = iOSMcuManagerLibrary;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5090A0B0C0D0E0F002000070 /* Project object */;
 }
