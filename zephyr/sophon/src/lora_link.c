@@ -74,8 +74,8 @@ static uint32_t log_every = 1;
  *  - with no sensor locked, untagged packets can't be attributed and are dropped
  *    until a status trailer names one.
  * Two sensors whose seqs happen to be within the bound of each other can still
- * be mixed: telling them apart for certain needs a sensor tag in every packet
- * (#354).
+ * be mixed. That's accepted: two sensors on one channel collide anyway, so the
+ * rule is one sensor per channel (LORA-PROTOCOL.md § Locking onto a sensor).
  */
 #define SAMPLES_PER_S_X10 543
 #define SEQ_SLACK         (2 * LORA_K_LIMIT)

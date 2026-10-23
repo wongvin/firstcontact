@@ -2,11 +2,16 @@
 
 ## 2026-10-22
 
+### docs: one sensor per LoRa channel (#350)
+
+- LORA-PROTOCOL.md § Locking onto a sensor states the rule: one sensor per channel, with each sensor–gateway pair given its own frequency from the app. Two sensors sharing a channel collide on air every few seconds, so the residual mixing #350 leaves is accepted, and tagging every packet (#354) was rejected.
+- FIELD-TEST.md: power only the scenario's sensor, or move any other to a frequency of its own.
+
 ### fix: gateway releases a stale sensor lock and stops mixing sensors (#350)
 
 - **Firmware 2.32.0:** a gateway relays only its locked sensor. An untagged packet counts as that sensor's only if its `seq` continues its stream within what the elapsed time allows, from an anchor no older than 5 s; another sensor's packets are counted as wrong peer instead of blended in. While unlocked, untagged packets are dropped until a status trailer names a sensor.
 - **With peer "any",** a lock whose sensor's status trailers stop for 5 s is released, and the next sensor heard is locked onto. Relocking the same sensor keeps its stream, so fades still count as missing. A configured peer is never released.
-- **Residual:** two sensors with nearby `seq` can still be mixed; tagging every packet is #354.
+- **Residual:** two sensors with nearby `seq` can still be mixed; accepted, since two sensors on one channel collide anyway.
 - LORA-PROTOCOL.md § Locking onto a sensor; PROTOCOL.md `sensor_id` and `wrong_peer`.
 
 ### fix: a sensor turned off leaves the Sensors list (#351)
