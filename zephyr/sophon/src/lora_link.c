@@ -57,8 +57,40 @@ static uint32_t log_every = 1;
 /* A status trailer at most this often (LORA-PROTOCOL.md). */
 #define STATUS_PERIOD_MS 1000
 
-/* A seq jump at least this large is a sensor restart, not loss. */
-#define SEQ_RESYNC_GAP 1024
+/*
+ * Which packets are the locked sensor's (#350). Only a status trailer, about
+ * once a second, names its sensor; the packets between carry none. So:
+ *  - an untagged packet counts as the locked sensor's only if its seq continues
+ *    that sensor's stream: the gap since the last accepted packet can be no more
+ *    than the elapsed time allows at 54.3 Hz (SAMPLES_PER_S_X10) plus two
+ *    packets' slack. Another sensor's seq lands elsewhere and is a wrong peer;
+ *  - the anchor is trusted for ANCHOR_HOLD_MS only. After that much silence an
+ *    untagged packet waits for a status trailer from the locked sensor to
+ *    re-anchor the stream. That bounds the tolerance (about 300 samples) so a
+ *    quiet locked sensor can't hand its stream to another;
+ *  - a status trailer from the locked sensor is always accepted. A gap within
+ *    what FADE_COUNT_MS allows counts as missing -- a fade -- and a larger jump
+ *    is its restart, re-anchored without being counted;
+ *  - with no sensor locked, untagged packets can't be attributed and are dropped
+ *    until a status trailer names one.
+ * Two sensors whose seqs happen to be within the bound of each other can still
+ * be mixed: telling them apart for certain needs a sensor tag in every packet
+ * (#354).
+ */
+#define SAMPLES_PER_S_X10 543
+#define SEQ_SLACK         (2 * LORA_K_LIMIT)
+#define ANCHOR_HOLD_MS    5000
+#define FADE_COUNT_MS     20000 /* ~1086 samples, as the old 1024-sample rule */
+
+/* With "any" peer, a lock is released when its sensor's status trailers stop
+ * for this long, so the next sensor heard can be locked onto (#350). */
+#define PEER_SILENT_MS 5000
+
+/* Samples the elapsed time allows, plus slack; ms is capped by the caller. */
+static uint32_t seq_bound(int64_t ms)
+{
+	return (uint32_t)MAX(ms, 0) * SAMPLES_PER_S_X10 / 10000U + SEQ_SLACK;
+}
 
 /* The preset's TX power, unless the stored config overrides it (#329). */
 static int8_t tx_dbm(void)
@@ -315,6 +347,9 @@ static int64_t dio1_high_since = -1;
 static uint32_t dio1_kicks;
 static bool have_last_seq;
 static uint16_t last_seq;
+static int64_t last_accept_ms;      /* the last packet accepted as the locked sensor's */
+static uint16_t anchor_id;          /* the sensor whose stream last_seq belongs to */
+static int64_t peer_status_ms = -1; /* the locked sensor's last status trailer */
 
 bool lora_link_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
 {
@@ -452,31 +487,51 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 
 	/*
 	 * The sensor id travels only in status trailers, so that is where the
-	 * peer filter can act. With no id configured, lock onto the first heard.
+	 * peer filter can act directly. With no id configured, lock onto the first
+	 * heard. Relocking the same sensor keeps its anchor, so a fade across a
+	 * release is still counted.
 	 */
 	if (pkt.has_status) {
 		if (peer_id == 0) {
 			peer_id = pkt.status.sensor_id;
+			if (peer_id != anchor_id) {
+				have_last_seq = false; /* a different stream */
+			}
+			anchor_id = peer_id;
 			LOG_INF("locked onto sensor %04X", peer_id);
 		} else if (pkt.status.sensor_id != peer_id) {
 			gw_stats.wrong_peer++;
 			return;
 		}
+		peer_status_ms = last_rx_ms;
 		store_status(&pkt.status);
+	} else if (peer_id == 0) {
+		gw_stats.wrong_peer++; /* no sensor named yet: can't be attributed */
+		return;
 	}
-
-	gw_stats.packets++;
-	gw_stats.samples += pkt.count;
 
 	seq0 = lora_frame_seq(pkt.frames[0]);
 	if (have_last_seq) {
+		int64_t since = last_rx_ms - last_accept_ms;
 		uint16_t gap = (uint16_t)(seq0 - last_seq - 1);
 
-		if (gap < SEQ_RESYNC_GAP) {
+		if (!pkt.has_status) {
+			/* The locked sensor's only if it continues its stream, recently. */
+			if (since > ANCHOR_HOLD_MS || gap > seq_bound(since)) {
+				gw_stats.wrong_peer++;
+				return;
+			}
 			gw_stats.missing += gap;
+		} else if (gap <= seq_bound(MIN(since, FADE_COUNT_MS))) {
+			gw_stats.missing += gap; /* a fade */
 		}
+		/* else: the locked sensor's restart -- re-anchored, not counted */
 	}
+	gw_stats.packets++;
+	gw_stats.samples += pkt.count;
 	last_seq = lora_frame_seq(pkt.frames[pkt.count - 1]);
+	last_accept_ms = last_rx_ms;
+	anchor_id = peer_id;
 	have_last_seq = true;
 
 	for (uint8_t i = 0; i < pkt.count; i++) {
@@ -600,6 +655,19 @@ static void watchdog_handler(struct k_work *work)
 			LOG_WRN("radio interrupt stuck, clear failed (%d); retrying", err);
 		}
 	}
+
+	/*
+	 * Release a lock whose sensor has gone quiet, so another sensor can be
+	 * locked onto without restarting the gateway (#350). A configured peer is
+	 * the user's choice and is never released.
+	 */
+	if (sophon_config_boot()->peer_id == 0 && peer_id != 0 && peer_status_ms >= 0 &&
+	    now - peer_status_ms >= PEER_SILENT_MS) {
+		LOG_INF("sensor %04X silent for %d s -- unlocked", peer_id, PEER_SILENT_MS / 1000);
+		peer_id = 0; /* the anchor is kept: if it returns, its fade counts */
+		peer_status_ms = -1;
+	}
+
 	(void)k_work_schedule(&watchdog_work, K_MSEC(WATCHDOG_PERIOD_MS));
 }
 

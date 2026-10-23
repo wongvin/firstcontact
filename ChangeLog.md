@@ -2,6 +2,13 @@
 
 ## 2026-10-22
 
+### fix: gateway releases a stale sensor lock and stops mixing sensors (#350)
+
+- **Firmware 2.32.0:** a gateway relays only its locked sensor. An untagged packet counts as that sensor's only if its `seq` continues its stream within what the elapsed time allows, from an anchor no older than 5 s; another sensor's packets are counted as wrong peer instead of blended in. While unlocked, untagged packets are dropped until a status trailer names a sensor.
+- **With peer "any",** a lock whose sensor's status trailers stop for 5 s is released, and the next sensor heard is locked onto. Relocking the same sensor keeps its stream, so fades still count as missing. A configured peer is never released.
+- **Residual:** two sensors with nearby `seq` can still be mixed; tagging every packet is #354.
+- LORA-PROTOCOL.md § Locking onto a sensor; PROTOCOL.md `sensor_id` and `wrong_peer`.
+
 ### fix: a sensor turned off leaves the Sensors list (#351)
 
 - **A board listed under Sensors** is now watched for silence like a released board: duplicate sightings are on while one is listed, and the sweep drops it about 15 s after it stops advertising. Before, it stayed "Discovered" forever.
