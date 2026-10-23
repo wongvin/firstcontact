@@ -36,6 +36,9 @@ struct LoRaLinkSection: View {
                 }
                 LabeledContent("LoRa RSSI") { Text(rssiText(record)) }
                 LabeledContent("LoRa SNR") { Text(snrText(record)) }
+                LabeledContent("Noise floor") {
+                    Text(noiseText(record)).foregroundStyle(record.noiseMin == nil ? .secondary : .primary)
+                }
                 DistanceRow(recorder: recorder)
                 LabeledContent("Last packet") {
                     Text(!record.heard ? "None this window"
@@ -141,7 +144,20 @@ struct LoRaLinkSection: View {
         if let sensitivity = link.sensitivityDBm {
             text += " · \(Int(link.rssiAvg) - sensitivity) dB above sensitivity"
         }
+        // Signal against the measured noise (#336), independent of LoRa's own SNR.
+        // Gated on the minimum, like the Noise floor row, so the two agree.
+        if link.noiseMin != nil, let noise = link.noiseMedian {
+            text += " · \(Int(link.rssiAvg) - Int(noise)) dB above noise"
+        }
         return text
+    }
+
+    /// The receiver's own noise, sampled between packets (#336): the minimum is
+    /// the clean floor, the median shows interference that lasts.
+    private func noiseText(_ link: LoRaLinkRecord) -> String {
+        // Older firmware, or no sample this window: either way, nothing to show.
+        guard let floor = link.noiseMin else { return "Not measured" }
+        return "\(floor) dBm" + (link.noiseMedian.map { " (median \($0))" } ?? "")
     }
 
     private func snrText(_ link: LoRaLinkRecord) -> String {

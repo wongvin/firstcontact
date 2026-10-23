@@ -395,6 +395,27 @@ its first BLE frame delivered. The sensor confirms on its first successful LoRa
 send. With no acknowledgement on the link, that proves only the sensor's IMU →
 radio path.
 
+## Noise floor
+
+From firmware 2.31.1 (#336), a gateway samples its receiver's instantaneous
+RSSI between packets: once in the middle of the quiet gap after each packet
+it receives, or every 100 ms once nothing has been heard for 200 ms. Each
+LoRa Link record carries the window's **minimum** and **median**
+(PROTOCOL.md § LoRa Link frame). The timing per preset, and why mid-gap, is in
+NOISE-FLOOR-PLAN.md.
+
+- **What to expect:** thermal noise in 500 kHz with a 6 dB noise figure is
+  about −111 dBm. A floor several dB above that is noise the receiver's own
+  setup picks up, or other traffic on the channel.
+- **Minimum against median:** the minimum is the clean floor. A median well
+  above it means interference that lasts: another transmitter, or noise from
+  something near the antenna.
+- **Signal over noise:** packet RSSI minus the median noise estimates the
+  signal's margin over the noise the receiver actually hears, independent of
+  LoRa's own SNR. The app shows it on the LoRa RSSI row, and
+  `walktest-report.py` per distance band.
+
+
 ## Walk-test mode
 
 `SOPHON_LORA_WALKTEST=y`, both ends. The sensor sets `TEST` on every v2 packet.

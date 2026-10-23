@@ -373,8 +373,8 @@ aligned and the spare byte is last. Version 1, which sent `lq_x10` and an 8-bit
 | 10 | 2 | `u16` | `samples` | samples received |
 | 12 | 2 | `u16` | `missing` | samples lost, from `seq` gaps between packets |
 | 14 | 1 | `u8` | `last_packet` | time since the last packet at the record's close, in **100 ms** units. 255 = 25.5 s or more, or no packet yet |
-| 15 | 1 | `i8` | `noise_min` | the receiver's noise floor over the window, dBm. **`0x7F` = not measured** (until #336) |
-| 16 | 1 | `i8` | `noise_median` | dBm; `0x7F` = not measured (until #336) |
+| 15 | 1 | `i8` | `noise_min` | the receiver's noise floor over the window: the lowest of the samples taken between packets, dBm (firmware 2.31.1, #336; [NOISE-FLOOR-PLAN.md](NOISE-FLOOR-PLAN.md)). **`0x7F` = not measured**: older firmware, or no sample this window |
+| 16 | 1 | `i8` | `noise_median` | the median of those samples, dBm: ongoing interference raises it above the minimum. `0x7F` = not measured |
 | 17 | 1 | `u8` | `bad` · `wrong_peer` | bits 0–3: packets that failed to decode; bits 4–7: packets from another sensor. Each saturates at 15 |
 | 18 | 1 | `u8` | `flags` | bit 0 RX boost on · bit 1 walk-test record · bit 2 **heard** (any packet this window) · bit 3 spare · bits 4–7 spreading factor |
 | 19 | 1 | `u8` | `reserved` | 0 |
