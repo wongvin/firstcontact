@@ -32,6 +32,7 @@
 #include <hal/nrf_power.h>
 
 #include "config.h"
+#include "lora_image.h"
 #include "lora_link.h"
 #include "lora_presets.h"
 #include "slow_work.h"
@@ -89,7 +90,7 @@ static uint8_t pending_flags;
 
 static bool config_valid(const struct sophon_config *c)
 {
-	if (c->role > SOPHON_CONFIG_ROLE_GATEWAY) {
+	if (c->role > SOPHON_CONFIG_ROLE_TRANSPORTER) {
 		return false;
 	}
 	if (c->preset != SOPHON_CONFIG_PRESET_DEFAULT && c->preset >= LORA_PRESET_COUNT) {
@@ -343,6 +344,9 @@ uint8_t sophon_config_write(const uint8_t *buf, uint16_t len)
 		if (c.role == SOPHON_CONFIG_ROLE_GATEWAY && !hw_radio) {
 			return BT_ATT_ERR_VALUE_NOT_ALLOWED;
 		}
+		if (c.role == SOPHON_CONFIG_ROLE_TRANSPORTER && !(hw_radio && lora_image_ready())) {
+			return BT_ATT_ERR_VALUE_NOT_ALLOWED;
+		}
 	}
 
 #if !defined(CONFIG_SETTINGS)
@@ -370,9 +374,10 @@ void sophon_config_read(uint8_t out[SOPHON_CONFIG_READ_SIZE])
 		now = stored;
 	}
 
-	active.role = role == SOPHON_ROLE_SENSOR    ? SOPHON_CONFIG_ROLE_SENSOR
-		      : role == SOPHON_ROLE_GATEWAY ? SOPHON_CONFIG_ROLE_GATEWAY
-						    : SOPHON_CONFIG_ROLE_DIRECT;
+	active.role = role == SOPHON_ROLE_SENSOR        ? SOPHON_CONFIG_ROLE_SENSOR
+		      : role == SOPHON_ROLE_GATEWAY     ? SOPHON_CONFIG_ROLE_GATEWAY
+		      : role == SOPHON_ROLE_TRANSPORTER ? SOPHON_CONFIG_ROLE_TRANSPORTER
+							: SOPHON_CONFIG_ROLE_DIRECT;
 	active.preset = sophon_config_preset_id();
 	preset = lora_preset_get(active.preset);
 	active.tx_dbm = boot.tx_dbm != SOPHON_CONFIG_TX_DEFAULT ? boot.tx_dbm
@@ -387,6 +392,7 @@ void sophon_config_read(uint8_t out[SOPHON_CONFIG_READ_SIZE])
 	status |= hw_forced ? SOPHON_CONFIG_STATUS_FORCED : 0;
 	status |= boot_from_flash ? SOPHON_CONFIG_STATUS_STORED : 0;
 	status |= guard_tripped ? SOPHON_CONFIG_STATUS_GUARD : 0;
+	status |= lora_image_ready() ? SOPHON_CONFIG_STATUS_TRANSPORT : 0;
 
 	out[0] = SOPHON_CONFIG_VERSION;
 	pack_fields(&now, &out[1]);

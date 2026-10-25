@@ -20,6 +20,8 @@ enum sophon_config_role {
 	SOPHON_CONFIG_ROLE_DIRECT = 1,
 	SOPHON_CONFIG_ROLE_SENSOR = 2,
 	SOPHON_CONFIG_ROLE_GATEWAY = 3,
+	/* Sends its own image for the bit-error test (#359). Never chosen by Auto. */
+	SOPHON_CONFIG_ROLE_TRANSPORTER = 4,
 };
 
 /* Sentinels meaning "use the build's own value". */
@@ -60,12 +62,14 @@ struct sophon_config {
 #define SOPHON_CONFIG_FLAG_RESTART  BIT(0)
 #define SOPHON_CONFIG_FLAG_DEFAULTS BIT(1)
 
-#define SOPHON_CONFIG_STATUS_RADIO   BIT(0)
-#define SOPHON_CONFIG_STATUS_IMU     BIT(1)
-#define SOPHON_CONFIG_STATUS_PENDING BIT(2)
-#define SOPHON_CONFIG_STATUS_FORCED  BIT(3)
-#define SOPHON_CONFIG_STATUS_STORED  BIT(4)
-#define SOPHON_CONFIG_STATUS_GUARD   BIT(5)
+#define SOPHON_CONFIG_STATUS_RADIO     BIT(0)
+#define SOPHON_CONFIG_STATUS_IMU       BIT(1)
+#define SOPHON_CONFIG_STATUS_PENDING   BIT(2)
+#define SOPHON_CONFIG_STATUS_FORCED    BIT(3)
+#define SOPHON_CONFIG_STATUS_STORED    BIT(4)
+#define SOPHON_CONFIG_STATUS_GUARD     BIT(5)
+/* An MCUboot build that read its own image (#359): it can be a transporter. */
+#define SOPHON_CONFIG_STATUS_TRANSPORT BIT(6)
 
 /*
  * Load the stored config and run the boot-loop guard. Call first thing at boot,

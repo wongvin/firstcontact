@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-10-25
+
+### feat: transporter role measures LoRa bit errors (#359)
+
+- **Firmware 2.37.0:** a board set to **Transporter** sends its own running image (slot 0, header + body) over LoRa with the payload CRC off, on the sensor's packet schedule. A gateway with the same image compares every bit, header included: a damaged header is rebuilt from the last good packet, and a header check seeded with the image hash flags a mismatched image.
+- **Per window:** packets, damaged, lost, bit errors, repaired, unresolved, on the console and in a new **LoRa BER** characteristic (`C6560008`) paired with LoRa Link by window number. Config role 4 and status bit 6 ("can transport"). MCUboot builds only; `src/lora_ber.c` is host-tested by `scripts/test-codec.sh`.
+- **App:** the LoRa link section adapts to what the gateway hears: with a transporter, Bit error rate and its 30-window chart replace Link quality, alongside the test's rows (per window and this session), **Check images** comparing both boards' slot-0 hashes over SMP, the Transporter role in Config (listed under Sensors), and `ber_*` columns in walk-test CSV format 3.
+- **Only what applies to the role:** Motion, Frames and the transmit counters are hidden for a sensor or transporter (which point to their gateway) and for a gateway hearing only a transporter.
+- **Image check works on a mismatch:** with no header passing, the gateway still names the transporter from its headers (two in a row), flagged unverified (BER flags bit 3), so the app can find the board and show Mismatch. **A BER walk is gated on it:** while a transporter is heard, Start walk-test recording needs a current matching check.
+- **BER uses the received packet length:** the frame's `packet_len` is the length of the packets compared, not the gateway's own preset's, so BER is right when the two boards run different presets of one SF.
+- **Lost no longer double-counts:** a packet heard but unresolved counts in `unresolved` only, not in `lost` as well, so lost % = lost ÷ (packets + lost + unresolved) holds (`lora_ber_lost()`, host-tested).
+- TRANSPORTER-PLAN.md; LORA-PROTOCOL.md § Bit-error test; PROTOCOL.md § LoRa BER frame.
+
 ## 2026-10-24
 
 ### docs: LoRa trade-off figures (#337)

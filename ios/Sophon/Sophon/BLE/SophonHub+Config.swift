@@ -39,6 +39,7 @@ extension SophonHub {
         }
         guard let device = devices.first(where: { $0.id == id }) else { return }
         if device.config != state { device.config = state }
+        device.loraBer.note(role: state.active.role)
         if device.configMismatch != nil { device.configMismatch = nil }
         if device.configReadFailed { device.configReadFailed = false }
 
@@ -48,10 +49,10 @@ extension SophonHub {
         // disconnect re-arms a connect, which completes on the first
         // connectable advertisement, after which the board stops advertising.
         // The config read on every connect says what the board really is.
-        if state.active.role == .sensor {
+        if state.active.role.isLoRaOnly {
             if !device.advertisesAsSensor { device.advertisesAsSensor = true }
             if !device.sensorSessionRequested {
-                Self.configLog.info("\(device.displayName, privacy: .public) is a sensor; not holding it")
+                Self.configLog.info("\(device.displayName, privacy: .public) is LoRa-only; not holding it")
                 dropConnection(device)
             }
         }
@@ -87,7 +88,7 @@ extension SophonHub {
         if request.restart, let state = device.config {
             let role = request.restoreDefaults ? SophonConfig.Role.auto : request.config.role
             let resolved = role == .auto ? state.autoRole : role
-            device.expectingSensorRestart = resolved == .sensor && !device.sensorSessionRequested
+            device.expectingSensorRestart = resolved.isLoRaOnly && !device.sensorSessionRequested
         }
         device.peripheral.writeValue(request.encoded, for: characteristic, type: .withResponse)
         Self.configLog.info("config write to \(device.displayName, privacy: .public)")

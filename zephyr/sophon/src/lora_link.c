@@ -7,10 +7,15 @@
  * thread gathers frames into a packet under the packing rules and sends it
  * with the blocking lora_send(), so radio time never lands on the IMU thread.
  *
+ * TRANSPORTER (#359). The same thread slot as the sensor's, since a board is
+ * one or the other: it sends its own running image, packet by packet on the
+ * sensor's schedule, with the payload CRC off (TRANSPORTER-PLAN.md).
+ *
  * GATEWAY. loramac-node's async receive re-arms itself after every packet and
  * runs its callback on the system work queue. The callback decodes, tracks seq
  * continuity, keeps the sensor's latest status, and hands each rebuilt frame to
- * main.c, which owns the BLE delivery queue.
+ * main.c, which owns the BLE delivery queue. A transporter's packet goes to the
+ * bit-error measurement instead.
  */
 
 #include <string.h>
@@ -28,7 +33,9 @@
 #include "ble.h"
 #include "ident.h"
 #include "config.h"
+#include "lora_ber.h"
 #include "lora_codec.h"
+#include "lora_image.h"
 #include "lora_link.h"
 #include "lora_presets.h"
 
@@ -100,7 +107,8 @@ static int8_t tx_dbm(void)
 	return override != SOPHON_CONFIG_TX_DEFAULT ? override : preset->tx_dbm;
 }
 
-static int configure(bool tx)
+/* crc_off only for a transporter's sends (#359): a damaged packet must arrive. */
+static int configure(bool tx, bool crc_off)
 {
 	struct lora_modem_config cfg = {
 		.frequency = sophon_config_freq_hz(),
@@ -112,7 +120,7 @@ static int configure(bool tx)
 		.tx = tx,
 		.iq_inverted = false,
 		.public_network = false, /* the private sync word */
-		.packet_crc_disable = false,
+		.packet_crc_disable = crc_off,
 	};
 
 	return lora_config(lora_dev, &cfg);
@@ -240,6 +248,75 @@ static void sensor_stats_log(void)
 		sensor_stats.packets, sensor_stats.samples, sensor_stats.send_err,
 		sensor_stats.dropped);
 	memset(&sensor_stats, 0, sizeof(sensor_stats));
+}
+
+/* ------------------------------------------------------------- transporter */
+
+static struct {
+	uint32_t packets;
+	uint32_t send_err;
+	uint32_t passes; /* times the offset wrapped: whole images sent */
+} transporter_stats;
+
+/* One packet every k samples' worth of time, as a sensor sends (#359). */
+static K_TIMER_DEFINE(transporter_timer, NULL, NULL);
+
+static void transporter_main(void *p1, void *p2, void *p3)
+{
+	static uint8_t buf[LORA_BER_PACKET_MAX];
+	const struct lora_ber_image *img = lora_image();
+	size_t len = lora_preset_full_len(preset);
+	uint32_t n = (uint32_t)(len - LORA_BER_HEADER);
+	struct lora_ber_header h = {0};
+	bool confirmed = false;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)sophon_device_tag(&h.tx_id);
+	LOG_INF("transporter: %u B packets, %u image bytes each, one every %u us; "
+		"%u packets per pass",
+		(unsigned int)len, n, preset->k * 18400U, (img->len + n - 1) / n);
+
+	k_timer_start(&transporter_timer, K_NO_WAIT, K_USEC(preset->k * 18400U));
+	for (;;) {
+		int err;
+
+		(void)k_timer_status_sync(&transporter_timer);
+
+		err = lora_ber_encode(img, &h, buf, len);
+		if (err == 0) {
+			err = lora_send(lora_dev, buf, (uint32_t)len);
+		}
+		if (err) {
+			transporter_stats.send_err++;
+		} else {
+			transporter_stats.packets++;
+			/* As a sensor does: a completed send, the nearest to delivered. */
+			if (!confirmed) {
+				confirmed = true;
+				sophon_image_confirm_once();
+			}
+		}
+
+		/* Advance whether or not it went out: the gateway extrapolates the
+		 * header from time, and a missing packet is simply lost. */
+		h.pseq++;
+		h.offset += n;
+		if (h.offset >= img->len) {
+			h.offset -= img->len;
+			transporter_stats.passes++;
+		}
+	}
+}
+
+static void transporter_stats_log(void)
+{
+	LOG_INF("lora tx: %u image pkts, %u send errors; %u whole passes so far",
+		transporter_stats.packets, transporter_stats.send_err, transporter_stats.passes);
+	transporter_stats.packets = 0;
+	transporter_stats.send_err = 0;
 }
 
 /* ----------------------------------------------------------------- gateway */
@@ -463,6 +540,232 @@ static void noise_summary(uint8_t *min_out, uint8_t *median_out)
 	}
 }
 
+/*
+ * BIT-ERROR MEASUREMENT (#359; TRANSPORTER-PLAN.md § Header damage). Every
+ * transporter packet is compared bit by bit with this board's own image. The
+ * anchor is the last packet whose hcrc passed; a damaged header is recovered
+ * from it. A repaired packet doesn't move the anchor, so losses are counted
+ * from ber_counted, the delta of the last packet accounted since the anchor.
+ * System work queue only, like the rest of gateway_rx; the record is read from
+ * the Bluetooth RX thread, hence its lock.
+ */
+#define BER_REPAIR_MAX        64
+/* Image mismatch suspected: this many test packets in the window, at least
+ * BER_MISMATCH_PCT of them unresolved, at an SNR that can't explain it. */
+#define BER_MISMATCH_MIN_PKTS 10
+#define BER_MISMATCH_PCT      90
+#define BER_MISMATCH_SNR_DB   0
+
+static struct {
+	uint32_t heard; /* every transporter packet, whatever became of it */
+	uint32_t packets;
+	uint32_t damaged;
+	uint32_t lost;
+	uint32_t bit_errors;
+	uint32_t bits;
+	uint32_t repaired;
+	uint32_t unresolved;
+	int32_t snr_sum;
+} ber_stats;
+
+static struct lora_ber_anchor ber_anchor;
+static int64_t ber_anchor_ms;
+static uint16_t ber_counted;
+/* Typed packets heard but unresolved since the last one accounted: already
+ * counted as unresolved, so taken out of the next gap's losses. */
+static uint16_t ber_unresolved_since;
+
+/*
+ * The transporter a typed packet's header names, not yet confirmed. An anchor
+ * needs hcrc to pass, which it never does when the two boards run different
+ * images, so tx_id would stay 0 and the app couldn't find the board to check
+ * its image: the one case the check exists for (#359 review, finding 1). The
+ * same id in two typed packets in a row becomes the claim, so a single
+ * damaged header can't name a board. The record reports it, with flag bit 3,
+ * until an anchor confirms an id; it lapses with the fade window.
+ */
+static uint16_t ber_claim_id;
+static uint16_t ber_claim_last;
+static int64_t ber_claim_ms;
+
+static struct k_spinlock ber_record_lock;
+static uint8_t ber_record[LORA_BER_RECORD_SIZE];
+static bool ber_record_valid;
+
+/* Packets the elapsed time allows, plus slack, at the sensor's schedule. */
+static uint32_t ber_steps(int64_t ms)
+{
+	return (uint32_t)(MAX(ms, 0) / MAX(noise_period_ms, 1U)) + 3U;
+}
+
+/*
+ * Measure one packet. typed: its type byte says transporter. An untyped one
+ * (a damaged type byte, tried on its length) that can't be resolved isn't
+ * claimed: false, and the caller counts it bad, as before #359.
+ */
+static bool gateway_ber(const uint8_t *data, uint16_t size, int8_t snr, bool typed)
+{
+	struct lora_ber_result r;
+	int64_t age = ber_anchor.valid ? last_rx_ms - ber_anchor_ms : INT64_MAX;
+	uint16_t repair_max = age <= ANCHOR_HOLD_MS ? MIN(ber_steps(age), BER_REPAIR_MAX) : 0;
+	uint16_t count_max = age <= FADE_COUNT_MS ? MIN(ber_steps(age), UINT16_MAX) : 0;
+	bool resolved;
+
+	if (typed && size >= LORA_BER_HEADER) {
+		uint16_t id = sys_get_le16(&data[1]);
+
+		if (id != 0 && id == ber_claim_last) {
+			ber_claim_id = id;
+			ber_claim_ms = last_rx_ms;
+		}
+		ber_claim_last = id;
+	}
+	resolved = lora_image_ready() &&
+		   lora_ber_measure(lora_image(), &ber_anchor, repair_max, count_max, data, size,
+				    &r) == 0 &&
+		   r.kind != LORA_BER_UNRESOLVED;
+
+	if (!resolved && !typed) {
+		return false;
+	}
+	ber_stats.heard++;
+	ber_stats.snr_sum += snr;
+	if (!resolved) {
+		ber_stats.unresolved++;
+		if (ber_unresolved_since < UINT16_MAX) {
+			ber_unresolved_since++;
+		}
+		return true;
+	}
+
+	/* Losses since the last packet accounted, not since the anchor, less
+	 * those heard in between that couldn't be resolved. */
+	if (r.delta > ber_counted) {
+		ber_stats.lost += lora_ber_lost(r.delta, ber_counted, ber_unresolved_since);
+		ber_counted = r.delta;
+	}
+	ber_unresolved_since = 0;
+	if (r.kind == LORA_BER_GOOD) {
+		ber_anchor.valid = true;
+		ber_anchor.hdr = r.hdr;
+		ber_anchor.len = (uint8_t)size;
+		ber_anchor_ms = last_rx_ms;
+		ber_counted = 0;
+	} else {
+		ber_stats.repaired++;
+	}
+	ber_stats.packets++;
+	ber_stats.bits += size * 8U;
+	ber_stats.bit_errors += r.bit_errors;
+	ber_stats.damaged += r.bit_errors > 0;
+	return true;
+}
+
+static bool ber_mismatch_suspected(void)
+{
+	return ber_stats.heard >= BER_MISMATCH_MIN_PKTS &&
+	       ber_stats.unresolved * 100U >= ber_stats.heard * BER_MISMATCH_PCT &&
+	       ber_stats.snr_sum / (int32_t)ber_stats.heard >= BER_MISMATCH_SNR_DB;
+}
+
+/* The transporter the record names: the anchored one, confirmed by hcrc, or
+ * else a recent claim from the headers. *unverified says which. Both lapse
+ * FADE_COUNT_MS after the transporter was last heard, measured against now,
+ * not the last packet: with nothing heard that would never move, and a board
+ * switched off would be named until this gateway rebooted (#359 review). */
+static uint16_t ber_tx_id(bool *unverified)
+{
+	int64_t now = k_uptime_get();
+
+	*unverified = false;
+	if (ber_anchor.valid && now - ber_anchor_ms <= FADE_COUNT_MS) {
+		return ber_anchor.hdr.tx_id;
+	}
+	if (ber_claim_id != 0 && now - ber_claim_ms <= FADE_COUNT_MS) {
+		*unverified = true;
+		return ber_claim_id;
+	}
+	return 0;
+}
+
+static uint8_t sat_u8(uint32_t v)
+{
+	return (uint8_t)MIN(v, UINT8_MAX);
+}
+
+/* The LoRa BER record (#359), PROTOCOL.md § LoRa BER frame. window is the LoRa
+ * Link record's, taken before that record increments it. */
+static void gateway_build_ber_record(uint16_t window)
+{
+	uint8_t r[LORA_BER_RECORD_SIZE];
+	k_spinlock_key_t key;
+	bool unverified;
+	uint16_t tx_id = ber_tx_id(&unverified);
+
+	r[0] = LORA_BER_RECORD_VERSION;
+	r[1] = (uint8_t)((preset->id & 0x0F) | ((stats_period_ms / 1000) << 4));
+	sys_put_le16(tx_id, &r[2]);
+	sys_put_le16(window, &r[4]);
+	sys_put_le16((uint16_t)MIN(ber_stats.packets, UINT16_MAX), &r[6]);
+	sys_put_le16((uint16_t)MIN(ber_stats.damaged, UINT16_MAX), &r[8]);
+	sys_put_le16((uint16_t)MIN(ber_stats.lost, UINT16_MAX), &r[10]);
+	sys_put_le32(ber_stats.bit_errors, &r[12]);
+	/* The length of the packets actually compared, so packets x 8 x PL is
+	 * the bits compared: a gateway hears any preset of its SF, so its own
+	 * preset's length can differ (#359 review, finding 4). Exact from the
+	 * bits counted; else the anchor's; else this gateway's preset. */
+	r[16] = ber_stats.packets  ? (uint8_t)((ber_stats.bits / 8U + ber_stats.packets / 2U) /
+                                              ber_stats.packets)
+		: ber_anchor.valid ? ber_anchor.len
+				   : (uint8_t)lora_preset_full_len(preset);
+	r[17] = sat_u8(ber_stats.unresolved);
+	/* bit 0 heard, bit 1 image mismatch suspected, bit 2 can compare,
+	 * bit 3 tx_id unverified (from headers, not yet an anchor). */
+	r[18] = (ber_stats.heard ? BIT(0) : 0) | (ber_mismatch_suspected() ? BIT(1) : 0) |
+		(lora_image_ready() ? BIT(2) : 0) | (unverified ? BIT(3) : 0);
+	r[19] = sat_u8(ber_stats.repaired);
+
+	key = k_spin_lock(&ber_record_lock);
+	memcpy(ber_record, r, sizeof(ber_record));
+	ber_record_valid = true;
+	k_spin_unlock(&ber_record_lock, key);
+
+	sophon_ble_lora_ber_notify();
+}
+
+bool lora_link_ber_record(uint8_t out[LORA_BER_RECORD_SIZE])
+{
+	k_spinlock_key_t key = k_spin_lock(&ber_record_lock);
+	bool valid = ber_record_valid;
+
+	if (valid) {
+		memcpy(out, ber_record, LORA_BER_RECORD_SIZE);
+	}
+	k_spin_unlock(&ber_record_lock, key);
+	return valid;
+}
+
+static void gateway_ber_log(void)
+{
+	uint32_t ppm;
+	bool unverified;
+	uint16_t tx_id = ber_tx_id(&unverified);
+
+	if (ber_stats.heard == 0) {
+		return;
+	}
+	/* Parts per million, so the console shows the 0.0015% steps. */
+	ppm = ber_stats.bits
+		      ? (uint32_t)((uint64_t)ber_stats.bit_errors * 1000000U / ber_stats.bits)
+		      : 0;
+	LOG_INF("lora ber: tx %04X%s%s; %u pkts (%u repaired, %u unresolved), %u lost; "
+		"%u damaged; %u / %u bits = %u.%04u%%",
+		tx_id, unverified ? " (unverified)" : "",
+		ber_mismatch_suspected() ? " IMAGE MISMATCH SUSPECTED" : "", ber_stats.packets,
+		ber_stats.repaired, ber_stats.unresolved, ber_stats.lost, ber_stats.damaged,
+		ber_stats.bit_errors, ber_stats.bits, ppm / 10000, ppm % 10000);
+}
+
 static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, int16_t rssi,
 		       int8_t snr, void *user_data)
 {
@@ -480,7 +783,20 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 	gw_stats.rssi_min = MIN(gw_stats.rssi_min, rssi);
 	gw_stats.snr_min = MIN(gw_stats.snr_min, snr);
 
+	/* A transporter's packet (#359): measured, never relayed. */
+	if (size > 0 && data[0] == LORA_TYPE_BER) {
+		(void)gateway_ber(data, size, snr, true);
+		return;
+	}
+
 	if (lora_codec_decode(data, size, LORA_K_LIMIT, &pkt) != 0) {
+		/* A transporter packet whose type byte was hit: its exact length
+		 * while one is anchored is the tell, and repair has the last word. */
+		if (ber_anchor.valid && size == ber_anchor.len &&
+		    last_rx_ms - ber_anchor_ms <= ANCHOR_HOLD_MS &&
+		    gateway_ber(data, size, snr, false)) {
+			return;
+		}
 		gw_stats.bad++;
 		return;
 	}
@@ -673,12 +989,16 @@ static void watchdog_handler(struct k_work *work)
 
 static void gateway_stats_log(void)
 {
-	uint32_t rx = gw_stats.packets + gw_stats.bad + gw_stats.wrong_peer;
+	/* Transporter packets count as heard (#359): RSSI and SNR include them. */
+	uint32_t rx = gw_stats.packets + gw_stats.bad + gw_stats.wrong_peer + ber_stats.heard;
 	uint32_t expected = gw_stats.samples + gw_stats.missing;
 	uint32_t lq_x10 = expected ? (gw_stats.samples * 1000U) / expected : 0;
 	static uint32_t since_log;
 
-	/* Every window's record goes out; only the console is thinned. */
+	/* Every window's record goes out; only the console is thinned. The BER
+	 * record first, with the window number the Link record is about to use,
+	 * so the app can pair them (#359). */
+	gateway_build_ber_record(record_window);
 	gateway_build_record(rx);
 
 	if (++since_log < log_every) {
@@ -705,7 +1025,9 @@ static void gateway_stats_log(void)
 			gw_stats.rssi_min, gw_stats.snr_sum / (int32_t)rx, gw_stats.snr_min,
 			(int8_t)nmin, (int8_t)nmed, dio1_kicks);
 	}
+	gateway_ber_log();
 reset:
+	memset(&ber_stats, 0, sizeof(ber_stats));
 	memset(&gw_stats, 0, sizeof(gw_stats));
 	memset(noise_hist, 0, sizeof(noise_hist));
 	noise_count = 0;
@@ -726,6 +1048,8 @@ static void stats_handler(struct k_work *work)
 
 	if (link_role == SOPHON_ROLE_SENSOR) {
 		sensor_stats_log();
+	} else if (link_role == SOPHON_ROLE_TRANSPORTER) {
+		transporter_stats_log();
 	} else {
 		gateway_stats_log();
 	}
@@ -752,7 +1076,7 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 	 * UsageFault at boot, found on hardware. The gateway switches to RX below,
 	 * after the airtime has been logged.
 	 */
-	err = configure(true);
+	err = configure(true, role == SOPHON_ROLE_TRANSPORTER);
 	if (err) {
 		LOG_ERR("lora_config failed (%d)", err);
 		return err;
@@ -765,15 +1089,17 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 		sophon_config_freq_hz() / 1000000, (sophon_config_freq_hz() / 1000) % 1000,
 		lora_preset_full_len(preset), lora_airtime(lora_dev, lora_preset_full_len(preset)));
 
-	if (role == SOPHON_ROLE_SENSOR) {
+	if (role == SOPHON_ROLE_SENSOR || role == SOPHON_ROLE_TRANSPORTER) {
+		/* One TX thread slot: a board is a sensor or a transporter, never both. */
 		k_thread_create(&sensor_thread, sensor_stack, K_THREAD_STACK_SIZEOF(sensor_stack),
-				sensor_main, NULL, NULL, NULL, SENSOR_PRIORITY, 0, K_NO_WAIT);
+				role == SOPHON_ROLE_SENSOR ? sensor_main : transporter_main, NULL,
+				NULL, NULL, SENSOR_PRIORITY, 0, K_NO_WAIT);
 		k_thread_name_set(&sensor_thread, "lora_tx");
 	} else {
 		gateway_on_frame = on_frame;
 		gw_stats.rssi_min = INT16_MAX;
 		gw_stats.snr_min = INT8_MAX;
-		err = configure(false);
+		err = configure(false, false);
 		if (err) {
 			LOG_ERR("lora_config (rx) failed (%d)", err);
 			return err;

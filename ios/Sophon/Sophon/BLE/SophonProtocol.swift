@@ -727,6 +727,7 @@ nonisolated enum SophonProtocolSelfCheck {
         checkIdentity()
         checkLinkParams()
         checkLoRaLink()
+        checkLoRaBer()
         checkVersionMismatch()
         checkUptimeFormat()
         checkBattery()

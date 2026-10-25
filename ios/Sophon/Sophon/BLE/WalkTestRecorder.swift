@@ -215,7 +215,10 @@ final class WalkTestRecorder: NSObject {
     ///
     /// - Parameter sensor: the hub's entry for the sensor the gateway locked
     ///   onto, if the app has seen it, for its firmware and config.
-    func record(_ link: LoRaLinkRecord, from device: SophonDevice, sensor: SophonDevice?, gaps: [LossGap] = []) {
+    func record(
+        _ link: LoRaLinkRecord, from device: SophonDevice, sensor: SophonDevice?, transporter: SophonDevice? = nil,
+        gaps: [LossGap] = []
+    ) {
         guard isRecording else { return }
         // A recording follows one gateway: the first it hears from. Another
         // board still connected would otherwise alternate keys and split the
@@ -224,8 +227,9 @@ final class WalkTestRecorder: NSObject {
         guard device.id == gatewayID else { return }
         let now = Date()
         let record = HeldRecord(
-            arrived: now, link: link, gaps: gaps, device: device, sensor: sensor,
-            row: Self.windowRow(link, battery: device.battery, fix: lastFix, pin: pin, now: now))
+            arrived: now, link: link, gaps: gaps, device: device, sensor: sensor, transporter: transporter,
+            row: Self.windowRow(link, ber: device.loraBer.record, battery: device.battery, fix: lastFix, pin: pin,
+                                now: now))
         // After a reconnect the session reset clears the config and re-reads
         // it, and the LoRa Link read can land first. The record waits for it,
         // so the first record after a real change lands in the new file. Not
@@ -281,12 +285,17 @@ final class WalkTestRecorder: NSObject {
             if session.sensorID == 0, key.sensorID != 0, let name = link.sensorName {
                 learnt("sensor locked: \(name)")
             }
+            if session.transporterID == 0, key.transporterID != 0,
+               let name = device.loraBer.record?.transporterName {
+                learnt("transporter heard: \(name)")
+            }
             if session.config == nil, key.config != nil {
                 learnt("gateway config: " + Self.configDescription(device.config, link: link))
             }
             self.session = session.merged(with: key)
         } else {
-            writePreamble(device: device, link: link, sensor: record.sensor, rotating: link.isWalkTest)
+            writePreamble(device: device, link: link, sensor: record.sensor, transporter: record.transporter,
+                          rotating: link.isWalkTest)
             session = key
         }
         // The loss runs need the whole of a window's stream. Not known for the
@@ -374,11 +383,15 @@ final class WalkTestRecorder: NSObject {
         }
     }
 
-    private func writePreamble(device: SophonDevice?, link: LoRaLinkRecord?, sensor: SophonDevice?, rotating: Bool) {
+    private func writePreamble(
+        device: SophonDevice?, link: LoRaLinkRecord?, sensor: SophonDevice?, transporter: SophonDevice? = nil,
+        rotating: Bool
+    ) {
         let context = PreambleContext(
             started: started, note: note, part: part,
             continues: fileURLs.dropLast().last?.lastPathComponent,
-            gateway: device, link: link, sensor: sensor, pin: pin, pinIsAutomatic: pinIsAutomatic)
+            gateway: device, link: link, sensor: sensor, transporter: transporter, pin: pin,
+            pinIsAutomatic: pinIsAutomatic)
         columns = Self.columns(rotating: rotating)
         Self.preamble(context).forEach(append)
         append(columns.joined(separator: ","))

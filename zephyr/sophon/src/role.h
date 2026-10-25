@@ -5,6 +5,8 @@
  *   radio + IMU  -> sensor
  *   radio, no IMU -> gateway
  *   no radio     -> direct (the BLE peripheral as it was before LoRa)
+ *
+ * Auto never picks the transporter (#359): it is a test role, set from the app.
  */
 
 #ifndef SOPHON_ROLE_H
@@ -17,6 +19,7 @@ enum sophon_role {
 	SOPHON_ROLE_DIRECT,
 	SOPHON_ROLE_SENSOR,
 	SOPHON_ROLE_GATEWAY,
+	SOPHON_ROLE_TRANSPORTER, /* only when set from the app (#359) */
 };
 
 /*

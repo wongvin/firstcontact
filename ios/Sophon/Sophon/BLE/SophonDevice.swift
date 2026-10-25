@@ -674,6 +674,9 @@ final class SophonDevice: Identifiable {
     /// Cleared by the next record it does read, and with the session.
     var loraLinkMismatch: VersionMismatch?
 
+    /// The bit-error test (#359): its own object, cleared with the session.
+    let loraBer = LoRaBerState()
+
     /// The last record ingested, kept across `resetLinkStats()` on purpose. The
     /// window counter lives on the gateway's uptime, not this app's session, so
     /// the record the gateway re-sends on the read after a reconnect can only be
@@ -896,6 +899,9 @@ final class SophonDevice: Identifiable {
             // anything" is also caught rather than waiting forever on a first
             // frame that is not coming.
             guard let since = lastFrameAt ?? connectedAt else { return .connected }
+            // A gateway hearing only a transporter relays no motion (#359):
+            // its fresh bit-error records are this link's data.
+            if loraBer.isLive(asOf: now, staleAfter: loraRecordStaleAfter) { return .connected }
             let silent = now.timeIntervalSince(since)
             return silent > Self.interruptionThreshold ? .stalled(silentFor: silent) : .connected
         }
@@ -1093,6 +1099,7 @@ final class SophonDevice: Identifiable {
         loraSessionBadSaturated = false
         loraRecordsMissed = 0
         loraLinkMismatch = nil
+        loraBer.resetSession()
         // offersBattery deliberately NOT cleared -- it describes the GATT
         // database, which survives a reconnect. Same rule as offersLinkParams.
         // offersLinkParams is deliberately NOT cleared here. It describes the
