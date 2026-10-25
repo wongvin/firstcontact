@@ -316,6 +316,10 @@ private struct ConfigEditor: View {
     private var roleFooter: String {
         let auto = "Auto picks \(state.autoRole.label.lowercased()) on this board, from its hardware."
         switch config.role {
+        case .transporter:
+            return auto + " As a transporter it sends its own firmware over LoRa for the bit-error test, "
+                + "measured by a gateway running the same image. It stops advertising to the app, and "
+                + "appears under Sensors."
         case _ where becomesSensor(config.role):
             return auto + " As a sensor it stops advertising to the app, and appears under Sensors."
         case .gateway where state.imuPresent:
@@ -331,10 +335,11 @@ private struct ConfigEditor: View {
         return becomesSensor(edited.role) ? base + " It will then appear under Sensors." : base
     }
 
-    /// Whether this role takes the board into the sensor role from another --
-    /// directly, or through Auto on a board with a radio and an IMU.
+    /// Whether this role takes the board into a LoRa-only role (sensor or
+    /// transporter, #359) from another -- directly, or through Auto on a board
+    /// with a radio and an IMU.
     private func becomesSensor(_ role: SophonConfig.Role) -> Bool {
-        (role == .auto ? state.autoRole : role) == .sensor && state.active.role != .sensor
+        (role == .auto ? state.autoRole : role).isLoRaOnly && !state.active.role.isLoRaOnly
     }
 
     private func save(restart: Bool) {

@@ -92,8 +92,12 @@ final class FirmwareUpdater {
         deviceID == device.id ? phase : nil
     }
 
+    /// Set by the hub: an image check uses SMP too, so neither may start while
+    /// the other runs (#359 review, finding 3).
+    weak var imageCheck: ImageCheck?
+
     func start(_ image: FirmwareImage, on device: SophonDevice) {
-        guard !isBusy else { return }
+        guard !isBusy, imageCheck?.isBusy != true else { return }
         idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
         UIApplication.shared.isIdleTimerDisabled = true
         deviceID = device.id
@@ -213,8 +217,15 @@ final class FirmwareUpdater {
     /// is the board's own answer, and what its next advertisement will carry.
     private func noteRunning(_ version: String) {
         let parts = version.split(separator: ".").compactMap { UInt8($0) }
-        guard parts.count >= 2, let device, let identity = device.identity else { return }
+        guard parts.count >= 2, let device, let identity = device.identity else {
+            log.error("read-back \(version, privacy: .public) not applied: no device or identity")
+            return
+        }
         let updated = identity.withFirmware(major: parts[0], minor: parts[1])
+        log.info("""
+            read-back: \(device.displayName, privacy: .public) firmware \
+            \(identity.firmwareVersion, privacy: .public) → \(updated.firmwareVersion, privacy: .public)
+            """)
         if device.identity != updated { device.identity = updated }
     }
 

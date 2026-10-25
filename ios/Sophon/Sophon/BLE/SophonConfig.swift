@@ -13,6 +13,8 @@ nonisolated struct SophonConfig: Equatable, Sendable {
         case direct = 1
         case sensor = 2
         case gateway = 3
+        /// Sends its own image for the bit-error test (#359). Never Auto's pick.
+        case transporter = 4
 
         var label: String {
             switch self {
@@ -20,8 +22,14 @@ nonisolated struct SophonConfig: Equatable, Sendable {
             case .direct: "Direct"
             case .sensor: "Sensor"
             case .gateway: "Gateway"
+            case .transporter: "Transporter"
             }
         }
+
+        /// Talks only over LoRa: advertises SMP and its name, not the Sophon
+        /// service, so the app lists it under Sensors and never holds it
+        /// unasked (#329). The sensor, and the transporter (#359).
+        var isLoRaOnly: Bool { self == .sensor || self == .transporter }
     }
 
     /// Sentinels meaning "the build's own value".
@@ -133,6 +141,9 @@ nonisolated struct ConfigState: Equatable, Sendable {
     var fromFlash: Bool { status & 0x10 != 0 }
     /// The boot-loop guard tripped: the stored config is being ignored this boot.
     var guardTripped: Bool { status & 0x20 != 0 }
+    /// An MCUboot build that read its own image (#359): it can be a transporter,
+    /// and as a gateway it can compare. Clear on firmware before 2.33.0.
+    var canTransport: Bool { status & 0x40 != 0 }
 
     init?(_ data: Data) {
         guard data.count == Self.wireSize else { return nil }
@@ -146,13 +157,15 @@ nonisolated struct ConfigState: Equatable, Sendable {
     }
 
     /// The roles this board's hardware can run, as the firmware validates them:
-    /// sensor needs a radio and an IMU, gateway a radio.
+    /// sensor needs a radio and an IMU, gateway a radio, transporter a radio and
+    /// a readable image (#359).
     var supportedRoles: [SophonConfig.Role] {
         SophonConfig.Role.allCases.filter {
             switch $0 {
             case .auto, .direct: true
             case .sensor: radioPresent && imuPresent
             case .gateway: radioPresent
+            case .transporter: radioPresent && canTransport
             }
         }
     }
@@ -220,8 +233,17 @@ extension SophonProtocolSelfCheck {
         badVersion[0] = 1
         assert(ConfigState(badVersion) == nil, "a version 1 read is no longer understood")
         var badRole = wire
-        badRole[1] = 0x14
+        badRole[1] = 0x15
         assert(ConfigState(badRole) == nil, "an unknown role must be dropped")
+        var transporter = wire
+        transporter[1] = 0x04
+        transporter[19] = 0x59 // + can transport (#359)
+        let transporting = ConfigState(transporter)
+        assert(transporting?.stored.role == .transporter && transporting?.canTransport == true,
+               "role 4 is the transporter; status bit 6 is can transport")
+        assert(transporting?.supportedRoles == [.auto, .direct, .gateway, .transporter],
+               "a radio and a readable image allow the transporter")
+        assert(transporting?.autoRole == .gateway, "Auto never picks the transporter")
         var negative = wire
         negative[3] = 0xF7 // -9 dBm
         assert(ConfigState(negative)?.stored.txDbm == -9, "tx power must be signed")

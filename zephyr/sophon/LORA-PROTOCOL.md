@@ -54,9 +54,13 @@ every boot. An override holds only if the hardware supports it:
 
 | Hardware | Roles it accepts |
 |---|---|
-| Wio + IMU (Sense Plus on a Wio carrier) | auto (sensor), direct, sensor, gateway |
-| Wio, no IMU (base XIAO on a Wio carrier) | auto (gateway), direct, gateway |
+| Wio + IMU (Sense Plus on a Wio carrier) | auto (sensor), direct, sensor, gateway, transporter |
+| Wio, no IMU (base XIAO on a Wio carrier) | auto (gateway), direct, gateway, transporter |
 | no Wio | auto (direct), direct |
+
+**Transporter** (#359) is the bit-error test's sender (§ Bit-error test). Auto
+never picks it, and it needs an MCUboot build that can read its own image
+(Config status bit 6). Like a forced gateway, it leaves an IMU unarmed.
 
 - **A sensor needs an IMU.** A board without one is refused the sensor role,
   rather than sending motion it doesn't have.
@@ -232,18 +236,18 @@ Every variant uses BW 500 kHz, Npre 8, explicit header, CRC on and a single chan
 
 ## Packet formats
 
-Every packet is one LoRa frame: explicit header, LoRa CRC on, little-endian, no padding. **PL** means the LoRa payload length the receiver reports.
+Every packet is one LoRa frame: explicit header, LoRa CRC on, little-endian, no padding. The one exception is the bit-error test's format `11` (type `0x5C`), sent with the CRC **off** so damaged packets reach the gateway (§ Bit-error test); with an explicit header the receiver takes CRC on or off from each packet, so motion packets stay CRC-checked. **PL** means the LoRa payload length the receiver reports.
 
 ### Type byte (offset 0, every format)
 
 | Bits | Field | Values |
 |---|---|---|
 | 7–4 | `marker` | `0x5`: a Sophon LoRa packet. Anything else is dropped and counted as `rx bad`. |
-| 3–2 | `format` | `01` = v1, `10` = v2. `00` and `11` are reserved and dropped. |
+| 3–2 | `format` | `01` = v1, `10` = v2, `11` = bit-error test (#359; § Bit-error test). `00` is reserved and dropped. |
 | 1 | `TEST` | v2 only: the walk-test trailer is present |
 | 0 | `STATUS` | v2 only: the status trailer is present |
 
-So v1 = `0x54`, and v2 = `0x58` (motion only), `0x59` (+ status), `0x5A` (+ test) or `0x5B` (+ status + test).
+So v1 = `0x54`, and v2 = `0x58` (motion only), `0x59` (+ status), `0x5A` (+ test) or `0x5B` (+ status + test). A bit-error test packet is `0x5C`; it has no flag bits.
 
 ### v1: the baseline (variant V0)
 
@@ -344,7 +348,7 @@ rec 1-3  12 ... | 13 ... | 12 ...                            dt 18, 19, 18
 Reconstructed frames: (0x1234, 100000), (0x1235, 100018), (0x1236, 100037), (0x1237, 100055).
 
 **Versioning:**
-- A future format takes `format` = `11`.
+- `format` = `11` is the bit-error test's (#359). There are no format values left, so a new format needs a new marker.
 - Within v2, new trailers may only be added behind a new flag bit. There are no spare type bits left, so a v3 is the route for anything beyond that.
 - A receiver drops any type it doesn't know, so old gateways never misread new packets.
 
@@ -432,13 +436,15 @@ were accepted from any sensor.
 ## Sensor BLE presence
 
 The sensor advertises only its `Sophon-XXXX` name and the MCUmgr SMP service —
-no Sophon service UUID. The iOS app filters scans on that UUID and never sees the
+no Sophon service UUID. A transporter (#359) advertises the same way. The iOS app filters scans on that UUID and never sees the
 sensor; `flash-ota.sh` matches by name and still updates it over the air.
 
 **Image confirmation:** the gateway (like a direct board) confirms a new image on
 its first BLE frame delivered. The sensor confirms on its first successful LoRa
 send. With no acknowledgement on the link, that proves only the sensor's IMU →
-radio path.
+radio path. A transporter confirms the same way, on its first send. A gateway
+that hears only a transporter relays no motion, so it also confirms on its first
+LoRa BER record delivered from a window that heard one (#359).
 
 ## Noise floor
 
@@ -460,6 +466,100 @@ NOISE-FLOOR-PLAN.md.
   LoRa's own SNR. The app shows it on the LoRa RSSI row, and
   `walktest-report.py` per distance band.
 
+
+## Bit-error test
+
+From firmware 2.33.0 (#359). A board in the **transporter** role sends its own
+running image over LoRa with the **payload CRC off**, and a gateway compares
+every bit it receives with its own copy. The figures go to the gateway's
+console and to the app over the LoRa BER characteristic (PROTOCOL.md § LoRa BER
+frame). The design and the arithmetic are in
+[TRANSPORTER-PLAN.md](TRANSPORTER-PLAN.md).
+
+**What's sent:** slot 0 from the MCUboot header through the body, L =
+`ih_hdr_size + ih_img_size` bytes, looped forever. Not the rest of the slot, not
+the TLVs, not MCUboot's trailer. A packet that crosses the end wraps to the
+start, so every packet is the same length and every payload byte is an image
+byte.
+
+**Packet** (`format` = `11`), little-endian:
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| 0 | 1 | `type` | `0x5C` |
+| 1 | 2 | `tx_id` | low 16 bits of the transporter's FICR id, as `sensor_id` |
+| 3 | 2 | `pseq` | packet counter, from 0 at boot, mod 2^16. Advances even on a failed send |
+| 5 | 3 | `offset` | u24: where in the image the payload starts. Advances by n per packet, mod L |
+| 8 | 1 | `hcrc` | CRC-8, poly `0x07`, init 0, over the board's own 32-byte image SHA-256 and then bytes 0–7 |
+| 9 | n | image | image bytes `(offset + i) mod L`, i = 0 … n − 1 |
+
+- **Length:** PL = the preset's full motion packet (`lora_preset_full_len`), so
+  n = PL − 9. At V6, PL = 60 and n = 51.
+- **Schedule:** one packet every k × 18.4 ms, as a sensor sends, so airtime,
+  duty and noise-floor gaps match the motion link. A pass over a 220 KB image
+  takes 3.7–5.4 minutes depending on the preset; at V6, 4,310 packets, 5.3 min.
+- **CRC off** on the transporter only. With an explicit header the receiver
+  takes CRC on or off from the packet, so the gateway's configuration is
+  unchanged and motion packets stay CRC-checked.
+- **Same image on both boards.** Equal SHA-256 means equal bytes on air (the
+  hash covers header and body, not the signature, so a reproducible rebuild
+  counts as the same). The hash isn't sent: the app's **Check images** compares
+  the two boards' slot-0 hashes over SMP, and `hcrc`'s seed makes the gateway
+  see a mismatch as headers that never pass. Those headers still name the
+  transporter: from 2.37.0 the gateway reports the id two packets in a row
+  named, marked unverified (PROTOCOL.md § LoRa BER frame), so the app can find
+  the board and run the check that shows the mismatch.
+- **A BER walk needs a matching check.** While the gateway hears a
+  transporter, the app's **Start walk-test recording** stays disabled until
+  Check images reports a match for that pair, on the firmware both run now. A
+  mismatch or an unfinished check says why. A walk with no transporter heard
+  is unaffected.
+- **Not encrypted.** No key or credential is in the image, but anyone receiving
+  the channel can rebuild the firmware binary itself.
+
+**Worked example** (the host test pins these bytes): image hash `00 01 … 1F`,
+`tx_id` 0x1A2B, `pseq` 0x0102, `offset` 0x000345:
+
+```
+5C | 2B 1A | 02 01 | 45 03 00 | 50 | image[0x345] …
+```
+
+**What the gateway measures**, per window:
+- **Every bit counts, header included.** A packet whose `hcrc` passes is the
+  **anchor**. When `hcrc` fails, the gateway rebuilds the header from the
+  anchor: `type`, `tx_id` and the hash are known, and Δ packets on, `pseq` is
+  `(anchor_pseq + Δ) mod 2^16` and `offset` is `(anchor_offset + Δ·n) mod L`.
+  It tries Δ = 1 to what the elapsed time allows plus two (at most 64) and keeps
+  the whole packet closest to what arrived: **repaired**.
+- **Unresolved:** no anchor in the last 5 s, or the best match over 25% wrong.
+  Not compared; counted.
+- **Not trusted on hcrc alone:** CRC-8 lets about 1 damaged header in 256
+  through, so a passing header whose payload is over 25% wrong goes to repair
+  too.
+- **A damaged type byte:** a packet that fails to decode, has the anchor's
+  length, and arrives within 5 s of the anchor is tried the same way; if it
+  can't be resolved it counts as `rx bad`, as before.
+- **Lost** packets are the gaps in `pseq`. A gap after more than 20 s, or a
+  `pseq` that doesn't match its `offset` (a transporter restart), re-anchors
+  without counting.
+- **Image mismatch suspected:** at least 10 test packets in the window, at
+  least 90% unresolved, at an average SNR ≥ 0 dB.
+
+**What "raw" means:** the bits after the radio's own decoding, with only the
+CRC removed. V4 (CR 4/7) is the only preset where the radio corrects errors, so
+its figure is the residual after correction. Every other preset is CR 4/5,
+parity only, so its figure is the demodulated channel's. Coding can only fix
+damaged packets; lost ones (a missed preamble, a failed LoRa header, a
+collision) stay lost.
+
+**Console**, one line per window when any test packet was heard:
+
+```
+lora ber: tx 1A2B; 135 pkts (1 repaired, 0 unresolved), 2 lost; 3 damaged; 14 / 64800 bits = 0.0216%
+```
+
+The transporter logs `lora tx: N image pkts, N send errors; N whole passes so
+far` every 10 s.
 
 ## Walk-test mode
 
@@ -487,23 +587,26 @@ Procedure: LORA-UPDATED-PLAN.md § Walk-test procedure. The sensor stays at base
 ## Walk-test recording format
 
 The Sophon app writes each walk-test recording as a CSV in Documents (the Files
-app's On My iPhone › Sophon). This is **version 2** (#335). What stays fixed for
-the session is written once, in a preamble, and only what changes per window is
-in the rows. Version 1 files, from before #335, have no preamble and one flat
-row per record; `scripts/walktest-report.py` reads both.
+app's On My iPhone › Sophon). This is **version 3** (#359), which is version 2
+(#335) plus the bit-error test's `ber_*` columns and `transporter` preamble line.
+What stays fixed for the session is written once, in a preamble, and only what
+changes per window is in the rows. Version 1 files, from before #335, have no
+preamble and one flat row per record; `scripts/walktest-report.py` reads all
+three.
 
 **Preamble:** `# key: value` lines before the header, written when the first
 record arrives, so the boards and their configuration are known.
 
 | Key | Value |
 |---|---|
-| `sophon-walktest` | `2`, always the first line |
+| `sophon-walktest` | `3` (`2` before #359), always the first line |
 | `started` | local start time with offset, and the time zone |
 | `part`, `continues` | only in a continuation file: its part number and the previous file's name |
 | `app` | app version and build, phone model, iOS version |
 | `gateway` | name, firmware and hardware version |
 | `gateway config` | the active Config (PROTOCOL.md § Config frame): role and whether it was set from the app, preset, SF, TX power, frequency, stored peer, RX boost, and the record's window length |
 | `sensor` | the sensor the gateway locked onto, with its firmware if the app has seen it advertise; `not locked` otherwise |
+| `transporter` | only once the gateway has heard one (#359): its name and the latest image check, e.g. `images match (checked …)`, or `images not checked` |
 | `sensor config` | only if the app read the sensor's Config this session |
 | `variant rotation` | `off`: one preset for the whole file. `on`: walk-test variant rotation (§ Walk-test mode), so preset, SF and RX boost become row columns |
 | `pin` | where distances are measured from: position, accuracy, and `automatic (first fix)` or `dropped by hand` |
@@ -521,7 +624,11 @@ and `missing` (PROTOCOL.md § LoRa Link frame); `last_packet_ms` is empty for
 `distance_m`, `fix_age_s`); the **sensor's** battery as the gateway relays it
 (`sensor_batt_mv`, `sensor_usb`, `sensor_charging`); how the window's losses
 clustered (`loss_run_1`, `loss_run_2`, `loss_run_3_4`, `loss_run_5_8`,
-`loss_run_9_plus`; below); and `event`.
+`loss_run_9_plus`; below); the bit-error test's window (`ber_packets`,
+`ber_damaged`, `ber_lost`, `ber_bit_errors`, `ber_bits`, `ber_repaired`,
+`ber_unresolved`, `ber_mismatch_suspected`; PROTOCOL.md § LoRa BER frame), filled
+only from the BER record with the row's own window number and empty otherwise;
+and `event`.
 
 **Loss runs (#337).** The gateway relays every motion sample with the
 sensor's `seq`, which advances on every sample whether or not it was heard. A
@@ -557,6 +664,12 @@ changes packet by packet.
     is up, not that records are flowing again;
   - `sensor locked: Sophon-XXXX`: the gateway locked onto a sensor after the
     preamble said `not locked`;
+  - `transporter heard: Sophon-XXXX` (#359): the gateway first heard a
+    transporter after the preamble was written. The preamble's `transporter`
+    line states an image check only while it still describes the transporter
+    heard and both boards' advertised firmware; otherwise `images not checked`.
+    After a reconnect, the first window row can have empty `ber_*` columns: the
+    re-read of LoRa Link can land before that window's BER record;
   - `gateway config: …`: the gateway's Config, read after the preamble said
     `not read yet`;
   - `marker: <text>`: added by the walker while recording;
@@ -589,6 +702,8 @@ preamble, the app ends that file with a `config changed` event and continues in
 `…-part2.csv`, with a fresh preamble saying which file it continues:
 - the locked sensor, once both are known. A gateway reports no sensor until it
   locks onto one and again after it restarts, and that matches any sensor;
+- the transporter the bit-error test hears (#359), on the same terms: none heard
+  yet matches any;
 - variant rotation;
 - outside rotation, the record's preset, SF and RX boost;
 - the gateway's active role, preset, TX power and frequency, once both are

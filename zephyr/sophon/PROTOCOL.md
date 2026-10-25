@@ -25,6 +25,7 @@ following the Nordic UART convention.
 | Battery characteristic (read) | `C6560005-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | LoRa Link characteristic (read, notify) | `C6560006-84D5-4DC2-8C1E-4B4EB2337CE4` |
 | Config characteristic (read, write with response) | `C6560007-84D5-4DC2-8C1E-4B4EB2337CE4` |
+| LoRa BER characteristic (read, notify) | `C6560008-84D5-4DC2-8C1E-4B4EB2337CE4` |
 
 The service UUID is carried in the **advertisement**; iOS filtered scanning
 (`scanForPeripherals(withServices:)`) matches against it, and filtered scanning is
@@ -408,8 +409,8 @@ shows it in tenths of a percent, truncated, matching the gateway console.
 
 **RSSI and SNR are meaningful only when `heard` is set**; they read 0 otherwise.
 
-**On a direct or sensor board, a read returns zero bytes and nothing is ever
-notified.** The same is true on a gateway until its first window closes, about
+**On a direct, sensor or transporter board, a read returns zero bytes and
+nothing is ever notified.** The same is true on a gateway until its first window closes, about
 10 s after boot. The characteristic is still in every board's GATT table, because
 a board's role depends on whether a Wio is plugged in, and a characteristic that
 came and went with it would leave iOS's cached attribute table describing the
@@ -450,6 +451,71 @@ CSV carries it as `margin_min_db`.
 | 50–100 m | 81.9% | +11.6 dB | −1.5 dB |
 | 100–200 m | 48.6% | +4.8 dB | −2.5 dB |
 
+## LoRa BER frame
+
+**20 bytes, little-endian**, from the LoRa BER characteristic (#359). Only a
+**LoRa gateway** fills it, with the **bit-error test**: a board in the
+transporter role sends its own running image with the payload CRC off, and the
+gateway compares every bit it receives with its own copy (LORA-PROTOCOL.md
+§ Bit-error test; the design is TRANSPORTER-PLAN.md). One record per window,
+built just before that window's LoRa Link record and carrying the **same
+`window`** number, so the two can be paired. Notified when the window closes;
+read for the latest on reconnect.
+
+**Version 1** (firmware 2.33.0).
+
+| Offset | Size | Type | Field | Meaning |
+|---|---|---|---|---|
+| 0 | 1 | `u8` | `version` | `1`. Parsers drop any other value |
+| 1 | 1 | `u8` | `preset` · `window_s` | as in the LoRa Link frame |
+| 2 | 2 | `u16` | `tx_id` | the transporter heard: the `XXXX` of its `Sophon-XXXX`. The anchored one when there is one; otherwise, from 2.37.0, the id two typed packets in a row named, with flags bit 3 set. Either lapses 20 s after the transporter was last heard. 0 when none |
+| 4 | 2 | `u16` | `window` | the same counter as the LoRa Link record's |
+| 6 | 2 | `u16` | `packets` | packets compared: header good, or repaired |
+| 8 | 2 | `u16` | `damaged` | of those, packets with at least one bit wrong |
+| 10 | 2 | `u16` | `lost` | packets the transporter sent that never arrived, from gaps in its packet counter. A packet heard but unresolved counts in `unresolved`, not here too (from 2.37.0) |
+| 12 | 4 | `u32` | `bit_errors` | bits wrong, over every bit of every packet compared, header included |
+| 16 | 1 | `u8` | `packet_len` | the length PL of the packets compared, so **bits compared = `packets` × 8 × `packet_len`**. From 2.37.0 it's the received length (the window's bits compared ÷ 8 ÷ `packets`, rounded), not the gateway's own preset's: a gateway hears every preset of its SF and bandwidth. With nothing compared: the last good packet's length, else the gateway's preset's |
+| 17 | 1 | `u8` | `unresolved` | packets heard but not compared: their header couldn't be recovered. Saturates at 255 |
+| 18 | 1 | `u8` | `flags` | bit 0 **heard** (any transporter packet this window) · bit 1 **image mismatch suspected** · bit 2 **can compare** (the gateway read its own image) · bit 3 **tx_id unverified** (named by headers whose check never passed, as when the images differ; from 2.37.0) · bits 4–7 0 |
+| 19 | 1 | `u8` | `repaired` | of `packets`, those whose header failed its check and was recovered. Saturates at 255 |
+
+**Bit error rate** = `bit_errors ÷ (packets × 8 × packet_len)`; nothing is
+compared when `packets` is 0. **Damaged** = `damaged ÷ packets`, **lost** =
+`lost ÷ (packets + lost + unresolved)`: the three don't overlap, so together they are every packet sent that the gateway could account for.
+
+**Image mismatch suspected** is set when the window heard at least 10
+transporter packets, at least 90% of them unresolved, at an average SNR of 0 dB
+or better. The two boards then almost certainly run different images: the
+header check is seeded with each board's own image hash, so on a mismatch it
+never passes. The app's **Check images** compares the hashes directly.
+
+**A gateway that can't compare** (a UF2 build, which can't read its image) still
+sets **heard**, and counts every packet as unresolved.
+
+**Worked example** (the app's DEBUG self-check uses these bytes):
+
+```
+01 A7 2B 1A 2A 01 87 00 03 00 02 00 0E 00 00 00 3C 00 05 01
+```
+
+| Bytes | Field | Value |
+|---|---|---|
+| `01` | version | 1 |
+| `A7` | preset · window_s | preset 7 (V6), window 10 s |
+| `2B 1A` | tx_id | 0x1A2B (Sophon-1A2B) |
+| `2A 01` | window | 298 |
+| `87 00` | packets | 135 |
+| `03 00` | damaged | 3, so 2.2% damaged |
+| `02 00` | lost | 2 |
+| `0E 00 00 00` | bit_errors | 14 |
+| `3C` | packet_len | 60, so 135 × 480 = 64,800 bits compared and BER = 0.0216% |
+| `00` | unresolved | 0 |
+| `05` | flags | heard, can compare |
+| `01` | repaired | 1 |
+
+As with LoRa Link, **a read returns zero bytes** off-gateway and until the
+first window closes, and parsers require **exactly 20 bytes**.
+
 ## Config frame
 
 The Config characteristic (#329) sets a board's **role** and its **LoRa
@@ -463,7 +529,7 @@ The same nine bytes appear in the write and twice in the read, little-endian:
 
 | Offset | Size | Type | Field | Values |
 |---|---|---|---|---|
-| 0 | 1 | `u8` | `role` · `window_s` | bits 0–3 `role`: 0 **auto** · 1 direct · 2 sensor · 3 gateway. Bits 4–7 `window_s`, the **gateway's stats window** (#344): 0 = the build's default (10 s) · 1–10 seconds |
+| 0 | 1 | `u8` | `role` · `window_s` | bits 0–3 `role`: 0 **auto** · 1 direct · 2 sensor · 3 gateway · 4 transporter (#359). Bits 4–7 `window_s`, the **gateway's stats window** (#344): 0 = the build's default (10 s) · 1–10 seconds |
 | 1 | 1 | `u8` | `preset` | 0–8 (V0…V6b, LORA-PROTOCOL.md § Presets) · `0xFF` = the build's default |
 | 2 | 1 | `i8` | `tx_dbm` | −9…+22 · `0x7F` = the preset's own power |
 | 3 | 4 | `u32` | `freq_hz` | 902 250 000…927 750 000 · 0 = the build's default |
@@ -471,7 +537,8 @@ The same nine bytes appear in the write and twice in the read, little-endian:
 
 **Auto** is no override: the board picks its role at every boot from its
 hardware, as LORA-PROTOCOL.md § Roles describes. It is the default. The other
-roles override detection until changed.
+roles override detection until changed. Auto never picks **transporter**: it's
+the bit-error test's sender, set from the app only.
 
 **`window_s`** shares the role byte, so no frame grows (Config version 2,
 #344). It sets the length of the gateway's LoRa Link window: every record then
@@ -492,7 +559,7 @@ The board validates the write on receipt. Nothing is stored unless all of it is
 valid. It answers with an ATT error and stores nothing for:
 - a length other than 12: `0x0D` (invalid attribute value length);
 - an unknown version or flag, a non-zero reserved byte, or a field out of range: `0x13` (value not allowed);
-- a role the hardware can't run, also `0x13`: **sensor** needs a radio and an IMU, **gateway** needs a radio.
+- a role the hardware can't run, also `0x13`: **sensor** needs a radio and an IMU, **gateway** needs a radio, **transporter** needs a radio and a readable image (status bit 6).
 
 The save runs after the response, off the Bluetooth thread. With **restart**,
 the board reboots about 500 ms after saving, so the response goes out first. The
@@ -507,7 +574,7 @@ client should treat any write error as "refused", then re-read.
 |---|---|---|
 | 0 | 1 | `version`, 2 |
 | 1 | 9 | **stored**: what flash holds, the config the next restart runs |
-| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–3, never auto); `preset`, `tx_dbm`, `freq_hz` and `window_s` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto (0 while unlocked, #350) |
+| 10 | 9 | **active**: what this boot runs, resolved. `role` is the role actually chosen (1–4, never auto); `preset`, `tx_dbm`, `freq_hz` and `window_s` are the values in use, with defaults resolved; `peer_id` on a gateway is the sensor it accepts, or the one it locked onto (0 while unlocked, #350) |
 | 19 | 1 | `status` |
 
 | `status` bit | Meaning |
@@ -518,6 +585,7 @@ client should treat any write error as "refused", then re-read.
 | 3 | a stored role override is in effect. Clear with a non-auto stored role means the hardware no longer supports it, and the board is running as auto |
 | 4 | this boot runs a config from flash; clear means the build's defaults |
 | 5 | **boot-loop guard tripped**: after three boots in a row that never came up, the stored config is ignored for this boot. It is kept, not erased |
+| 6 | **can transport** (#359): an MCUboot build that read its own image header and hash, so it can be a transporter and, as a gateway, compare. Firmware before 2.33.0 leaves it clear |
 
 **Worked example** (the app's DEBUG self-check uses this vector): a gateway
 forced from the app with a **1 s stats window**, preset V3, +14 dBm,
@@ -540,9 +608,9 @@ Writing that config with **restart** is `02 13 02 0E E0 6B 91 36 F0 86 01 00`.
   SWD reflashing (`flash-swd.sh` leaves 0xFC000–0xFFFFF alone). BOOTLOADER.md §
   Memory map has the layout.
 - **Bluetooth stays reachable.** No valid stored config takes the board off
-  Bluetooth. A board set to **sensor** advertises SMP and its name, not the
-  Sophon service, so the app also scans for SMP and lists such boards under
-  Sensors.
+  Bluetooth. A board set to **sensor** or **transporter** advertises SMP and
+  its name, not the Sophon service, so the app also scans for SMP and lists
+  such boards under Sensors.
 - **Recovery:** Restore defaults from the app, or the boot-loop guard, a
   `GPREGRET2` counter that lasts across resets but not power-off. As a last
   resort, erase the settings partition over SWD.

@@ -172,4 +172,7 @@ void sophon_ble_battery_notify(void);
  */
 void sophon_ble_lora_link_notify(void);
 
+/* Notify the latest LoRa BER record (#359), if a central is connected. */
+void sophon_ble_lora_ber_notify(void);
+
 #endif /* SOPHON_BLE_H */

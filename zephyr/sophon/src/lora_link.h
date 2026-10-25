@@ -48,6 +48,16 @@ bool lora_link_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags);
 bool lora_link_record(uint8_t out[LORA_LINK_RECORD_SIZE]);
 
 /*
+ * Gateway: the latest LoRa BER record (#359), PROTOCOL.md § LoRa BER frame: the
+ * bit-error test's figures for the window whose LoRa Link record carries the
+ * same window number. False until the first window has closed, and always false
+ * off-gateway.
+ */
+#define LORA_BER_RECORD_SIZE    20
+#define LORA_BER_RECORD_VERSION 1
+bool lora_link_ber_record(uint8_t out[LORA_BER_RECORD_SIZE]);
+
+/*
  * Gateway: the sensor id accepted -- the configured one, or the one locked onto
  * when that is 0. 0 until a sensor has been heard. For the Config read (#329).
  */

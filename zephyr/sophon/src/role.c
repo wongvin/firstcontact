@@ -25,6 +25,7 @@
 #include <zephyr/logging/log.h>
 
 #include "config.h"
+#include "lora_image.h"
 #include "role.h"
 
 LOG_MODULE_REGISTER(sophon_role, LOG_LEVEL_INF);
@@ -174,6 +175,11 @@ enum sophon_role sophon_role_resolve(uint8_t override, bool imu_ok)
 		want = SOPHON_ROLE_SENSOR;
 		role_forced = radio && imu_ok;
 		break;
+	case SOPHON_CONFIG_ROLE_TRANSPORTER:
+		/* It sends the image it runs, so it must be able to read it (#359). */
+		want = SOPHON_ROLE_TRANSPORTER;
+		role_forced = radio && lora_image_ready();
+		break;
 	default:
 		want = auto_role(radio, imu_ok);
 		role_forced = false;
@@ -188,9 +194,10 @@ enum sophon_role sophon_role_resolve(uint8_t override, bool imu_ok)
 		 * cannot do (#329).
 		 */
 		want = auto_role(radio, imu_ok);
-		LOG_WRN("stored role %u needs hardware this board lacks (radio %s, IMU %s) -- "
-			"running as Auto",
-			override, radio ? "yes" : "no", imu_ok ? "yes" : "no");
+		LOG_WRN("stored role %u needs hardware this board lacks (radio %s, IMU %s, "
+			"image %s) -- running as Auto",
+			override, radio ? "yes" : "no", imu_ok ? "yes" : "no",
+			lora_image_ready() ? "readable" : "unreadable");
 	}
 
 	/* A direct board never starts the radio, even one that answered. */
@@ -237,6 +244,8 @@ const char *sophon_role_name(enum sophon_role r)
 		return "sensor";
 	case SOPHON_ROLE_GATEWAY:
 		return "gateway";
+	case SOPHON_ROLE_TRANSPORTER:
+		return "transporter";
 	default:
 		return "direct";
 	}

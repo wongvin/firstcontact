@@ -46,6 +46,8 @@ struct FirmwareUpdateRows: View {
                 note("This board's firmware version isn't known yet.")
             } else if updater.isBusy {
                 note("Another board is updating.")
+            } else if updater.imageCheck?.isBusy == true {
+                note("Checking images over Bluetooth. Try again in a moment.")
             } else if recording {
                 note("Stop the walk-test recording to update.")
             } else if !device.state.isConnected {

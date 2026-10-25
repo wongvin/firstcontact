@@ -2,8 +2,9 @@ import CoreLocation
 import Foundation
 import UIKit
 
-/// The walk-test file format, version 2 (#335; LORA-PROTOCOL.md § Walk-test
-/// recording format), kept apart from the recorder's state and I/O.
+/// The walk-test file format, version 3 (#335, #359; LORA-PROTOCOL.md § Walk-test
+/// recording format), kept apart from the recorder's state and I/O. Version 3
+/// adds the bit-error test's `ber_*` columns and a `transporter` preamble line.
 ///
 /// A file is a preamble of `# key: value` lines, written once, then a CSV whose
 /// rows are typed: `window` rows carry one LoRa Link record each, `event` rows a
@@ -11,7 +12,7 @@ import UIKit
 /// fixed for the session lives in the preamble and nowhere else, and a file
 /// never changes configuration half-way: see ``SessionKey``.
 extension WalkTestRecorder {
-    static let formatVersion = 2
+    static let formatVersion = 3
 
     /// What must stay the same for the whole of one file. A record whose key
     /// doesn't match the open file's closes that file and starts the next part.
@@ -30,6 +31,9 @@ extension WalkTestRecorder {
     struct SessionKey: Equatable {
         var gateway: UUID
         var sensorID: UInt16
+        /// The transporter the bit-error test hears (#359); 0 until one is
+        /// heard, which matches anything, like `sensorID`.
+        var transporterID: UInt16
         var rotating: Bool
         /// Preset, SF and RX boost; nil while the variants rotate.
         var radio: [UInt8]?
@@ -38,6 +42,7 @@ extension WalkTestRecorder {
         init(link: LoRaLinkRecord, device: SophonDevice) {
             gateway = device.id
             sensorID = link.sensorID
+            transporterID = device.loraBer.record?.transporterID ?? 0
             rotating = link.isWalkTest
             radio = link.isWalkTest
                 ? nil : [link.preset, link.spreadingFactor, link.rxBoost ? 1 : 0, link.windowSeconds]
@@ -50,6 +55,7 @@ extension WalkTestRecorder {
         func matches(_ other: SessionKey) -> Bool {
             gateway == other.gateway && rotating == other.rotating && radio == other.radio
                 && (sensorID == 0 || other.sensorID == 0 || sensorID == other.sensorID)
+                && (transporterID == 0 || other.transporterID == 0 || transporterID == other.transporterID)
                 && (config == nil || other.config == nil || config == other.config)
         }
 
@@ -57,6 +63,7 @@ extension WalkTestRecorder {
         func merged(with other: SessionKey) -> SessionKey {
             var key = self
             if key.sensorID == 0 { key.sensorID = other.sensorID }
+            if key.transporterID == 0 { key.transporterID = other.transporterID }
             if key.config == nil { key.config = other.config }
             return key
         }
@@ -91,6 +98,7 @@ extension WalkTestRecorder {
         let gaps: [LossGap]
         let device: SophonDevice
         let sensor: SophonDevice?
+        let transporter: SophonDevice?
         let row: [String: String]
     }
 
@@ -103,6 +111,8 @@ extension WalkTestRecorder {
         let gateway: SophonDevice?
         let link: LoRaLinkRecord?
         let sensor: SophonDevice?
+        /// The hub's entry for the transporter the gateway hears (#359), if seen.
+        let transporter: SophonDevice?
         let pin: CLLocation?
         let pinIsAutomatic: Bool
     }
@@ -121,18 +131,25 @@ extension WalkTestRecorder {
     /// Samples, not run counts, so the five add up to the window's loss as the
     /// app saw it, which the report checks against the gateway's `missing`.
     static let lossColumns = ["loss_run_1", "loss_run_2", "loss_run_3_4", "loss_run_5_8", "loss_run_9_plus"]
+    /// The bit-error test's window (#359), from the LoRa BER record with this
+    /// row's window number; empty when there's none.
+    static let berColumns = [
+        "ber_packets", "ber_damaged", "ber_lost", "ber_bit_errors", "ber_bits", "ber_repaired", "ber_unresolved",
+        "ber_mismatch_suspected",
+    ]
 
     /// The header. While the variants rotate, preset, SF and RX boost change per
     /// record, so they become columns; otherwise they are in the preamble.
     static func columns(rotating: Bool) -> [String] {
         ["type", "time", "window"] + (rotating ? ["preset", "sf", "rx_boost"] : [])
-            + linkColumns + noiseColumns + positionColumns + batteryColumns + lossColumns + ["event"]
+            + linkColumns + noiseColumns + positionColumns + batteryColumns + lossColumns + berColumns + ["event"]
     }
 
     // MARK: Rows
 
     static func windowRow(
-        _ link: LoRaLinkRecord, battery: BatteryReading?, fix: CLLocation?, pin: CLLocation?, now: Date
+        _ link: LoRaLinkRecord, ber: LoRaBerRecord? = nil, battery: BatteryReading?, fix: CLLocation?, pin: CLLocation?,
+        now: Date
     ) -> [String: String] {
         var row: [String: String] = [
             "type": "window",
@@ -160,6 +177,18 @@ extension WalkTestRecorder {
             "noise_median": link.noiseMedian.map(String.init) ?? "",
         ]
         row.merge(positionFields(fix: fix, pin: pin, now: now)) { $1 }
+        // Only the BER record for this very window: the gateway sends it just
+        // before the Link record, with the same number (#359).
+        if let ber, ber.window == link.window {
+            row["ber_packets"] = String(ber.packets)
+            row["ber_damaged"] = String(ber.damaged)
+            row["ber_lost"] = String(ber.lost)
+            row["ber_bit_errors"] = String(ber.bitErrors)
+            row["ber_bits"] = String(ber.bitsCompared)
+            row["ber_repaired"] = String(ber.repaired)
+            row["ber_unresolved"] = String(ber.unresolved)
+            row["ber_mismatch_suspected"] = ber.mismatchSuspected ? "1" : "0"
+        }
         if let battery {
             row["sensor_batt_mv"] = String(battery.millivolts)
             row["sensor_usb"] = battery.usbPowered.map { $0 ? "1" : "0" } ?? ""
@@ -310,6 +339,11 @@ extension WalkTestRecorder {
             lines.append("gateway config: \(config)")
         }
         lines.append("sensor: \(sensorDescription(context.link, sensor: context.sensor))")
+        if let gateway = context.gateway, let name = gateway.loraBer.record?.transporterName {
+            let check = ImageCheck.current(gateway.loraBer.imageCheck, gateway: gateway, transporterName: name,
+                                           transporter: context.transporter)
+            lines.append("transporter: \(name) · \(imageCheckDescription(check))")
+        }
         if let sensorConfig = context.sensor?.config {
             lines.append("sensor config: \(configDescription(sensorConfig, link: nil))")
         }
@@ -351,6 +385,18 @@ extension WalkTestRecorder {
         guard let name = link?.sensorName else { return "not locked" }
         guard let identity = sensor?.identity else { return "\(name) · firmware unknown" }
         return "\(name) · firmware \(identity.firmwareVersion)"
+    }
+
+    /// The latest image check (#359), for the preamble.
+    private static func imageCheckDescription(_ outcome: ImageCheck.Outcome?) -> String {
+        guard let outcome else { return "images not checked" }
+        let when = timestamp(outcome.at)
+        switch outcome.result {
+        case .match: return "images match (checked \(when))"
+        case .mismatch: return "images differ (checked \(when))"
+        case .transporterUnreachable(let why): return "image check failed: transporter \(why) (\(when))"
+        case .gatewayUnreadable(let why): return "image check failed: gateway \(why) (\(when))"
+        }
     }
 
     /// The active configuration as the board reported it at session start (#329),

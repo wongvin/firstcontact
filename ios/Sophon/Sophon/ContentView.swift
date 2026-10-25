@@ -140,12 +140,15 @@ private struct ViewerView: View {
                 walkTest: hub.walkTest,
                 firmware: hub.firmware,
                 updater: hub.updater,
+                imageCheck: hub.imageCheck,
                 onRefresh: { hub.refreshStats(device) },
                 onToggleConnection: {
                     if device.isHeld { hub.release(device) } else { hub.reclaim(device) }
                 },
                 onScreen: { hub.setDeviceOnScreen($0 ? device.id : nil) },
-                onWriteConfig: { hub.writeConfig($0, to: device) }
+                onWriteConfig: { hub.writeConfig($0, to: device) },
+                onCheckImages: { hub.checkImages(for: device) },
+                findDevice: { name in hub.devices.first { $0.displayName == name } }
             )
         } label: {
             DeviceRow(device: device)
@@ -287,11 +290,17 @@ private struct DeviceDetailView: View {
     /// Hub-owned, so an update survives leaving this screen (#357).
     let firmware: FirmwareStore
     let updater: FirmwareUpdater
+    /// Hub-owned, like the updater: it uses SMP too (#359).
+    let imageCheck: ImageCheck
     let onRefresh: () -> Void
     let onToggleConnection: () -> Void
     let onScreen: (Bool) -> Void
     /// Sends a config write (#329).
     let onWriteConfig: (ConfigRequest) -> Void
+    /// Compares this gateway's image with its transporter's (#359).
+    let onCheckImages: () -> Void
+    /// The hub's entry for a board by name: the transporter, for its firmware.
+    let findDevice: (String) -> SophonDevice?
 
     /// Pops this view off the NavigationStack. Note this needs no `NavigationPath`
     /// and no selection binding — `DismissAction` works on a plain
@@ -334,7 +343,10 @@ private struct DeviceDetailView: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular {
+            // A board that can't stream motion -- a sensor, a transporter, a
+            // gateway hearing only a transporter -- has no Motion column to fill,
+            // so it gets the single list (#359).
+            if sizeClass == .regular && device.streamsMotion {
                 // Left holds the two counts you scan at a glance; right holds
                 // the live values and the transmit detail.
                 //
@@ -348,7 +360,7 @@ private struct DeviceDetailView: View {
                     List {
                         linkSection
                         configSection
-                        LoRaLinkSection(device: device, recorder: walkTest, updating: updating) { walkTestPrompt = $0 }
+                        loraSection
                         framesSection
                     }
                     Divider()
@@ -361,10 +373,12 @@ private struct DeviceDetailView: View {
                 List {
                     linkSection
                     configSection
-                    LoRaLinkSection(device: device, recorder: walkTest, updating: updating) { walkTestPrompt = $0 }
-                    framesSection
-                    countersSection
-                    motionSection
+                    loraSection
+                    if device.streamsMotion {
+                        framesSection
+                        countersSection
+                        motionSection
+                    }
                 }
             }
         }
@@ -428,8 +442,32 @@ private struct DeviceDetailView: View {
         }
     }
 
+    /// Why a walk-test recording can't start here: a BER walk needs a matching
+    /// image check first (#359). Passed as a closure, so only the walk-test rows
+    /// that call it observe the BER record, not this whole view.
+    private var walkTestBlock: () -> String? {
+        { [device, findDevice] in ImageCheck.walkTestBlock(gateway: device, findDevice: findDevice) }
+    }
+
     /// This board is being updated (#357).
     private var updating: Bool { updater.phase(for: device)?.isBusy == true }
+
+    /// The LoRa link, adapted to what the gateway hears (#359); for a sensor or
+    /// transporter, a pointer to the gateway, where its link is measured.
+    @ViewBuilder private var loraSection: some View {
+        LoRaLinkSection(device: device, recorder: walkTest, updating: updating, startBlocked: walkTestBlock,
+                        imageCheck: imageCheck, smpBusy: updater.isBusy, findDevice: findDevice,
+                        onCheckImages: onCheckImages) { walkTestPrompt = $0 }
+        if device.sendsOverLoRa, !walkTest.isRecording, let role = device.config?.active.role ?? device.loraBer.role {
+            Section("LoRa link") {
+                Text("""
+                    This board is a \(role.label.lowercased()). It sends over LoRa, and its link is measured \
+                    by the gateway that hears it: open the gateway to see it.
+                    """)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 
     private var configSection: some View {
         ConfigSection(device: device, firmware: firmware, updater: updater, recording: walkTest.isRecording,

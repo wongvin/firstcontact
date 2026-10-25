@@ -40,6 +40,7 @@ LOG_MODULE_REGISTER(sophon_ble, LOG_LEVEL_INF);
  *   Battery:     C6560005-84D5-4DC2-8C1E-4B4EB2337CE4  (read, notify)
  *   LoRa Link:   C6560006-84D5-4DC2-8C1E-4B4EB2337CE4  (read, notify)
  *   Config:      C6560007-84D5-4DC2-8C1E-4B4EB2337CE4  (read, write)
+ *   LoRa BER:    C6560008-84D5-4DC2-8C1E-4B4EB2337CE4  (read, notify)
  */
 /*
  * Whose battery the Battery characteristic reports. A gateway has a pack of its
@@ -69,6 +70,7 @@ static void read_battery(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
 #define SOPHON_UUID_BATTERY   BT_UUID_128_ENCODE(0xC6560005, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_LORA_LINK BT_UUID_128_ENCODE(0xC6560006, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 #define SOPHON_UUID_CONFIG    BT_UUID_128_ENCODE(0xC6560007, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
+#define SOPHON_UUID_LORA_BER  BT_UUID_128_ENCODE(0xC6560008, 0x84D5, 0x4DC2, 0x8C1E, 0x4B4EB2337CE4)
 
 static const struct bt_uuid_128 sophon_service_uuid = BT_UUID_INIT_128(SOPHON_UUID_SERVICE);
 static const struct bt_uuid_128 sophon_motion_uuid = BT_UUID_INIT_128(SOPHON_UUID_MOTION);
@@ -77,6 +79,7 @@ static const struct bt_uuid_128 sophon_link_params_uuid = BT_UUID_INIT_128(SOPHO
 static const struct bt_uuid_128 sophon_battery_uuid = BT_UUID_INIT_128(SOPHON_UUID_BATTERY);
 static const struct bt_uuid_128 sophon_lora_link_uuid = BT_UUID_INIT_128(SOPHON_UUID_LORA_LINK);
 static const struct bt_uuid_128 sophon_config_uuid = BT_UUID_INIT_128(SOPHON_UUID_CONFIG);
+static const struct bt_uuid_128 sophon_lora_ber_uuid = BT_UUID_INIT_128(SOPHON_UUID_LORA_BER);
 
 static struct bt_conn *current_conn;
 static bool motion_subscribed;
@@ -191,6 +194,21 @@ static ssize_t lora_link_read(struct bt_conn *conn, const struct bt_gatt_attr *a
 }
 
 /*
+ * LoRa BER (#359): the bit-error test's record, one per window. Like LoRa Link,
+ * zero bytes means not a gateway, or no window closed yet.
+ */
+static ssize_t lora_ber_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+			     uint16_t len, uint16_t offset)
+{
+	uint8_t wire[LORA_BER_RECORD_SIZE];
+
+	if (sophon_role() != SOPHON_ROLE_GATEWAY || !lora_link_ber_record(wire)) {
+		return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, 0);
+	}
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, wire, sizeof(wire));
+}
+
+/*
  * Config (#329): the role override and LoRa parameters, applied at the next
  * boot. PROTOCOL.md § Config frame. The write is validated here, on the BT RX
  * thread, so a bad value is refused with an ATT error before anything is
@@ -259,7 +277,11 @@ BT_GATT_SERVICE_DEFINE(
 	/* Every role, like LoRa Link: the table is static. Unauthenticated, like SMP. */
 	BT_GATT_CHARACTERISTIC(&sophon_config_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
 			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE, config_read, config_write,
-			       NULL), );
+			       NULL),
+	/* Every role too (#359); only a gateway fills it, once per window. */
+	BT_GATT_CHARACTERISTIC(&sophon_lora_ber_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_READ, lora_ber_read, NULL, NULL),
+	BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 
 /*
  * The advertisement and the scan response are SEPARATE 31-byte budgets, not one
@@ -285,7 +307,9 @@ static const struct bt_data adv_data[] = {
  * for that UUID only, so it never sees -- and never auto-connects to -- a
  * sensor that should be talking to its gateway instead. The name stays in the
  * scan response, which is what flash-ota.sh matches on, and the SMP UUID says
- * what the board is reachable for. The GATT table itself is unchanged.
+ * what the board is reachable for. The GATT table itself is unchanged. A
+ * transporter (#359) advertises the same way: it too talks only over LoRa, and
+ * the app reaches it over SMP to compare image hashes.
  */
 static const struct bt_data sensor_adv_data[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -353,7 +377,8 @@ static int start_advertising(void)
 	};
 	int err;
 
-	bool sensor = sophon_role() == SOPHON_ROLE_SENSOR;
+	bool sensor =
+		sophon_role() == SOPHON_ROLE_SENSOR || sophon_role() == SOPHON_ROLE_TRANSPORTER;
 
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, sensor ? sensor_adv_data : adv_data,
 			      sensor ? ARRAY_SIZE(sensor_adv_data) : ARRAY_SIZE(adv_data), scan_rsp,
@@ -710,6 +735,26 @@ void sophon_ble_lora_link_notify(void)
 	 */
 	(void)bt_gatt_notify_uuid(current_conn, &sophon_lora_link_uuid.uuid, sophon_svc.attrs, wire,
 				  sizeof(wire));
+}
+
+void sophon_ble_lora_ber_notify(void)
+{
+	uint8_t wire[LORA_BER_RECORD_SIZE];
+
+	if (!current_conn || !lora_link_ber_record(wire)) {
+		return;
+	}
+	/* As the LoRa Link notify: by UUID, K_NO_WAIT. */
+	if (bt_gatt_notify_uuid(current_conn, &sophon_lora_ber_uuid.uuid, sophon_svc.attrs, wire,
+				sizeof(wire)) == 0 &&
+	    (wire[18] & BIT(0))) {
+		/*
+		 * A gateway hearing only a transporter relays no motion, so the
+		 * first-frame confirm never comes (#359). A delivered record of a
+		 * window that heard one proves the same: LoRa in, Bluetooth out.
+		 */
+		maybe_confirm_image();
+	}
 }
 
 void sophon_battery_pack(uint16_t mv, uint16_t age_s, uint8_t flags,

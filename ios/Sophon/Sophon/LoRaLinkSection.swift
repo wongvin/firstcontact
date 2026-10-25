@@ -2,7 +2,12 @@ import Charts
 import CoreLocation
 import SwiftUI
 
-/// The sensor → gateway LoRa link, as a gateway reports it every 10 s (#309).
+/// The LoRa link to a gateway, as the gateway reports it every 10 s (#309).
+///
+/// One section whatever the gateway hears (#359), adapted to it: a sensor's
+/// motion link shows Link quality and its chart; a transporter's bit-error test
+/// shows Bit error rate, its chart and the test's rows (``LoRaBerRows``). The
+/// radio rows -- margin, RSSI, SNR, noise, last packet, age -- are shared.
 ///
 /// Shown once a full record has arrived, or while a walk-test recording runs. A
 /// direct board never sends a record, so it shows this section only if a
@@ -14,27 +19,61 @@ struct LoRaLinkSection: View {
     let recorder: WalkTestRecorder
     /// A firmware update is running (#357): its restart would cut a recording off.
     var updating = false
+    /// Why a recording can't start: a BER walk without a matching image check
+    /// (#359). A closure, evaluated by the walk-test rows only: reading the BER
+    /// record in the detail view's body redrew the whole screen every window.
+    var startBlocked: () -> String? = { nil }
+    /// The bit-error test's image check (#359), and what its rows need.
+    let imageCheck: ImageCheck
+    /// A firmware update is running on any board: SMP is taken (#357).
+    var smpBusy = false
+    let findDevice: (String) -> SophonDevice?
+    let onCheckImages: () -> Void
     /// Asks for the note or a marker. The alert itself hangs off the detail
     /// view, outside its List (see ``View/walkTestPrompt(_:recorder:)``).
     let onPrompt: (WalkTestPrompt) -> Void
 
     var body: some View {
         if let record = device.loraLink {
+            let peer = device.loraPeer
+            let testing = peer == .transporter || peer == .both
             Section {
                 // The verdict rows share one timeline so they can dim once records
                 // stop arriving: a green 100 % about a link nobody is measuring any
                 // more reads as a current verdict (#309 review, finding 5).
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let stale = (device.loraRecordAge(asOf: context.date) ?? 0) > device.loraRecordStaleAfter
-                    LabeledContent("Link quality") {
-                        Text((record.linkQuality.map { String(format: "%.1f %%", $0) } ?? "Nothing heard")
-                             + (stale ? " (stale)" : ""))
-                            .foregroundStyle(stale ? .secondary : Self.qualityColor(record.linkQuality))
+                    // A transporter's packets carry its image, not samples, so
+                    // LQ has nothing to count: its headline is the bit error
+                    // rate instead (#359).
+                    if peer != .transporter {
+                        LabeledContent("Link quality") {
+                            Text((record.linkQuality.map { String(format: "%.1f %%", $0) } ?? "Nothing heard")
+                                 + (stale ? " (stale)" : ""))
+                                .foregroundStyle(stale ? .secondary : Self.qualityColor(record.linkQuality))
+                        }
+                    }
+                    if testing, let ber = device.loraBer.record {
+                        // Its own record's age: a missed BER notify mustn't pass
+                        // the last window's figure off as current (review, finding 5).
+                        let berStale = (device.loraBer.recordAge(asOf: context.date) ?? 0)
+                            > device.loraRecordStaleAfter
+                        LabeledContent("Bit error rate") {
+                            Text(LoRaBerRows.berText(ber) + (berStale ? " (stale)" : ""))
+                                .foregroundStyle(berStale ? .secondary : LoRaBerRows.berColor(ber))
+                        }
                     }
                     LabeledContent("Margin") {
                         Text(marginText(record) + (stale ? " (stale)" : ""))
                             .foregroundStyle(stale ? .secondary : Self.marginColor(record.worstMarginDB))
                     }
+                }
+                if peer == .both {
+                    Text("""
+                        Hearing a sensor and a transporter on one channel. They collide, and both sets of \
+                        figures suffer: give each its own frequency.
+                        """)
+                        .font(.footnote).foregroundStyle(.orange)
                 }
                 LabeledContent("LoRa RSSI") { Text(rssiText(record)) }
                 LabeledContent("LoRa SNR") { Text(snrText(record)) }
@@ -57,15 +96,21 @@ struct LoRaLinkSection: View {
                             .foregroundStyle((age ?? 0) > device.loraRecordStaleAfter ? .orange : .secondary)
                     }
                 }
-                LabeledContent("Sensor") { Text(record.sensorName ?? "Not locked yet") }
                 LabeledContent("Preset") {
                     Text("\(record.presetName) · SF\(record.spreadingFactor) · 500 kHz"
                          + (record.rxBoost ? " · RX boost" : ""))
                 }
-                LabeledContent("This session") {
-                    Text("\(device.loraSessionSamples) samples · \(device.loraSessionMissing) missing · "
-                         + "\(device.loraSessionBad)\(device.loraSessionBadSaturated ? "+" : "") bad")
-                        .font(.callout.monospacedDigit())
+                if peer != .transporter {
+                    LabeledContent("Sensor") { Text(record.sensorName ?? "Not locked yet") }
+                    LabeledContent("This session") {
+                        Text("\(device.loraSessionSamples) samples · \(device.loraSessionMissing) missing · "
+                             + "\(device.loraSessionBad)\(device.loraSessionBadSaturated ? "+" : "") bad")
+                            .font(.callout.monospacedDigit())
+                    }
+                }
+                if testing || device.loraBer.mismatch != nil {
+                    LoRaBerRows(device: device, imageCheck: imageCheck, updating: smpBusy,
+                                findDevice: findDevice, onCheckImages: onCheckImages)
                 }
                 if device.loraRecordsMissed > 0 {
                     LabeledContent("Records missed") {
@@ -73,18 +118,14 @@ struct LoRaLinkSection: View {
                     }
                 }
                 if device.loraLinkHistory.count >= 2 {
-                    sparklines
+                    sparklines(peer)
                 }
-                WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
+                WalkTestControls(recorder: recorder, updating: updating, startBlocked: startBlocked,
+                                 fixedEnd: peer == .transporter ? "transporter" : "sensor", onPrompt: onPrompt)
             } header: {
                 Text("LoRa link")
             } footer: {
-                Text("The sensor's radio link to this gateway, measured by the gateway over "
-                     + "\(record.windowSeconds) s windows. "
-                     + "Margin is SNR above the level where packets stop decoding; the worst packet's margin "
-                     + "is the one to watch, because fades lose packets while the average still looks "
-                     + "healthy. The RSSI row above is this phone's Bluetooth link "
-                     + "to the gateway, not the LoRa link.")
+                Text(footer(peer, windowSeconds: record.windowSeconds))
             }
         } else if let mismatch = device.loraLinkMismatch {
             // Records arrive but this app can't read them (#346): say why, and
@@ -94,7 +135,8 @@ struct LoRaLinkSection: View {
                     .foregroundStyle(.orange)
                 if recorder.isRecording {
                     DistanceRow(recorder: recorder)
-                    WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
+                    WalkTestControls(recorder: recorder, updating: updating, startBlocked: startBlocked,
+                                     onPrompt: onPrompt)
                 }
             }
         } else if recorder.isRecording {
@@ -104,39 +146,164 @@ struct LoRaLinkSection: View {
             // record (#309 review, finding 4).
             Section("LoRa link") {
                 LabeledContent("Link") {
-                    Text("Waiting for a LoRa record from this board").foregroundStyle(.secondary)
+                    // A sensor or transporter never sends one: the recording runs
+                    // against its gateway (#359 review, finding 6).
+                    Text(device.sendsOverLoRa ? "Recording on the gateway, where this board's link is measured"
+                                              : "Waiting for a LoRa record from this board")
+                        .foregroundStyle(.secondary)
                 }
                 DistanceRow(recorder: recorder)
-                WalkTestControls(recorder: recorder, updating: updating, onPrompt: onPrompt)
+                WalkTestControls(recorder: recorder, updating: updating, startBlocked: startBlocked,
+                                 onPrompt: onPrompt)
             }
+        }
+    }
+
+    private func footer(_ peer: LoRaPeer, windowSeconds: UInt8) -> String {
+        let margin = "Margin is SNR above the level where packets stop decoding; the worst packet's margin "
+            + "is the one to watch, because fades lose packets while the average still looks healthy. "
+            + "The RSSI row above is this phone's Bluetooth link to the gateway, not the LoRa link."
+        switch peer {
+        case .transporter, .both:
+            return "A transporter sends its own firmware with the LoRa CRC off, and this gateway compares "
+                + "every bit with its own copy, over \(windowSeconds) s windows. Damaged packets arrived with "
+                + "a bit wrong; lost ones never arrived. Both boards must run the same image: check it "
+                + "before a walk. " + margin
+        case .sensor, .none:
+            return "The sensor's radio link to this gateway, measured by the gateway over "
+                + "\(windowSeconds) s windows. " + margin
         }
     }
 
     // MARK: Sparklines
 
-    private var sparklines: some View {
+    /// The headline's chart over the last windows, then the margin's. A
+    /// transporter's link charts its bit error rate (#359), a sensor's its LQ.
+    private func sparklines(_ peer: LoRaPeer) -> some View {
         let history = Array(device.loraLinkHistory.enumerated())
+        let berHistory = Array(device.loraBer.history.enumerated())
+        // A fixed 30-window axis ending at the latest window, the same for every
+        // chart: a short history fills from the right instead of stretching, and
+        // the charts stay aligned window for window.
+        // x is windows before the latest, 0 at the right: the window counter is
+        // 16 bits and wraps, which a raw number would draw as a line across the
+        // chart (final review, finding 2). A point outside the 30 -- a BER record
+        // a window ahead of its Link record -- is left out.
+        let latest = device.loraLink?.window ?? 0
+        let span = SophonDevice.loraLinkHistoryCount
+        let windows = (1 - span)...0
+        func xValue(_ window: UInt16) -> Int? {
+            let back = Int(latest &- window)
+            return back < span ? -back : nil
+        }
+        // A fixed scale from 0 to 0.3 %, rising (to a rounded value) only when a
+        // window exceeds it. With Charts' automatic scale a clean link (every
+        // window 0 %) has no range, and so no gridlines or labels at all.
+        let worstBer = berHistory.compactMap { $0.element.berPercent }.max() ?? 0
+        let berMarks = Self.berAxisMarks(worst: worstBer)
+        let berTop = berMarks.last ?? Self.berAxisDefault
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Last \(history.count) windows").font(.footnote).foregroundStyle(.secondary)
-            Chart(history, id: \.offset) { item in
-                if let lq = item.element.linkQuality {
-                    LineMark(x: .value("Window", item.offset), y: .value("LQ %", lq))
-                        .foregroundStyle(by: .value("Series", "Link quality %"))
+            Text("Last \(span) windows").font(.footnote).foregroundStyle(.secondary)
+            if peer != .transporter {
+                Chart(history, id: \.offset) { item in
+                    if let lq = item.element.linkQuality, let back = xValue(item.element.window) {
+                        LineMark(x: .value("Window", back), y: .value("LQ %", lq))
+                            .foregroundStyle(by: .value("Series", "Link quality %"))
+                        PointMark(x: .value("Window", back), y: .value("LQ %", lq))
+                            .symbolSize(12)
+                            .foregroundStyle(by: .value("Series", "Link quality %"))
+                    }
                 }
+                .chartYScale(domain: 0...100)
+                .chartYAxis { Self.trailingAxis(values: [0, 50, 100]) }
+                .chartXScale(domain: windows)
+                .chartXAxis(.hidden)
+                .frame(height: 70)
             }
-            .chartYScale(domain: 0...100)
-            .chartXAxis(.hidden)
-            .frame(height: 70)
+            if peer == .transporter || peer == .both, berHistory.count >= 2 {
+                Chart(berHistory, id: \.offset) { item in
+                    if let ber = item.element.berPercent, let back = xValue(item.element.window) {
+                        LineMark(x: .value("Window", back), y: .value("BER %", ber))
+                            .foregroundStyle(by: .value("Series", "Bit error rate %"))
+                        PointMark(x: .value("Window", back), y: .value("BER %", ber))
+                            .symbolSize(12)
+                            .foregroundStyle(by: .value("Series", "Bit error rate %"))
+                    }
+                }
+                // Gridlines with the rate on the right: BER spans decades, so the
+                // figure has to be readable off the chart, not just its shape.
+                .chartYScale(domain: 0...berTop)
+                .chartYAxis { Self.trailingAxis(values: berMarks) }
+                .chartXScale(domain: windows)
+                .chartXAxis(.hidden)
+                .frame(height: 70)
+            }
             Chart(history, id: \.offset) { item in
-                if let margin = item.element.marginDB {
-                    LineMark(x: .value("Window", item.offset), y: .value("Margin dB", margin))
+                if let margin = item.element.marginDB, let back = xValue(item.element.window) {
+                    LineMark(x: .value("Window", back), y: .value("Margin dB", margin))
+                        .foregroundStyle(by: .value("Series", "Margin dB"))
+                    PointMark(x: .value("Window", back), y: .value("Margin dB", margin))
+                        .symbolSize(12)
                         .foregroundStyle(by: .value("Series", "Margin dB"))
                 }
             }
+            .chartYAxis { Self.trailingAxis(values: .automatic(desiredCount: 3)) }
+            .chartXScale(domain: windows)
             .chartXAxis(.hidden)
             .frame(height: 70)
         }
         .padding(.vertical, 4)
+    }
+
+    /// The y-axis every chart here uses: gridlines, values on the right in a
+    /// fixed-width column. Equal label widths give equal plot widths, so the
+    /// stacked charts line up window for window.
+    static func trailingAxis(values: [Double]) -> some AxisContent {
+        AxisMarks(position: .trailing, values: values) { value in
+            AxisGridLine()
+            AxisValueLabel(horizontalSpacing: 2) {
+                if let number = value.as(Double.self) {
+                    Text(number.formatted(.number.precision(.significantDigits(1...3))))
+                        .frame(width: axisLabelWidth, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    static func trailingAxis(values: AxisMarkValues) -> some AxisContent {
+        AxisMarks(position: .trailing, values: values) { value in
+            AxisGridLine()
+            AxisValueLabel(horizontalSpacing: 2) {
+                if let number = value.as(Double.self) {
+                    Text(number.formatted(.number.precision(.significantDigits(1...3))))
+                        .frame(width: axisLabelWidth, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    /// Wide enough for "0.15" or "-12" at the caption size Charts uses.
+    static let axisLabelWidth: CGFloat = 24
+
+    /// The BER chart's default top, in percent, marked every 0.1 %.
+    static let berAxisDefault = 0.3
+
+    /// The BER axis's gridlines: 0, 0.1, 0.2, 0.3 % by default; above that,
+    /// about three steps of a round size (1, 2 or 5 x 10^n) that reach the worst.
+    static func berAxisMarks(worst: Double) -> [Double] {
+        let step = worst <= berAxisDefault ? 0.1 : niceCeiling(worst / 3)
+        let top = worst <= berAxisDefault ? berAxisDefault : (worst / step).rounded(.up) * step
+        return stride(from: 0, through: top + step / 2, by: step).map { ($0 / step).rounded() * step }
+    }
+
+    /// 1, 2 or 5 times a power of ten, at or above `value`; at least 0.01 %.
+    static func niceCeiling(_ value: Double) -> Double {
+        let floor = max(value, 0.01)
+        let magnitude = pow(10, (log10(floor)).rounded(.down))
+        for step in [1.0, 2.0, 5.0, 10.0] where step * magnitude >= floor * 0.999_999 {
+            return step * magnitude
+        }
+        return 10 * magnitude
     }
 
     // MARK: Formatting
@@ -202,6 +369,9 @@ struct LoRaLinkSection: View {
 private struct WalkTestControls: View {
     let recorder: WalkTestRecorder
     let updating: Bool
+    let startBlocked: () -> String?
+    /// The fixed end the pin marks: the sensor, or a transporter in a BER walk.
+    var fixedEnd = "sensor"
     let onPrompt: (WalkTestPrompt) -> Void
 
     var body: some View {
@@ -211,12 +381,16 @@ private struct WalkTestControls: View {
                     .font(.callout.monospacedDigit())
             }
             Button("Add marker…") { onPrompt(.marker) }
-            Button("Drop pin here (at the sensor)") { recorder.dropPin() }
+            Button("Drop pin here (at the \(fixedEnd))") { recorder.dropPin() }
                 .disabled(recorder.lastFix == nil)
             Button("Stop recording", role: .destructive) { recorder.stop() }
         } else {
+            let blocked = startBlocked()
             Button("Start walk-test recording") { onPrompt(.note) }
-                .disabled(updating)
+                .disabled(updating || blocked != nil)
+            if let blocked {
+                Text(blocked).font(.footnote).foregroundStyle(.orange)
+            }
             if !recorder.exportURLs.isEmpty {
                 ShareLink(items: recorder.exportURLs) {
                     Label(shareLabel, systemImage: "square.and.arrow.up")

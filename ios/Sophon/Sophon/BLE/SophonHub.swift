@@ -37,6 +37,8 @@ final class SophonHub: NSObject {
     /// like `walkTest`: an update outlives leaving the detail view.
     let firmware = FirmwareStore()
     let updater = FirmwareUpdater()
+    /// Compares a gateway's image with its transporter's (#359).
+    let imageCheck = ImageCheck()
 
     /// Peripherals that accepted a connection but had no Sophon service behind
     /// it. Tracked so the disconnect they are about to get is not treated as a
@@ -71,6 +73,7 @@ final class SophonHub: NSObject {
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+        updater.imageCheck = imageCheck // each waits for the other's SMP (#359)
 
         // Frames missed while the app is not running are not link loss. iOS
         // says exactly when that starts, which beats inferring it from how long
@@ -124,6 +127,20 @@ final class SophonHub: NSObject {
         for device in devices where device.isWatchedForSilence {
             device.lastSeenAt = now
         }
+    }
+
+    /// Latch an advertised identity, guarded like the other latches here.
+    /// Logged when the firmware changes: an advertisement can carry a scan
+    /// response iOS cached before an OTA update (#357).
+    private func noteIdentity(_ identity: SophonIdentity, of device: SophonDevice) {
+        guard device.identity != identity else { return }
+        if let old = device.identity, old.firmwareVersion != identity.firmwareVersion {
+            log.info("""
+                \(device.displayName, privacy: .public) advertised firmware \
+                \(old.firmwareVersion, privacy: .public) → \(identity.firmwareVersion, privacy: .public)
+                """)
+        }
+        device.identity = identity
     }
 
     func device(for peripheral: CBPeripheral) -> SophonDevice? {
@@ -634,7 +651,7 @@ extension SophonHub: CBCentralManagerDelegate {
             // Guarded like advertisementKeys above: with duplicate reporting on,
             // which it now is whenever a sensor is listed (#351), these arrive
             // tens of times a second, and an equal write still redraws.
-            if let identity, device.identity != identity { device.identity = identity }
+            if let identity { self.noteIdentity(identity, of: device) }
             if let txPower, device.txPower != txPower { device.txPower = txPower }
             self.noteRoleAdvertised(device, sensor: sensorAdvert, sophon: advertisesSophon)
 
@@ -825,7 +842,8 @@ extension SophonHub: CBPeripheralDelegate {
                  SophonProtocol.linkParamsCharacteristicUUID,
                  SophonProtocol.batteryCharacteristicUUID,
                  SophonProtocol.loraLinkCharacteristicUUID,
-                 SophonProtocol.configCharacteristicUUID],
+                 SophonProtocol.configCharacteristicUUID,
+                 SophonProtocol.loraBerCharacteristicUUID],
                 for: sophon)
         }
     }
@@ -875,6 +893,7 @@ extension SophonHub: CBPeripheralDelegate {
                     peripheral.setNotifyValue(true, for: characteristic)
                 case SophonProtocol.loraLinkCharacteristicUUID: self.subscribeLoRaLink(characteristic, on: peripheral)
                 case SophonProtocol.configCharacteristicUUID: self.readConfig(characteristic, on: peripheral)
+                case SophonProtocol.loraBerCharacteristicUUID: self.subscribeLoRaBer(characteristic, on: peripheral)
                 case SophonProtocol.linkParamsCharacteristicUUID:
                     // Read once here, and again whenever stats are refreshed --
                     // iOS revises the interval on its own schedule, so a value
@@ -904,6 +923,7 @@ extension SophonHub: CBPeripheralDelegate {
         if device?.offersLinkParams != offers { device?.offersLinkParams = offers }
         noteLoRaLinkOffered(characteristics, by: device)
         noteConfigOffered(characteristics, by: device)
+        noteLoRaBerOffered(characteristics, by: device)
     }
 
     nonisolated func peripheral(
@@ -956,8 +976,9 @@ extension SophonHub: CBPeripheralDelegate {
         switch characteristic.uuid {
         case SophonProtocol.batteryCharacteristicUUID:
             ingestBatteryValue(data, from: id)
-        case SophonProtocol.loraLinkCharacteristicUUID:
-            MainActor.assumeIsolated { self.ingestLoRaLinkValue(data, from: id) }
+        case SophonProtocol.loraLinkCharacteristicUUID, SophonProtocol.loraBerCharacteristicUUID:
+            let uuid = characteristic.uuid
+            MainActor.assumeIsolated { self.ingestLoRaValue(uuid, data, from: id) }
         case SophonProtocol.configCharacteristicUUID:
             MainActor.assumeIsolated { self.ingestConfigValue(data, from: id) }
         case SophonProtocol.statsCharacteristicUUID:

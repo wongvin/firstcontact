@@ -31,7 +31,9 @@ target_sources(app PRIVATE
   src/config.c
   src/ident.c
   src/imu.c
+  src/lora_ber.c
   src/lora_codec.c
+  src/lora_image.c
   src/lora_link.c
   src/lora_presets.c
   src/role.c

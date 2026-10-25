@@ -23,6 +23,7 @@
 #include "config.h"
 #include "frame.h"
 #include "imu.h"
+#include "lora_image.h"
 #include "lora_link.h"
 #include "role.h"
 #include "version.h"
@@ -395,15 +396,23 @@ int main(void)
 	override = sophon_config_boot()->role;
 
 	/*
+	 * The running image (#359), before the role: a transporter sends it and
+	 * a gateway compares against it, and a board that can't read it can't
+	 * be a transporter. Fails, quietly enough, in a UF2 build.
+	 */
+	(void)lora_image_init();
+
+	/*
 	 * A missing IMU is explicitly not fatal. The radio, the GATT table and the
 	 * transmit counters are all still worth having on a board whose sensor did
 	 * not come up.
 	 *
 	 * A board forced to gateway leaves its IMU unarmed (#329). Its Motion
 	 * stream is the sensor's, relayed; local samples would interleave a second
-	 * seq space into it. It still reports whether it has one.
+	 * seq space into it. It still reports whether it has one. A transporter
+	 * (#359) sends its image, never motion, so it leaves the IMU unarmed too.
 	 */
-	if (override == SOPHON_CONFIG_ROLE_GATEWAY) {
+	if (override == SOPHON_CONFIG_ROLE_GATEWAY || override == SOPHON_CONFIG_ROLE_TRANSPORTER) {
 		imu_skipped = true;
 		imu_err = sophon_imu_present() ? 0 : -ENODEV;
 	} else {
@@ -412,10 +421,10 @@ int main(void)
 	role = sophon_role_resolve(override, imu_err == 0);
 
 	/*
-	 * A forced gateway with no radio falls back to Auto, which on a radio-less
-	 * board is direct: start the IMU it skipped.
+	 * A forced gateway or transporter that can't run falls back to Auto, which
+	 * may want the IMU: start the IMU it skipped.
 	 */
-	if (imu_skipped && role != SOPHON_ROLE_GATEWAY) {
+	if (imu_skipped && role != SOPHON_ROLE_GATEWAY && role != SOPHON_ROLE_TRANSPORTER) {
 		imu_err = sophon_imu_init(imu_sample);
 		imu_skipped = false;
 	}
