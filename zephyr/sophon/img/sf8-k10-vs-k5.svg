@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" width="960" height="720" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>SF8 with k = 10 against k = 5, both at +22 dBm: V6b against V5b at +22 dBm</title>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="720" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">SF8 with k = 10 against k = 5, both at +22 dBm</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">k is samples per packet. Same range; fewer, longer packets against more, shorter ones. V5b at +22 dBm is not a preset.</text>
+
+  <!-- ===== A: batching and latency ===== -->
+  <text x="30" y="96" font-size="16" font-weight="700" fill="#1f2328">A · Samples every 18.4 ms, batched k at a time, first 400 ms (1 ms = 1.9 px)</text>
+  <g font-size="11" fill="#57606a">
+    <line x1="170" y1="126" x2="930" y2="126" stroke="#d0d7de"/>
+    <text x="170" y="122" text-anchor="middle">0</text><text x="360" y="122" text-anchor="middle">100</text>
+    <text x="550" y="122" text-anchor="middle">200</text><text x="740" y="122" text-anchor="middle">300</text>
+    <text x="930" y="122" text-anchor="middle">400 ms</text>
+  </g>
+  <text x="30" y="144" font-size="14" font-weight="700" fill="#d9730d">k = 10 · V6b</text>
+  <text x="30" y="160" font-size="11" fill="#57606a">100 ms every 184 ms</text>
+  <text x="30" y="174" font-size="11" fill="#57606a">PL 138 B · 54% busy</text>
+  <circle cx="170.0" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="205.0" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="239.9" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="274.9" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="309.8" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="344.8" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="379.8" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="414.7" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="449.7" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="484.6" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="519.6" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="554.6" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="589.5" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="624.5" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="659.4" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="694.4" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="729.4" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="764.3" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="799.3" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="834.2" cy="140" r="4" fill="#f0b27a"/>
+  <circle cx="869.2" cy="140" r="4" fill="#d9730d"/>
+  <circle cx="904.2" cy="140" r="4" fill="#d9730d"/>
+  <rect x="519.6" y="154" width="190.0" height="22" fill="#d9730d"/>
+  <text x="523.6" y="169" font-size="10" fill="#ffffff">packet 1</text>
+  <rect x="869.2" y="154" width="60.8" height="22" fill="#f0b27a"/>
+  <text x="873.2" y="169" font-size="10" fill="#ffffff">packet 2</text>
+  <line x1="170.0" y1="188" x2="709.6" y2="188" stroke="#1f2328" stroke-width="1.2"/>
+  <line x1="170.0" y1="183" x2="170.0" y2="193" stroke="#1f2328" stroke-width="1.2"/>
+  <line x1="709.6" y1="183" x2="709.6" y2="193" stroke="#1f2328" stroke-width="1.2"/>
+  <text x="715.6" y="192" font-size="11" fill="#1f2328">oldest sample waits 184 + 100 = 284 ms</text>
+  <text x="30" y="254" font-size="14" font-weight="700" fill="#0f8b8d">k = 5 · V5b</text>
+  <text x="30" y="270" font-size="11" fill="#57606a">at +22 dBm (not a preset)</text>
+  <text x="30" y="284" font-size="11" fill="#57606a">59.0 ms every 92 ms</text>
+  <text x="30" y="298" font-size="11" fill="#57606a">PL 73 B · 64% busy</text>
+  <circle cx="170.0" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="205.0" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="239.9" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="274.9" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="309.8" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="344.8" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="379.8" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="414.7" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="449.7" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="484.6" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="519.6" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="554.6" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="589.5" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="624.5" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="659.4" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="694.4" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="729.4" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="764.3" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="799.3" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="834.2" cy="250" r="4" fill="#7cc9ca"/>
+  <circle cx="869.2" cy="250" r="4" fill="#0f8b8d"/>
+  <circle cx="904.2" cy="250" r="4" fill="#0f8b8d"/>
+  <rect x="344.8" y="264" width="112.1" height="22" fill="#0f8b8d"/>
+  <text x="348.8" y="279" font-size="10" fill="#ffffff">packet 1</text>
+  <rect x="519.6" y="264" width="112.1" height="22" fill="#7cc9ca"/>
+  <text x="523.6" y="279" font-size="10" fill="#ffffff">packet 2</text>
+  <rect x="694.4" y="264" width="112.1" height="22" fill="#0f8b8d"/>
+  <text x="698.4" y="279" font-size="10" fill="#ffffff">packet 3</text>
+  <rect x="869.2" y="264" width="60.8" height="22" fill="#7cc9ca"/>
+  <text x="873.2" y="279" font-size="10" fill="#ffffff">packet 4</text>
+  <line x1="170.0" y1="298" x2="456.9" y2="298" stroke="#1f2328" stroke-width="1.2"/>
+  <line x1="170.0" y1="293" x2="170.0" y2="303" stroke="#1f2328" stroke-width="1.2"/>
+  <line x1="456.9" y1="293" x2="456.9" y2="303" stroke="#1f2328" stroke-width="1.2"/>
+  <text x="462.9" y="302" font-size="11" fill="#1f2328">92 + 59 = 151 ms</text>
+  <text x="170" y="330" font-size="12" fill="#57606a">Dots are samples, coloured by the packet that carries them. A packet goes out once its k samples are in,</text>
+  <text x="170" y="346" font-size="12" fill="#57606a">so the oldest sample waits k × 18.4 ms plus the airtime: the latency.</text>
+
+  <!-- ===== B: one lost packet ===== -->
+  <text x="30" y="374" font-size="16" font-weight="700" fill="#1f2328">B · What one lost packet costs</text>
+  <text x="30" y="396" font-size="14" font-weight="700" fill="#d9730d">k = 10</text>
+  <circle cx="170" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="206" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="242" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="278" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="314" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="350" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="386" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="422" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="458" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="494" cy="392" r="7" fill="#d9730d"/>
+  <circle cx="530" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="566" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="602" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="638" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="674" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="710" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="746" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="782" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="818" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="854" cy="392" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <line x1="518" y1="408" x2="866" y2="408" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="692" y="424" font-size="11" fill="#cf222e" text-anchor="middle">10 samples · 184 ms of motion</text>
+  <text x="30" y="466" font-size="14" font-weight="700" fill="#0f8b8d">k = 5</text>
+  <circle cx="170" cy="462" r="7" fill="#0f8b8d"/>
+  <circle cx="206" cy="462" r="7" fill="#0f8b8d"/>
+  <circle cx="242" cy="462" r="7" fill="#0f8b8d"/>
+  <circle cx="278" cy="462" r="7" fill="#0f8b8d"/>
+  <circle cx="314" cy="462" r="7" fill="#0f8b8d"/>
+  <circle cx="350" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="386" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="422" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="458" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="494" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="530" cy="462" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="566" cy="462" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="602" cy="462" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="638" cy="462" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="674" cy="462" r="7" fill="#ffffff" stroke="#cf222e" stroke-width="1.6"/>
+  <circle cx="710" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="746" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="782" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="818" cy="462" r="7" fill="#7cc9ca"/>
+  <circle cx="854" cy="462" r="7" fill="#7cc9ca"/>
+  <line x1="518" y1="478" x2="686" y2="478" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="602" y="494" font-size="11" fill="#cf222e" text-anchor="middle">5 samples · 92 ms of motion</text>
+  <text x="170" y="520" font-size="12" fill="#57606a">A fade takes every packet it touches: a fade of length D costs about (D + Tpacket) ÷ 18.4 samples.</text>
+  <text x="170" y="536" font-size="12" fill="#57606a">So the shorter k = 5 packet loses about 2 fewer samples per fade, in holes half as long.</text>
+
+  <!-- ===== C: the figures ===== -->
+  <text x="30" y="578" font-size="16" font-weight="700" fill="#1f2328">C · What each one buys (LORA-PROTOCOL.md § Variants, k = 5 recomputed at +22 dBm)</text>
+  <g font-size="12">
+    <text x="30" y="604" fill="#57606a">Preset</text>
+    <text x="200" y="604" fill="#57606a">Tpacket</text>
+    <text x="270" y="604" fill="#57606a">Packets/s</text>
+    <text x="350" y="604" fill="#57606a">Airtime/sample</text>
+    <text x="460" y="604" fill="#57606a">Share</text>
+    <text x="515" y="604" fill="#57606a">Latency</text>
+    <text x="585" y="604" fill="#57606a">Link budget</text>
+    <text x="675" y="604" fill="#57606a">TX current</text>
+    <text x="760" y="604" fill="#57606a">200 mAh, radio only</text>
+    <line x1="30" y1="612" x2="930" y2="612" stroke="#d0d7de"/>
+    <text x="30" y="634" font-weight="700" fill="#d9730d">V6b · k = 10</text>
+    <text x="200" y="634" fill="#1f2328">100.0 ms</text>
+    <text x="270" y="634" fill="#1f2328">5.4</text>
+    <text x="350" y="634" fill="#1f2328">10.0 ms</text>
+    <text x="460" y="634" fill="#1f2328">54%</text>
+    <text x="515" y="634" fill="#1f2328">284 ms</text>
+    <text x="585" y="634" fill="#1f2328">142 dB</text>
+    <text x="675" y="634" fill="#1f2328">64.2 mA</text>
+    <text x="760" y="634" fill="#1f2328">≈ 3.1 h</text>
+    <text x="30" y="658" font-weight="700" fill="#0f8b8d">V5b at +22 dBm · k = 5</text>
+    <text x="200" y="658" fill="#1f2328">59.0 ms</text>
+    <text x="270" y="658" fill="#1f2328">10.9</text>
+    <text x="350" y="658" fill="#1f2328">11.8 ms</text>
+    <text x="460" y="658" fill="#1f2328">64%</text>
+    <text x="515" y="658" fill="#1f2328">151 ms</text>
+    <text x="585" y="658" fill="#1f2328">142 dB</text>
+    <text x="675" y="658" fill="#1f2328">75.7 mA</text>
+    <text x="760" y="658" fill="#1f2328">≈ 2.6 h</text>
+  </g>
+  <text x="30" y="694" font-size="12" fill="#57606a">Same SF8 and +22 dBm, so the same sensitivity (−120 dBm) and range. k = 5 pays its fixed preamble and header twice as often:</text>
+  <text x="30" y="710" font-size="12" fill="#57606a">18% more airtime per sample and 18% more current, for 133 ms less latency and half the loss per packet.</text>
+</svg>

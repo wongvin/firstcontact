@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" width="960" height="720" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>LoRa variants: latency against link budget, sized by TX current</title>
+  <defs>
+    <marker id="ah-57606a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+    <marker id="ah-d9730d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d9730d"/></marker>
+  </defs>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="720" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">The variants at a glance: range against latency</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">Up is farther, left is faster, a bigger dot draws more current. Figures from § Variants; all at 500 kHz.</text>
+  <text x="30" y="84" font-size="14" fill="#57606a">The best choices sit on the upper-left edge: V3b, V3 and V6, then V6b for the most range.</text>
+
+  <line x1="120" y1="560.0" x2="880" y2="560.0" stroke="#eaeef2"/>
+  <text x="112" y="564.0" font-size="11" fill="#57606a" text-anchor="end">128</text>
+  <line x1="120" y1="508.8" x2="880" y2="508.8" stroke="#eaeef2"/>
+  <text x="112" y="512.8" font-size="11" fill="#57606a" text-anchor="end">130</text>
+  <line x1="120" y1="457.5" x2="880" y2="457.5" stroke="#eaeef2"/>
+  <text x="112" y="461.5" font-size="11" fill="#57606a" text-anchor="end">132</text>
+  <line x1="120" y1="406.2" x2="880" y2="406.2" stroke="#eaeef2"/>
+  <text x="112" y="410.2" font-size="11" fill="#57606a" text-anchor="end">134</text>
+  <line x1="120" y1="355.0" x2="880" y2="355.0" stroke="#eaeef2"/>
+  <text x="112" y="359.0" font-size="11" fill="#57606a" text-anchor="end">136</text>
+  <line x1="120" y1="303.8" x2="880" y2="303.8" stroke="#eaeef2"/>
+  <text x="112" y="307.8" font-size="11" fill="#57606a" text-anchor="end">138</text>
+  <line x1="120" y1="252.5" x2="880" y2="252.5" stroke="#eaeef2"/>
+  <text x="112" y="256.5" font-size="11" fill="#57606a" text-anchor="end">140</text>
+  <line x1="120" y1="201.2" x2="880" y2="201.2" stroke="#eaeef2"/>
+  <text x="112" y="205.2" font-size="11" fill="#57606a" text-anchor="end">142</text>
+  <line x1="120" y1="150.0" x2="880" y2="150.0" stroke="#eaeef2"/>
+  <text x="112" y="154.0" font-size="11" fill="#57606a" text-anchor="end">144</text>
+  <line x1="120.0" y1="150" x2="120.0" y2="560" stroke="#eaeef2"/>
+  <text x="120.0" y="578" font-size="11" fill="#57606a" text-anchor="middle">0</text>
+  <line x1="246.7" y1="150" x2="246.7" y2="560" stroke="#eaeef2"/>
+  <text x="246.7" y="578" font-size="11" fill="#57606a" text-anchor="middle">50</text>
+  <line x1="373.3" y1="150" x2="373.3" y2="560" stroke="#eaeef2"/>
+  <text x="373.3" y="578" font-size="11" fill="#57606a" text-anchor="middle">100</text>
+  <line x1="500.0" y1="150" x2="500.0" y2="560" stroke="#eaeef2"/>
+  <text x="500.0" y="578" font-size="11" fill="#57606a" text-anchor="middle">150</text>
+  <line x1="626.7" y1="150" x2="626.7" y2="560" stroke="#eaeef2"/>
+  <text x="626.7" y="578" font-size="11" fill="#57606a" text-anchor="middle">200</text>
+  <line x1="753.3" y1="150" x2="753.3" y2="560" stroke="#eaeef2"/>
+  <text x="753.3" y="578" font-size="11" fill="#57606a" text-anchor="middle">250</text>
+  <line x1="880.0" y1="150" x2="880.0" y2="560" stroke="#eaeef2"/>
+  <text x="880.0" y="578" font-size="11" fill="#57606a" text-anchor="middle">300</text>
+  <rect x="120" y="150" width="760" height="410" fill="none" stroke="#d0d7de"/>
+  <text x="500.0" y="600" font-size="13" fill="#1f2328" text-anchor="middle">Latency, oldest sample to the gateway (ms) · ← lower is better</text>
+  <text transform="translate(74,355.0) rotate(-90)" font-size="13" fill="#1f2328" text-anchor="middle">Link budget (dB) · higher reaches farther ↑</text>
+  <line x1="378.4" y1="452.4" x2="378.4" y2="314.0" stroke="#57606a" stroke-width="2"  marker-end="url(#ah-57606a)"/>
+  <text x="392.40000000000003" y="384.625" font-size="11.5" fill="#57606a" text-anchor="start">+8 dB TX power (+14 → +22 dBm), same latency</text>
+  <line x1="403.7" y1="273.0" x2="783.7" y2="211.5" stroke="#d9730d" stroke-width="2"  marker-end="url(#ah-d9730d)"/>
+  <text x="626.7" y="273.7" font-size="11.5" fill="#d9730d" text-anchor="middle">SF8 and k = 10: +3 dB, +182 ms</text>
+  <line x1="398.7" y1="257.6" x2="482.3" y2="211.5" stroke="#d9730d" stroke-width="2" stroke-dasharray="4 3" marker-end="url(#ah-d9730d)"/>
+  <text x="0" y="0" font-size="11.5" fill="#d9730d" text-anchor="start"></text>
+  <circle cx="776.1" cy="483.1" r="9.9" fill="#1d6fd8" fill-opacity="0.75" stroke="#1d6fd8"/>
+  <text x="776.1" y="513.1" font-size="13" font-weight="700" fill="#1d6fd8" text-anchor="middle">V0</text>
+  <text x="776.1" y="527.1" font-size="10.5" fill="#57606a" text-anchor="middle">v1 format · beaten by V1</text>
+  <circle cx="728.0" cy="483.1" r="8.5" fill="#1d6fd8" fill-opacity="0.75" stroke="#1d6fd8"/>
+  <text x="728.0" y="447.1" font-size="13" font-weight="700" fill="#1d6fd8" text-anchor="middle">V1</text>
+  <text x="728.0" y="461.1" font-size="10.5" fill="#57606a" text-anchor="middle">lowest current</text>
+  <circle cx="378.4" cy="483.1" r="9.6" fill="#1d6fd8" fill-opacity="0.75" stroke="#1d6fd8"/>
+  <text x="362.4" y="469.1" font-size="13" font-weight="700" fill="#1d6fd8" text-anchor="end">V3</text>
+  <circle cx="261.9" cy="483.1" r="11.2" fill="#1d6fd8" fill-opacity="0.75" stroke="#1d6fd8"/>
+  <text x="261.9" y="517.1" font-size="13" font-weight="700" fill="#1d6fd8" text-anchor="middle">V3b</text>
+  <text x="261.9" y="531.1" font-size="10.5" fill="#57606a" text-anchor="middle">lowest latency</text>
+  <circle cx="401.2" cy="483.1" r="11.0" fill="#8250df" fill-opacity="0.75" stroke="#8250df"/>
+  <text x="415.2" y="515.1" font-size="13" font-weight="700" fill="#8250df" text-anchor="start">V4</text>
+  <text x="415.2" y="529.1" font-size="10.5" fill="#57606a" text-anchor="start">CR 4/7 · beaten by V3 here;</text>
+  <circle cx="839.5" cy="406.2" r="11.4" fill="#d9730d" fill-opacity="0.75" stroke="#d9730d"/>
+  <text x="821.5" y="411.2" font-size="13" font-weight="700" fill="#d9730d" text-anchor="end">V5</text>
+  <circle cx="502.5" cy="406.2" r="12.4" fill="#d9730d" fill-opacity="0.75" stroke="#d9730d"/>
+  <text x="502.5" y="436.2" font-size="13" font-weight="700" fill="#d9730d" text-anchor="middle">V5b</text>
+  <circle cx="378.4" cy="278.1" r="15.5" fill="#1d6fd8" fill-opacity="0.75" stroke="#1d6fd8"/>
+  <text x="356.4" y="283.1" font-size="13" font-weight="700" fill="#1d6fd8" text-anchor="end">V6</text>
+  <text x="356.4" y="297.1" font-size="10.5" fill="#57606a" text-anchor="end">default</text>
+  <circle cx="839.5" cy="201.2" r="18.4" fill="#d9730d" fill-opacity="0.75" stroke="#d9730d"/>
+  <text x="839.5" y="237.2" font-size="13" font-weight="700" fill="#d9730d" text-anchor="middle">V6b</text>
+  <text x="415.2" y="543.1" font-size="10.5" fill="#57606a">helps only at good SNR</text>
+  <circle cx="502.5" cy="201.2" r="20.0" fill="#ffffff" stroke="#d9730d" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="502.5" y="161.2" font-size="12" font-weight="700" fill="#d9730d" text-anchor="middle">V5b at +22 dBm</text>
+  <text x="502.5" y="174.2" font-size="10.5" fill="#57606a" text-anchor="middle">not a preset · +3 dB for +49 ms</text>
+
+  <!-- legend -->
+  <g font-size="12" fill="#1f2328">
+    <circle cx="40" cy="650" r="7" fill="#1d6fd8" fill-opacity="0.75"/><text x="54" y="654">SF7, CR 4/5</text>
+    <circle cx="160" cy="650" r="7" fill="#d9730d" fill-opacity="0.75"/><text x="174" y="654">SF8, CR 4/5</text>
+    <circle cx="280" cy="650" r="7" fill="#8250df" fill-opacity="0.75"/><text x="294" y="654">SF7, CR 4/7</text>
+    <circle cx="430" cy="650" r="8.5" fill="#8c959f" fill-opacity="0.5"/><text x="448" y="654">13.8 mA</text>
+    <circle cx="540" cy="650" r="18.4" fill="#8c959f" fill-opacity="0.5"/><text x="565" y="654">64.2 mA average radio current</text>
+  </g>
+  <text x="30" y="690" font-size="12" fill="#57606a">V2 (an implicit header) has V1's figures and no driver; it isn't drawn. Range: 3 dB is about ×1.41 in free space and about ×1.26 over ground.</text>
+  <text x="30" y="706" font-size="12" fill="#57606a">V5 and V5b aren't beaten outright: they draw less current than V6 and V6b. V0 and V4 are, on all three measures shown.</text>
+</svg>

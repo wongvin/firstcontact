@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 760" width="960" height="760" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Link budget at V6: where the decibels go</title>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="760" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">Link budget at V6: where the decibels go</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">Sensor at +22 dBm, SF7, 6 dBi antennas at both ends. Free space against what the 2026-10-24 walk received.</text>
+  <text x="30" y="84" font-size="14" fill="#57606a">The walk lost 36–48 dB more than free space. Settings recover a few dB; receiver placement is the part of the loss we control.</text>
+
+  <line x1="110" y1="166.3" x2="640" y2="166.3" stroke="#eaeef2"/>
+  <text x="102" y="170.3" font-size="11" fill="#57606a" text-anchor="end">+20</text>
+  <line x1="110" y1="231.7" x2="640" y2="231.7" stroke="#eaeef2"/>
+  <text x="102" y="235.7" font-size="11" fill="#57606a" text-anchor="end">0</text>
+  <line x1="110" y1="297.0" x2="640" y2="297.0" stroke="#eaeef2"/>
+  <text x="102" y="301.0" font-size="11" fill="#57606a" text-anchor="end">−20</text>
+  <line x1="110" y1="362.3" x2="640" y2="362.3" stroke="#eaeef2"/>
+  <text x="102" y="366.3" font-size="11" fill="#57606a" text-anchor="end">−40</text>
+  <line x1="110" y1="427.7" x2="640" y2="427.7" stroke="#eaeef2"/>
+  <text x="102" y="431.7" font-size="11" fill="#57606a" text-anchor="end">−60</text>
+  <line x1="110" y1="493.0" x2="640" y2="493.0" stroke="#eaeef2"/>
+  <text x="102" y="497.0" font-size="11" fill="#57606a" text-anchor="end">−80</text>
+  <line x1="110" y1="558.3" x2="640" y2="558.3" stroke="#eaeef2"/>
+  <text x="102" y="562.3" font-size="11" fill="#57606a" text-anchor="end">−100</text>
+  <line x1="110" y1="623.7" x2="640" y2="623.7" stroke="#eaeef2"/>
+  <text x="102" y="627.7" font-size="11" fill="#57606a" text-anchor="end">−120</text>
+  <text transform="translate(58,395.0) rotate(-90)" font-size="13" fill="#1f2328" text-anchor="middle">Power at the receiver (dBm)</text>
+  <line x1="110" y1="574.7" x2="640" y2="574.7" stroke="#8c959f" stroke-width="1.6" stroke-dasharray="2 3"/>
+  <text x="642" y="578.7" font-size="11" fill="#8c959f">noise floor read on the walk, −105</text>
+  <line x1="110" y1="599.2" x2="640" y2="599.2" stroke="#cf222e" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="642" y="603.2" font-size="11" fill="#cf222e">SF7 limit implied by the walk, ≈ −113</text>
+  <line x1="110" y1="613.9" x2="640" y2="613.9" stroke="#1d6fd8" stroke-width="1.6" />
+  <text x="642" y="614.9" font-size="11" fill="#1d6fd8">SF7 limit, datasheet −117</text>
+  <line x1="110" y1="623.7" x2="640" y2="623.7" stroke="#d9730d" stroke-width="1.6" />
+  <text x="642" y="636.7" font-size="11" fill="#d9730d">SF8 limit, datasheet −120</text>
+  <circle cx="150" cy="159.8" r="7" fill="#1f2328"/>
+  <text x="150" y="145.8" font-size="12" font-weight="700" fill="#1f2328" text-anchor="middle">TX +22 dBm</text>
+  <text x="150" y="660" font-size="12" fill="#1f2328" text-anchor="middle">sensor</text>
+  <line x1="255" y1="159.8" x2="255" y2="354.8" stroke="#d0d7de" stroke-width="10"/>
+  <rect x="246" y="354.8" width="18" height="151.2" fill="#8c959f" fill-opacity="0.45"/>
+  <circle cx="255" cy="354.8" r="6" fill="#ffffff" stroke="#1d6fd8" stroke-width="2"/>
+  <circle cx="255" cy="506.1" r="6" fill="#d9730d"/>
+  <text x="267" y="434.4" font-size="11" fill="#57606a">−46 dB</text>
+  <text x="255" y="660" font-size="12" font-weight="700" fill="#1f2328" text-anchor="middle">100 m</text>
+  <text x="255" y="676" font-size="11" fill="#57606a" text-anchor="middle">LQ 98%</text>
+  <line x1="365" y1="159.8" x2="365" y2="400.2" stroke="#d0d7de" stroke-width="10"/>
+  <rect x="356" y="400.2" width="18" height="118.9" fill="#8c959f" fill-opacity="0.45"/>
+  <circle cx="365" cy="400.2" r="6" fill="#ffffff" stroke="#1d6fd8" stroke-width="2"/>
+  <circle cx="365" cy="519.1" r="6" fill="#d9730d"/>
+  <text x="377" y="463.7" font-size="11" fill="#57606a">−36 dB</text>
+  <text x="365" y="660" font-size="12" font-weight="700" fill="#1f2328" text-anchor="middle">500 m</text>
+  <text x="365" y="676" font-size="11" fill="#57606a" text-anchor="middle">LQ 98%</text>
+  <line x1="475" y1="159.8" x2="475" y2="413.6" stroke="#d0d7de" stroke-width="10"/>
+  <rect x="466" y="413.6" width="18" height="157.8" fill="#8c959f" fill-opacity="0.45"/>
+  <circle cx="475" cy="413.6" r="6" fill="#ffffff" stroke="#1d6fd8" stroke-width="2"/>
+  <circle cx="475" cy="571.4" r="6" fill="#d9730d"/>
+  <text x="487" y="496.5" font-size="11" fill="#57606a">−48 dB</text>
+  <text x="475" y="660" font-size="12" font-weight="700" fill="#1f2328" text-anchor="middle">800 m</text>
+  <text x="475" y="676" font-size="11" fill="#57606a" text-anchor="middle">LQ 79%</text>
+  <line x1="585" y1="159.8" x2="585" y2="427.3" stroke="#d0d7de" stroke-width="10"/>
+  <rect x="576" y="427.3" width="18" height="157.1" fill="#8c959f" fill-opacity="0.45"/>
+  <circle cx="585" cy="427.3" r="6" fill="#ffffff" stroke="#1d6fd8" stroke-width="2"/>
+  <circle cx="585" cy="584.5" r="6" fill="#d9730d"/>
+  <text x="597" y="509.9" font-size="11" fill="#57606a">−48 dB</text>
+  <text x="585" y="660" font-size="12" font-weight="700" fill="#1f2328" text-anchor="middle">1300 m</text>
+  <text x="585" y="676" font-size="11" fill="#57606a" text-anchor="middle">LQ 57%</text>
+  <text x="240" y="230" font-size="11" fill="#57606a" text-anchor="end">path loss</text>
+  <text x="240" y="244" font-size="11" fill="#57606a" text-anchor="end">in free space,</text>
+  <text x="240" y="258" font-size="11" fill="#57606a" text-anchor="end">less 12 dB of</text>
+  <text x="240" y="272" font-size="11" fill="#57606a" text-anchor="end">antenna gain</text>
+  <line x1="603" y1="584.5" x2="603" y2="599.2" stroke="#cf222e" stroke-width="2"/><line x1="597" y1="599.2" x2="609" y2="599.2" stroke="#cf222e" stroke-width="2"/>
+  <text x="572" y="590.8" font-size="11" font-weight="700" fill="#cf222e" text-anchor="end">≈ 5 dB left</text>
+  <circle cx="120" cy="704" r="6" fill="#ffffff" stroke="#1d6fd8" stroke-width="2"/><text x="132" y="708" font-size="12" fill="#1f2328">free space, 6 dBi at both ends</text>
+  <circle cx="345" cy="704" r="6" fill="#d9730d"/><text x="357" y="708" font-size="12" fill="#1f2328">measured on the 2026-10-24 walk</text>
+  <rect x="555" y="697" width="14" height="14" fill="#8c959f" fill-opacity="0.45"/><text x="575" y="708" font-size="12" fill="#1f2328">excess loss: ground, buildings, body, pocket, cable</text>
+  <text x="650" y="166.3" font-size="15" font-weight="700" fill="#1f2328">What each step buys</text>
+  <text x="650" y="184.3" font-size="11" fill="#57606a">bars to the same dB scale as the chart</text>
+  <text x="650" y="210.3" font-size="12" fill="#1f2328">+14 → +22 dBm TX (V3 → V6)</text>
+  <rect x="650" y="216.3" width="18" height="26.1" fill="#1f2328"/>
+  <text x="676" y="228.3" font-size="11" fill="#57606a">already in V6</text>
+  <text x="650" y="270.5" font-size="12" fill="#1f2328">6 dBi antennas at both ends</text>
+  <rect x="650" y="276.5" width="18" height="39.2" fill="#1f2328"/>
+  <text x="676" y="288.5" font-size="11" fill="#57606a">already on the walk</text>
+  <text x="650" y="343.7" font-size="12" fill="#1f2328">SF8 (V6b)</text>
+  <rect x="650" y="349.7" width="18" height="8.2" fill="#d9730d"/>
+  <text x="676" y="361.7" font-size="11" fill="#57606a">+2.5 dB · 2× airtime</text>
+  <text x="650" y="391.7" font-size="12" fill="#1f2328">receiver antenna off the body, raised</text>
+  <rect x="650" y="397.7" width="18" height="16.3" fill="#1a7f37"/>
+  <rect x="650" y="414.0" width="18" height="32.7" fill="#1a7f37" fill-opacity="0.35"/>
+  <text x="676" y="409.7" font-size="11" fill="#57606a">5–15 dB typical · to measure</text>
+
+  <text x="30" y="738" font-size="11.5" fill="#57606a">Measured: RSSI where SNR ≥ 5 dB; noise floor + SNR nearer the floor, where RSSI includes the noise. The implied limit is that floor plus SF7's −7.5 dB SNR limit:</text>
+  <text x="30" y="754" font-size="11.5" fill="#57606a">about 4 dB short of the datasheet, from a noise floor above thermal or an RSSI offset (absolute calibration unverified). Margin from SNR doesn't depend on either.</text>
+</svg>
