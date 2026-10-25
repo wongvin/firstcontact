@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026-10-23
+## 2026-10-25
 
 ### feat: transporter role measures LoRa bit errors (#359)
 
@@ -12,6 +12,13 @@
 - **BER uses the received packet length:** the frame's `packet_len` is the length of the packets compared, not the gateway's own preset's, so BER is right when the two boards run different presets of one SF.
 - **Lost no longer double-counts:** a packet heard but unresolved counts in `unresolved` only, not in `lost` as well, so lost % = lost ÷ (packets + lost + unresolved) holds (`lora_ber_lost()`, host-tested).
 - TRANSPORTER-PLAN.md; LORA-PROTOCOL.md § Bit-error test; PROTOCOL.md § LoRa BER frame.
+
+## 2026-10-24
+
+### docs: LoRa trade-off figures (#337)
+
+- LORA-PROTOCOL.md gains six figures: latency from IMU to app, the variants on one latency-against-link-budget chart, SF7 against SF8, CR 4/5 against CR 4/7, and k = 10 against k = 5 at SF8 (V5b at +22 dBm marked as not a preset).
+- § Walk-test results: the link budget on the 2026-10-24 walk, 6 dBi at both ends, 36–48 dB below free space, about 5 dB of margin left at 1300 m.
 
 ## 2026-10-22
 

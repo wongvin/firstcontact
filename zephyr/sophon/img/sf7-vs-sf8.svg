@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" width="960" height="700" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>SF7 against SF8 at 500 kHz: V6 against V6b</title>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="700" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">SF7 against SF8 at 500 kHz · V6 against V6b</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">One step of spreading factor doubles every symbol: about 2.5–3 dB more sensitivity, about twice the airtime.</text>
+
+  <!-- ===== A: one symbol ===== -->
+  <text x="30" y="104" font-size="16" font-weight="700" fill="#1f2328">A · One symbol is one chirp across the 500 kHz channel</text>
+  <!-- time axis: 0.512 ms = 400 px, from x=170 -->
+  <!-- SF7 row -->
+  <text x="30" y="150" font-size="14" font-weight="700" fill="#1d6fd8">SF7</text>
+  <text x="30" y="168" font-size="12" fill="#57606a">2⁷ = 128 chips</text>
+  <rect x="170" y="122" width="400" height="56" fill="#f6f8fa" stroke="#d0d7de"/>
+  <line x1="170" y1="174" x2="370" y2="126" stroke="#1d6fd8" stroke-width="3"/>
+  <line x1="370" y1="126" x2="370" y2="174" stroke="#1d6fd8" stroke-width="1" stroke-dasharray="3 3"/>
+  <line x1="370" y1="174" x2="570" y2="126" stroke="#1d6fd8" stroke-width="3"/>
+  <text x="270" y="194" font-size="12" fill="#1d6fd8" text-anchor="middle">0.256 ms · 7 bits</text>
+  <text x="470" y="194" font-size="12" fill="#1d6fd8" text-anchor="middle">0.256 ms · 7 bits</text>
+  <!-- SF8 row -->
+  <text x="30" y="236" font-size="14" font-weight="700" fill="#d9730d">SF8</text>
+  <text x="30" y="254" font-size="12" fill="#57606a">2⁸ = 256 chips</text>
+  <rect x="170" y="208" width="400" height="56" fill="#f6f8fa" stroke="#d0d7de"/>
+  <line x1="170" y1="260" x2="570" y2="212" stroke="#d9730d" stroke-width="3"/>
+  <text x="370" y="280" font-size="12" fill="#d9730d" text-anchor="middle">0.512 ms · 8 bits</text>
+  <!-- axis labels -->
+  <text x="164" y="130" font-size="10" fill="#57606a" text-anchor="end">915.25 MHz</text>
+  <text x="164" y="178" font-size="10" fill="#57606a" text-anchor="end">914.75 MHz</text>
+  <text x="170" y="298" font-size="11" fill="#57606a">0</text>
+  <text x="570" y="298" font-size="11" fill="#57606a" text-anchor="end">0.512 ms</text>
+  <!-- explanation -->
+  <text x="600" y="140" font-size="13" fill="#1f2328">Each symbol sweeps the whole 500 kHz.</text>
+  <text x="600" y="160" font-size="13" fill="#1f2328">SF8 sweeps it twice as slowly, so each</text>
+  <text x="600" y="180" font-size="13" fill="#1f2328">symbol collects twice the energy:</text>
+  <text x="600" y="200" font-size="13" fill="#1f2328">the receiver can decode it 2.5 dB deeper</text>
+  <text x="600" y="220" font-size="13" fill="#1f2328">below the noise (SNR −10 dB, not −7.5 dB).</text>
+  <text x="600" y="248" font-size="13" fill="#1f2328">It carries 8 bits instead of 7, so bits per</text>
+  <text x="600" y="268" font-size="13" fill="#1f2328">second fall: 27.3 kbit/s → 15.6 kbit/s.</text>
+
+  <!-- ===== B: airtime to scale ===== -->
+  <text x="30" y="340" font-size="16" font-weight="700" fill="#1f2328">B · Airtime to scale, first 400 ms (1 ms = 1.9 px)</text>
+  <!-- x0=170, 400 ms = 760 px -->
+  <g font-size="11" fill="#57606a">
+    <line x1="170" y1="356" x2="930" y2="356" stroke="#d0d7de"/>
+    <line x1="170" y1="352" x2="170" y2="360" stroke="#8c959f"/><text x="170" y="372" text-anchor="middle">0</text>
+    <line x1="360" y1="352" x2="360" y2="360" stroke="#8c959f"/><text x="360" y="372" text-anchor="middle">100</text>
+    <line x1="550" y1="352" x2="550" y2="360" stroke="#8c959f"/><text x="550" y="372" text-anchor="middle">200</text>
+    <line x1="740" y1="352" x2="740" y2="360" stroke="#8c959f"/><text x="740" y="372" text-anchor="middle">300</text>
+    <line x1="930" y1="352" x2="930" y2="360" stroke="#8c959f"/><text x="930" y="372" text-anchor="middle">400 ms</text>
+  </g>
+  <!-- V6: 28.2 ms every 73.6 ms -->
+  <text x="30" y="404" font-size="14" font-weight="700" fill="#1d6fd8">V6 · SF7, k = 4</text>
+  <text x="30" y="420" font-size="11" fill="#57606a">28.2 ms every 73.6 ms</text>
+  <rect x="170" y="388" width="760" height="30" fill="#f6f8fa" stroke="#d0d7de"/>
+  <g fill="#1d6fd8">
+    <rect x="170.0" y="390" width="53.6" height="26"/>
+    <rect x="309.8" y="390" width="53.6" height="26"/>
+    <rect x="449.7" y="390" width="53.6" height="26"/>
+    <rect x="589.5" y="390" width="53.6" height="26"/>
+    <rect x="729.4" y="390" width="53.6" height="26"/>
+    <rect x="869.2" y="390" width="53.6" height="26"/>
+  </g>
+  <text x="935" y="408" font-size="11" font-weight="700" fill="#1d6fd8">38%</text>
+  <!-- V6b: 100 ms every 184 ms -->
+  <text x="30" y="456" font-size="14" font-weight="700" fill="#d9730d">V6b · SF8, k = 10</text>
+  <text x="30" y="472" font-size="11" fill="#57606a">100 ms every 184 ms</text>
+  <rect x="170" y="440" width="760" height="30" fill="#f6f8fa" stroke="#d0d7de"/>
+  <g fill="#d9730d">
+    <rect x="170.0" y="442" width="190.0" height="26"/>
+    <rect x="519.6" y="442" width="190.0" height="26"/>
+    <rect x="869.2" y="442" width="60.8" height="26"/>
+  </g>
+  <text x="935" y="460" font-size="11" font-weight="700" fill="#d9730d">54%</text>
+  <!-- SF8 at k=4, not a preset -->
+  <text x="30" y="508" font-size="14" font-weight="700" fill="#8c959f">SF8, k = 4</text>
+  <text x="30" y="524" font-size="11" fill="#8c959f">not a preset: 51.3 ms</text>
+  <text x="30" y="538" font-size="11" fill="#8c959f">every 73.6 ms</text>
+  <rect x="170" y="492" width="760" height="30" fill="#f6f8fa" stroke="#d0d7de"/>
+  <g fill="#d9730d" fill-opacity="0.35" stroke="#d9730d" stroke-dasharray="3 2">
+    <rect x="170.0" y="494" width="97.5" height="26"/>
+    <rect x="309.8" y="494" width="97.5" height="26"/>
+    <rect x="449.7" y="494" width="97.5" height="26"/>
+    <rect x="589.5" y="494" width="97.5" height="26"/>
+    <rect x="729.4" y="494" width="97.5" height="26"/>
+    <rect x="869.2" y="494" width="60.8" height="26"/>
+  </g>
+  <text x="935" y="512" font-size="11" font-weight="700" fill="#8c959f">70%</text>
+  <text x="170" y="546" font-size="12" fill="#57606a">At SF8 a k = 4 packet takes 70% of the channel, so V6b packs k = 10 samples per packet:</text>
+  <text x="170" y="562" font-size="12" fill="#57606a">fewer, longer packets. That is where its 284 ms latency comes from, not the slower symbols alone.</text>
+
+  <!-- ===== C: the figures ===== -->
+  <text x="30" y="604" font-size="16" font-weight="700" fill="#1f2328">C · What each one buys (LORA-PROTOCOL.md § Variants)</text>
+  <g font-size="12">
+    <text x="30" y="628" fill="#57606a">Preset</text>
+    <text x="170" y="628" fill="#57606a">Symbol</text>
+    <text x="255" y="628" fill="#57606a">SNR limit</text>
+    <text x="345" y="628" fill="#57606a">Sensitivity</text>
+    <text x="445" y="628" fill="#57606a">Link budget</text>
+    <text x="545" y="628" fill="#57606a">Latency</text>
+    <text x="625" y="628" fill="#57606a">Range vs V0 (free space / ground)</text>
+    <text x="845" y="628" fill="#57606a">TX current</text>
+    <line x1="30" y1="636" x2="930" y2="636" stroke="#d0d7de"/>
+    <text x="30" y="656" font-weight="700" fill="#1d6fd8">V6 · SF7</text>
+    <text x="170" y="656" fill="#1f2328">0.256 ms</text>
+    <text x="255" y="656" fill="#1f2328">−7.5 dB</text>
+    <text x="345" y="656" fill="#1f2328">−117 dBm</text>
+    <text x="445" y="656" fill="#1f2328">139 dB</text>
+    <text x="545" y="656" fill="#1f2328">102 ms</text>
+    <text x="625" y="656" fill="#1f2328">2.51× / 1.85×</text>
+    <text x="845" y="656" fill="#1f2328">45.3 mA</text>
+    <text x="30" y="680" font-weight="700" fill="#d9730d">V6b · SF8</text>
+    <text x="170" y="680" fill="#1f2328">0.512 ms</text>
+    <text x="255" y="680" fill="#1f2328">−10 dB</text>
+    <text x="345" y="680" fill="#1f2328">−120 dBm</text>
+    <text x="445" y="680" fill="#1f2328">142 dB</text>
+    <text x="545" y="680" fill="#1f2328">284 ms</text>
+    <text x="625" y="680" fill="#1f2328">3.55× / 2.33×</text>
+    <text x="845" y="680" fill="#1f2328">64.2 mA</text>
+  </g>
+</svg>

@@ -192,6 +192,12 @@ The leading "8 +" in Npl is the header block, which is always sent at 4/8.
 | **Share** | Tpacket / W, the fraction of time the radio is transmitting | — |
 | **Latency** | sample → BLE notify ≈ W + Tpacket (worst case, for the oldest sample in the batch) | — |
 
+![Latency from start to finish. A: the stages: IMU sample at t = 0, a batch of k samples (W = k × 18.4 ms), the LoRa packet on air (Tpacket), the gateway's decode, a BLE notify at the next connection event (0–15 ms at the 15 ms interval the gateway requests), and the app. B: to scale, the oldest and newest sample of one packet: V3b 56–71 ms oldest and 38–53 ms newest; V6 102–117 ms and 47–62 ms; V6b 284–299 ms and 148–163 ms, since iOS takes about 4 notifications per connection event and V6b's 10 frames need 3 events.](img/latency.svg)
+
+- **Batching is most of the latency:** the oldest sample waits the whole window W, the newest only one sample period. At k = 10 the batch alone is 184 ms.
+- **The BLE hop adds up to one connection interval** on top of W + Tpacket: 0–15 ms at the 15 ms the gateway requests, more if iOS grants longer (Link Params shows it). iOS takes about 4 notifications per event, so a k = 10 packet's last frames arrive up to two events later.
+- These are computed; the bench measurement (min, median, max per variant) is pending in § Walk-test results.
+
 ## Variants
 
 Every variant uses BW 500 kHz, Npre 8, explicit header, CRC on and a single channel at 915 MHz. **V0 is the current design.** The Format column refers to "Packet formats" below. PL is the motion-only payload: 9 + 18k for v1, 8 + 13k for v2.
@@ -210,6 +216,36 @@ Every variant uses BW 500 kHz, Npre 8, explicit header, CRC on and a single chan
 | V6b | v2 | V5 at 22 dBm | 138 | 100.0 ms | 54% | 284 ms | −120 | 142 dB | 3.55 / 2.33 | 64.2 mA |
 
 ¹ Share × TX current: ~45 mA at +14 dBm and ~118 mA at +22 dBm, from the SX1262 datasheet's typical figures. This is the radio's share only, not the whole board.
+
+**The variants at a glance:**
+
+![The variants plotted as latency against link budget, each dot sized by average radio current and coloured by SF and coding rate. V3b (56 ms, 131 dB), V3 (102 ms, 131 dB), V6 (102 ms, 139 dB, the default) and V6b (284 ms, 142 dB) form the upper-left edge; an arrow shows +8 dB of TX power taking V3 to V6, and another shows SF8 with k = 10 taking V6 to V6b for +3 dB and +182 ms. V5b at +22 dBm, not a preset, would sit at 151 ms and 142 dB. V0 is beaten by V1 and V4 by V3; V5 and V5b draw less current than V6 and V6b.](img/variants-map.svg)
+
+- **The upper-left edge is where to choose:** V3b for the lowest latency, V3 and V6 at 102 ms, V6b for the most range.
+- **V0 and V4 are beaten on all three measures shown** (by V1 and V3). V4's CR 4/7 only pays off at good SNR, which the chart doesn't show.
+- **V5b at +22 dBm** (not a preset) would reach V6b's 142 dB at 151 ms instead of 284 ms, for more current: see the k = 10 against k = 5 figure below.
+
+**SF7 against SF8**, as V6 and V6b:
+
+![SF7 against SF8 at 500 kHz. A: one SF7 symbol is a 0.256 ms chirp carrying 7 bits; one SF8 symbol is a 0.512 ms chirp carrying 8 bits, decodable 2.5 dB deeper below the noise. B: airtime to scale over 400 ms; V6 sends 28.2 ms every 73.6 ms (38%), V6b 100 ms every 184 ms (54%), and SF8 at k = 4 would need 51.3 ms every 73.6 ms (70%). C: symbol time, SNR limit, sensitivity, link budget, latency, range and TX current for both.](img/sf7-vs-sf8.svg)
+
+- **Each step of SF doubles the symbol.** It gains about 2.5–3 dB of sensitivity, and costs about twice the airtime for the same bytes.
+- **SF8 at V6's k = 4 would fill 70% of the channel**, so V6b sends k = 10 samples per packet. That, more than the slower symbols, is why its latency is 284 ms.
+
+**CR 4/5 against CR 4/7**, as V6 and V4 (V4 is V3 with CR 4/7; V3 and V6 differ only in TX power, so the coding comparison holds):
+
+![CR 4/5 against CR 4/7 at SF7 / 500 kHz. A: every 4 data bits become a 5-bit codeword with one parity bit, which only detects an error, or a 7-bit Hamming codeword, which repairs one wrong bit; interleaving spreads each codeword over CR + 4 symbols, so one damaged symbol is repaired at 4/7 and fails the CRC at 4/5. B: one 60-byte packet to scale: preamble, the header block at 4/8, then 18 blocks of 5 symbols (28.2 ms) or 7 symbols (37.4 ms). C: bits per 4, what it repairs, airtime, share, latency, sensitivity and when it helps.](img/cr45-vs-cr47.svg)
+
+- **The coding rate doesn't move sensitivity.** A symbol too weak to demodulate is lost at either rate. 4/7 repairs one damaged symbol per block of 7, which only matters when packets fail at good SNR: interference, or a burst mid-packet.
+- **It costs 9.2 ms per packet**, 38% → 51% of the channel at V6's rate. So the walk test must show losses at good SNR before V4 is worth choosing (the note under the table).
+
+**k = 10 against k = 5 at SF8**, as V6b and V5b, both at +22 dBm. **V5b at +22 dBm is not a preset**: V5b runs at +14 dBm, so its link budget, current and battery figures here are recomputed for +22 dBm.
+
+![SF8 with k = 10 against k = 5, both at +22 dBm. A: samples every 18.4 ms batched into packets; k = 10 sends 100 ms every 184 ms (54% busy) and the oldest sample waits 284 ms; k = 5 sends 59 ms every 92 ms (64% busy) and waits 151 ms. B: one lost packet costs 10 samples (184 ms of motion) at k = 10 and 5 samples (92 ms) at k = 5. C: airtime, packets per second, airtime per sample, share, latency, link budget, TX current and battery life for both.](img/sf8-k10-vs-k5.svg)
+
+- **Same range, different shape.** Both are SF8 at +22 dBm: −120 dBm sensitivity and a 142 dB link budget.
+- **k = 5 halves the latency** (284 → 151 ms) **and the hole one lost packet leaves** (184 → 92 ms of motion). A fade of length D costs about (D + Tpacket) ÷ 18.4 samples, so the shorter packet also loses about 2 fewer samples per fade.
+- **It pays the fixed preamble and header twice as often:** 18% more airtime per sample, 64% of the channel against 54%, and about 75.7 mA against 64.2 mA, roughly 2.6 h against 3.1 h on the 200 mAh pack (radio only).
 
 **Notes:**
 - **Trailer cost** (v2, SF7, checked by script):
@@ -726,6 +762,17 @@ splits a file.
 variant, LQ, RSSI and SNR, boost on and off, and which variants pass LQ ≥ 99%.
 Plus the antenna-height check and the bench latency measurements (min, median,
 max per variant).
+
+### Link budget on the 2026-10-24 walk (V6)
+
+Scenario 1, V6, 6 dBi antennas at both ends: the sensor's on a vehicle roof mount, the receiver's carried on foot, mostly in a pocket (#337). Distances are from the sensor; no positions are recorded here (#327).
+
+![Link budget at V6. The sensor transmits +22 dBm. At 100, 500, 800 and 1300 m, free space with the 6 dBi antennas at both ends would deliver −38, −52, −56 and −60 dBm; the walk received about −84, −88, −104 and −108 dBm, 36–48 dB less, and LQ fell from 98% to 57%. Reference lines: the noise floor read on the walk (−105 dBm), the SF7 limit that floor implies (about −113 dBm), and the datasheet limits for SF7 (−117) and SF8 (−120). At 1300 m about 5 dB of margin was left. A side panel sizes what each step buys: +8 dB from TX power (already in V6), 12 dB from the two 6 dBi antennas (already on the walk), +2.5 dB from SF8, and 5–15 dB typical from moving the receiver's antenna off the body and raising it.](img/link-budget.svg)
+
+- **The walk lost 36–48 dB more than free space with its 6 dBi antennas**: ground, buildings, the body, the pocket and the roof mount's cable. A pocketed antenna doesn't deliver its rated gain. That excess, not the preset, sets the range.
+- **The margin that matters is the one from SNR** (the app's `margin_db`): about 17 dB to 500 m, 8–9 dB at 800–1000 m, and about 5 dB at 1300 m, where LQ was 57%.
+- **The SF7 limit came out about 4 dB worse than the datasheet** (≈ −113 against −117 dBm), judged from the noise floor the receiver reads plus SF7's −7.5 dB SNR limit. Either the noise floor is above thermal or the RSSI reads high; absolute calibration hasn't been checked.
+- **Of the steps on the right, only placement is sized like the loss.** SF8 buys about 2.5 dB; moving and raising the receive antenna is typically 5–15 dB, and is the next thing to measure (a stationary A/B at about 750 m).
 
 ## Chosen preset
 
