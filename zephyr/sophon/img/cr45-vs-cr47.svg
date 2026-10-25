@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" width="960" height="700" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>CR 4/5 against CR 4/7 at SF7 / 500 kHz: V6 against V4</title>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="700" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">CR 4/5 against CR 4/7 at SF7 / 500 kHz · V6 against V4</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">The coding rate adds check bits. It doesn't change sensitivity; it repairs symbols damaged at good SNR, for more airtime.</text>
+
+  <!-- ===== A: one codeword ===== -->
+  <text x="30" y="104" font-size="16" font-weight="700" fill="#1f2328">A · Every 4 data bits become one codeword</text>
+  <text x="30" y="140" font-size="14" font-weight="700" fill="#1d6fd8">CR 4/5</text>
+  <text x="30" y="158" font-size="12" fill="#57606a">V6, V3 and most presets</text>
+  <rect x="170" y="124" width="34" height="34" rx="4" fill="#dbe7f5" stroke="#1d6fd8"/><text x="187" y="146" font-size="13" text-anchor="middle" fill="#1f2328">d1</text> <rect x="210" y="124" width="34" height="34" rx="4" fill="#dbe7f5" stroke="#1d6fd8"/><text x="227" y="146" font-size="13" text-anchor="middle" fill="#1f2328">d2</text> <rect x="250" y="124" width="34" height="34" rx="4" fill="#dbe7f5" stroke="#1d6fd8"/><text x="267" y="146" font-size="13" text-anchor="middle" fill="#1f2328">d3</text> <rect x="290" y="124" width="34" height="34" rx="4" fill="#dbe7f5" stroke="#1d6fd8"/><text x="307" y="146" font-size="13" text-anchor="middle" fill="#1f2328">d4</text> <rect x="330" y="124" width="34" height="34" rx="4" fill="#eef1f4" stroke="#8c959f"/><text x="347" y="146" font-size="13" text-anchor="middle" fill="#1f2328">p</text>
+  <text x="380" y="138" font-size="13" fill="#1f2328">1 parity bit: <tspan font-weight="700">detects</tspan> a wrong bit, can't repair it.</text>
+  <text x="380" y="158" font-size="13" fill="#57606a">+25% bits. A damaged codeword is left to the packet CRC.</text>
+  <text x="30" y="224" font-size="14" font-weight="700" fill="#8250df">CR 4/7</text>
+  <text x="30" y="242" font-size="12" fill="#57606a">V4</text>
+  <rect x="170" y="208" width="34" height="34" rx="4" fill="#ebe2fb" stroke="#8250df"/><text x="187" y="230" font-size="13" text-anchor="middle" fill="#1f2328">d1</text> <rect x="210" y="208" width="34" height="34" rx="4" fill="#ebe2fb" stroke="#8250df"/><text x="227" y="230" font-size="13" text-anchor="middle" fill="#1f2328">d2</text> <rect x="250" y="208" width="34" height="34" rx="4" fill="#ebe2fb" stroke="#8250df"/><text x="267" y="230" font-size="13" text-anchor="middle" fill="#1f2328">d3</text> <rect x="290" y="208" width="34" height="34" rx="4" fill="#ebe2fb" stroke="#8250df"/><text x="307" y="230" font-size="13" text-anchor="middle" fill="#1f2328">d4</text> <rect x="330" y="208" width="34" height="34" rx="4" fill="#eef1f4" stroke="#8c959f"/><text x="347" y="230" font-size="13" text-anchor="middle" fill="#1f2328">p1</text> <rect x="370" y="208" width="34" height="34" rx="4" fill="#eef1f4" stroke="#8c959f"/><text x="387" y="230" font-size="13" text-anchor="middle" fill="#1f2328">p2</text> <rect x="410" y="208" width="34" height="34" rx="4" fill="#eef1f4" stroke="#8c959f"/><text x="427" y="230" font-size="13" text-anchor="middle" fill="#1f2328">p3</text>
+  <text x="460" y="222" font-size="13" fill="#1f2328">Hamming code: <tspan font-weight="700">repairs</tspan> one wrong bit per codeword.</text>
+  <text x="460" y="242" font-size="13" fill="#57606a">+75% bits.</text>
+  <text x="30" y="282" font-size="13" fill="#1f2328">LoRa interleaves SF codewords over CR + 4 symbols, one bit of each codeword per symbol. A symbol hit by noise or a</text>
+  <text x="30" y="300" font-size="13" fill="#1f2328">short burst of interference damages one bit in each of 7 codewords: at 4/7 all 7 are repaired; at 4/5 the packet fails its CRC.</text>
+
+  <!-- ===== B: packet to scale ===== -->
+  <text x="30" y="342" font-size="16" font-weight="700" fill="#1f2328">B · One packet to scale: PL 60 B, k = 4 (1 ms = 19 px)</text>
+  <g font-size="11" fill="#57606a">
+    <line x1="170" y1="358" x2="930" y2="358" stroke="#d0d7de"/>
+    <line x1="170" y1="354" x2="170" y2="362" stroke="#8c959f"/><text x="170" y="374" text-anchor="middle">0</text>
+    <line x1="360" y1="354" x2="360" y2="362" stroke="#8c959f"/><text x="360" y="374" text-anchor="middle">10</text>
+    <line x1="550" y1="354" x2="550" y2="362" stroke="#8c959f"/><text x="550" y="374" text-anchor="middle">20</text>
+    <line x1="740" y1="354" x2="740" y2="362" stroke="#8c959f"/><text x="740" y="374" text-anchor="middle">30</text>
+    <line x1="930" y1="354" x2="930" y2="362" stroke="#8c959f"/><text x="930" y="374" text-anchor="middle">40 ms</text>
+  </g>
+  <text x="30" y="404" font-size="14" font-weight="700" fill="#1d6fd8">V6 · CR 4/5</text>
+  <text x="30" y="420" font-size="11" fill="#57606a">98 payload symbols</text>
+  <text x="30" y="435" font-size="11" font-weight="700" fill="#1d6fd8">28.2 ms</text>
+  <rect x="170" y="388" width="760" height="30" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="170.0" y="390" width="59.6" height="26" fill="#d0d7de"/>
+    <rect x="229.6" y="390" width="38.9" height="26" fill="#8c959f"/>
+    <rect x="268.5" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="292.8" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="317.1" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="341.5" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="365.8" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="390.1" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="414.4" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="438.7" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="463.1" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="487.4" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="511.7" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="536.0" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="560.3" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="584.7" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="609.0" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="633.3" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+    <rect x="657.6" y="390" width="24.3" height="26" fill="#1d6fd8"/>
+    <rect x="681.9" y="390" width="24.3" height="26" fill="#6ea3ea"/>
+  <text x="30" y="464" font-size="14" font-weight="700" fill="#8250df">V4 · CR 4/7</text>
+  <text x="30" y="480" font-size="11" fill="#57606a">134 payload symbols</text>
+  <text x="30" y="495" font-size="11" font-weight="700" fill="#8250df">37.4 ms</text>
+  <rect x="170" y="448" width="760" height="30" fill="#f6f8fa" stroke="#d0d7de"/>
+    <rect x="170.0" y="450" width="59.6" height="26" fill="#d0d7de"/>
+    <rect x="229.6" y="450" width="38.9" height="26" fill="#8c959f"/>
+    <rect x="268.5" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="302.5" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="336.6" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="370.6" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="404.7" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="438.7" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="472.8" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="506.8" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="540.9" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="574.9" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="609.0" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="643.0" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="677.1" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="711.1" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="745.2" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="779.2" y="450" width="34.0" height="26" fill="#b493ec"/>
+    <rect x="813.3" y="450" width="34.0" height="26" fill="#8250df"/>
+    <rect x="847.3" y="450" width="34.0" height="26" fill="#b493ec"/>
+  <g font-size="11" fill="#57606a">
+    <rect x="170" y="500" width="14" height="12" fill="#d0d7de"/><text x="190" y="510">preamble (12.25 symbols)</text>
+    <rect x="350" y="500" width="14" height="12" fill="#8c959f"/><text x="370" y="510">header block, always 4/8 (8 symbols)</text>
+    <rect x="590" y="500" width="14" height="12" fill="#1d6fd8"/><rect x="604" y="500" width="14" height="12" fill="#8250df"/><text x="624" y="510">18 interleaved blocks of CR + 4 symbols</text>
+  </g>
+  <text x="170" y="540" font-size="12" fill="#57606a">Same 60 bytes, same SF: each block grows from 5 symbols to 7, so the packet is 9.2 ms longer, and at one packet</text>
+  <text x="170" y="556" font-size="12" fill="#57606a">every 73.6 ms the channel goes from 38% to 51% busy.</text>
+
+  <!-- ===== C: the figures ===== -->
+  <text x="30" y="604" font-size="16" font-weight="700" fill="#1f2328">C · What each one buys (LORA-PROTOCOL.md § Variants)</text>
+  <g font-size="12">
+    <text x="30" y="628" fill="#57606a">Preset</text>
+    <text x="170" y="628" fill="#57606a">Bits per 4</text>
+    <text x="260" y="628" fill="#57606a">Repairs</text>
+    <text x="400" y="628" fill="#57606a">Tpacket</text>
+    <text x="480" y="628" fill="#57606a">Share</text>
+    <text x="545" y="628" fill="#57606a">Latency</text>
+    <text x="625" y="628" fill="#57606a">Sensitivity</text>
+    <text x="720" y="628" fill="#57606a">Helps when</text>
+    <line x1="30" y1="636" x2="930" y2="636" stroke="#d0d7de"/>
+    <text x="30" y="656" font-weight="700" fill="#1d6fd8">V6 · CR 4/5</text>
+    <text x="170" y="656" fill="#1f2328">5</text>
+    <text x="260" y="656" fill="#1f2328">nothing (detects)</text>
+    <text x="400" y="656" fill="#1f2328">28.2 ms</text>
+    <text x="480" y="656" fill="#1f2328">38%</text>
+    <text x="545" y="656" fill="#1f2328">102 ms</text>
+    <text x="625" y="656" fill="#1f2328">−117 dBm</text>
+    <text x="720" y="656" fill="#1f2328">—</text>
+    <text x="30" y="680" font-weight="700" fill="#8250df">V4 · CR 4/7</text>
+    <text x="170" y="680" fill="#1f2328">7</text>
+    <text x="260" y="680" fill="#1f2328">1 bit per codeword</text>
+    <text x="400" y="680" fill="#1f2328">37.4 ms</text>
+    <text x="480" y="680" fill="#1f2328">51%</text>
+    <text x="545" y="680" fill="#1f2328">111 ms</text>
+    <text x="625" y="680" fill="#1f2328">−117 dBm</text>
+    <text x="720" y="680" fill="#1f2328">losses at good SNR (interference)</text>
+  </g>
+</svg>

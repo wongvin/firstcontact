@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-24
+
+### docs: LoRa trade-off figures (#337)
+
+- LORA-PROTOCOL.md gains six figures: latency from IMU to app, the variants on one latency-against-link-budget chart, SF7 against SF8, CR 4/5 against CR 4/7, and k = 10 against k = 5 at SF8 (V5b at +22 dBm marked as not a preset).
+- § Walk-test results: the link budget on the 2026-10-24 walk, 6 dBi at both ends, 36–48 dB below free space, about 5 dB of margin left at 1300 m.
+
 ## 2026-10-22
 
 ### feat: update a board's firmware from the iPhone (#357)
