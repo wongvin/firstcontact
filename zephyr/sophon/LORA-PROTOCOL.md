@@ -445,6 +445,15 @@ configured (PROTOCOL.md § Config frame), only that sensor. From firmware
 - **With no sensor locked**, untagged packets can't be attributed and are
   dropped as wrong peer until a status trailer names a sensor, normally within
   a second.
+- **A configured peer keeps its stream across a fade** (from 2.38.0, #360). It is
+  the one sensor on the channel, so an untagged packet is accepted up to 20 s
+  after the last one, not 5 s, if its `seq` fits the time elapsed: the packets
+  that end a fade are kept, and the gap before them counts as missing.
+- **During a walk-test recording the app sets the peer** (#360). Once the
+  recording's gateway has locked onto a sensor with peer **any**, the app writes
+  that sensor as the peer, with restart, and writes the previous config back
+  at Stop, with restart, or when the gateway is next read if it's out of reach
+  then. The CSV logs `peer held` and `peer released` events.
 - **A quiet sensor's lock is released.** With peer **any**, if the locked
   sensor's status trailers stop for **5 s**, the gateway unlocks (`sensor_id`
   reads 0) and locks onto the next sensor heard. If that's the same sensor
@@ -456,6 +465,10 @@ configured (PROTOCOL.md § Config frame), only that sensor. From firmware
   channel collide on air every few seconds anyway (seen on the bench,
   2026-10-22), so a shared channel doesn't work whatever the gateway does. A
   sensor tag in every packet was considered and rejected (#354).
+
+![How a gateway attributes packets to its locked sensor, firmware 2.32.0. A: three states. Unlocked (sensor_id 0) drops untagged packets as wrong peer until a status trailer names a sensor. Locked and anchored relays untagged packets whose seq continues the stream, counting any gap as missing, and counts the rest as wrong peer. After 5 s with nothing accepted the anchor goes stale, and untagged packets are dropped until the locked sensor's trailer re-anchors. With peer any, 5 s without the locked sensor's trailer releases the lock; a configured peer is never released. B: a fade from 2 to 8.4 s; the lock is released at 6.5 s, packets heard from 8.4 s are dropped as wrong peer, and the trailer at 9.4 s relocks the same sensor and counts the whole gap as missing.](img/sensor-lock.svg)
+
+The figure's panel B is the case #360 addressed: the packets that end a long fade arrive before the next status trailer, so with peer any they're dropped. From 2.38.0 a configured peer keeps them, and a walk-test recording configures the peer for its length.
 
 **One sensor per channel.** To run more than one sensor, give each
 sensor–gateway pair its own frequency: **Configuration › Edit… › Set

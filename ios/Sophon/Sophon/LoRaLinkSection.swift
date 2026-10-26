@@ -454,7 +454,8 @@ private struct WalkTestPromptModifier: ViewModifier {
                 }
             } message: { kind in
                 Text(kind == .note
-                     ? "Describe the setup: antennas, where the receiver is carried. Optional."
+                     ? "Describe the setup: antennas, where the receiver is carried. Optional. With peer Any, "
+                        + "the gateway is set to its sensor for the walk: it restarts once now and once at Stop."
                      : "What changed? It is logged at this moment.")
             }
             .onChange(of: prompt) { _, new in

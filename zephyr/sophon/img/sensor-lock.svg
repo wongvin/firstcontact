@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" width="960" height="720" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>How a gateway attributes packets to its locked sensor (firmware 2.32.0, #350)</title>
+  <defs>
+    <marker id="ah-1f2328" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f2328"/></marker>
+    <marker id="ah-bf8700" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#bf8700"/></marker>
+    <marker id="ah-1a7f37" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1a7f37"/></marker>
+    <marker id="ah-57606a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#57606a"/></marker>
+  </defs>
+
+  <!-- background, so the drawing reads the same in dark mode -->
+  <rect width="960" height="720" fill="#ffffff"/>
+  <text x="30" y="40" font-size="22" font-weight="700" fill="#1f2328">Locking onto a sensor: which packets a gateway relays</text>
+  <text x="30" y="64" font-size="14" fill="#57606a">Only a status trailer (about once a second) names its sensor; the packets between are untagged. Firmware 2.32.0 (#350).</text>
+  <text x="30" y="100" font-size="16" font-weight="700" fill="#1f2328">A · The rules</text>
+
+    <rect x="330" y="118" width="615" height="262" rx="14" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="6 4"/>
+  <text x="346" y="140" font-size="13" font-weight="700" fill="#57606a">Locked onto one sensor · sensor_id = XXXX</text>
+  <rect x="30" y="180" width="230" height="150" rx="10" fill="#ffffff" stroke="#8c959f" stroke-width="1.5"/>
+  <text x="44" y="204" font-size="14" font-weight="700" fill="#1f2328">Unlocked</text>
+  <text x="44" y="226" font-size="11.5" fill="#57606a">sensor_id reads 0</text>
+  <text x="44" y="243" font-size="11.5" fill="#cf222e">untagged packet → dropped,</text>
+  <text x="44" y="260" font-size="11.5" fill="#cf222e">   wrong peer (can't attribute)</text>
+  <text x="44" y="277" font-size="11.5" fill="#57606a">waits for a status trailer,</text>
+  <text x="44" y="294" font-size="11.5" fill="#57606a">   normally within a second</text>
+  <rect x="350" y="160" width="260" height="170" rx="10" fill="#ffffff" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="364" y="184" font-size="14" font-weight="700" fill="#1f2328">Anchored</text>
+  <text x="364" y="206" font-size="11.5" fill="#1f2328">untagged, seq continues the stream</text>
+  <text x="364" y="223" font-size="11.5" fill="#1a7f37">   → relayed; any gap → missing</text>
+  <text x="364" y="240" font-size="11.5" fill="#1f2328">untagged, seq out of bound</text>
+  <text x="364" y="257" font-size="11.5" fill="#cf222e">   → wrong peer</text>
+  <text x="364" y="274" font-size="11.5" fill="#1f2328">trailer from the locked sensor</text>
+  <text x="364" y="291" font-size="11.5" fill="#1a7f37">   → relayed, re-anchors</text>
+  <rect x="700" y="160" width="230" height="170" rx="10" fill="#ffffff" stroke="#bf8700" stroke-width="1.5"/>
+  <text x="714" y="184" font-size="14" font-weight="700" fill="#1f2328">Anchor stale</text>
+  <text x="714" y="206" font-size="11.5" fill="#57606a">nothing accepted for 5 s</text>
+  <text x="714" y="223" font-size="11.5" fill="#cf222e">untagged packet → dropped,</text>
+  <text x="714" y="240" font-size="11.5" fill="#cf222e">   wrong peer (waits)</text>
+  <text x="714" y="257" font-size="11.5" fill="#1f2328">trailer from the locked sensor</text>
+  <text x="714" y="274" font-size="11.5" fill="#1a7f37">   → re-anchors (see arrow)</text>
+  <line x1="262" y1="230" x2="346" y2="230" stroke="#1f2328" stroke-width="2" marker-end="url(#ah-1f2328)"/>
+  <text x="304" y="206" font-size="11" fill="#1f2328" text-anchor="middle">status trailer</text>
+  <text x="304" y="220" font-size="11" fill="#1f2328" text-anchor="middle">names a sensor¹</text>
+  <line x1="612" y1="205" x2="696" y2="205" stroke="#bf8700" stroke-width="2" marker-end="url(#ah-bf8700)"/>
+  <text x="654" y="184" font-size="11" fill="#bf8700" text-anchor="middle">5 s, nothing</text>
+  <text x="654" y="198" font-size="11" fill="#bf8700" text-anchor="middle">accepted</text>
+  <line x1="696" y1="285" x2="614" y2="285" stroke="#1a7f37" stroke-width="2" marker-end="url(#ah-1a7f37)"/>
+  <text x="654" y="302" font-size="11" fill="#1a7f37" text-anchor="middle">its trailer²</text>
+  <text x="346" y="356" font-size="11.5" fill="#cf222e">In either locked state, a status trailer naming another sensor → wrong peer.</text>
+  <text x="346" y="372" font-size="11.5" fill="#57606a">A configured peer is never released.</text>
+  <path d="M 640 380 L 640 405 L 145 405 L 145 334" fill="none" stroke="#57606a" stroke-width="2" marker-end="url(#ah-57606a)"/>
+  <text x="392" y="422" font-size="11.5" fill="#57606a" text-anchor="middle">peer any: the locked sensor's status trailers stop for 5 s → released</text>
+  <text x="30" y="452" font-size="11" fill="#57606a">¹ With peer any, the first sensor heard; with a configured peer, only that one. Relocking the same sensor keeps its stream, so a fade across a release still counts.</text>
+  <text x="30" y="468" font-size="11" fill="#57606a">² Re-anchoring counts the gap as missing if it's within what 20 s allows (a fade); a bigger jump is the sensor's restart, not counted.</text>
+
+    <text x="30" y="510" font-size="16" font-weight="700" fill="#1f2328">B · A fade longer than 5 s, with peer any (the 2026-10-24 walk, #360)</text>
+  <text x="170.0" y="530" font-size="11" fill="#57606a" text-anchor="middle">0 s</text>
+  <line x1="170.0" y1="536" x2="170.0" y2="620" stroke="#eaeef2"/>
+  <text x="296.7" y="530" font-size="11" fill="#57606a" text-anchor="middle">2 s</text>
+  <line x1="296.7" y1="536" x2="296.7" y2="620" stroke="#eaeef2"/>
+  <text x="423.3" y="530" font-size="11" fill="#57606a" text-anchor="middle">4 s</text>
+  <line x1="423.3" y1="536" x2="423.3" y2="620" stroke="#eaeef2"/>
+  <text x="550.0" y="530" font-size="11" fill="#57606a" text-anchor="middle">6 s</text>
+  <line x1="550.0" y1="536" x2="550.0" y2="620" stroke="#eaeef2"/>
+  <text x="676.7" y="530" font-size="11" fill="#57606a" text-anchor="middle">8 s</text>
+  <line x1="676.7" y1="536" x2="676.7" y2="620" stroke="#eaeef2"/>
+  <text x="803.3" y="530" font-size="11" fill="#57606a" text-anchor="middle">10 s</text>
+  <line x1="803.3" y1="536" x2="803.3" y2="620" stroke="#eaeef2"/>
+  <text x="930.0" y="530" font-size="11" fill="#57606a" text-anchor="middle">12 s</text>
+  <line x1="930.0" y1="536" x2="930.0" y2="620" stroke="#eaeef2"/>
+  <text x="30" y="564" font-size="12" fill="#1f2328">status trailers</text>
+  <text x="30" y="606" font-size="12" fill="#1f2328">packets</text>
+  <rect x="296.7" y="588" width="405.3" height="28" fill="#eaeef2"/>
+  <text x="461.3" y="607" font-size="11.5" fill="#57606a" text-anchor="middle">fade: nothing heard</text>
+  <rect x="170.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="174.7" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="179.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="184.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="188.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="193.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="198.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="202.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="207.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="212.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="216.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="221.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="225.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="230.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="235.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="239.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="244.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="249.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="253.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="258.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="263.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="267.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="272.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="277.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="281.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="286.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="291.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="295.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <text x="707.1" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="711.7" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="716.4" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="721.0" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="725.7" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="730.4" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="735.0" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="739.7" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="744.3" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="749.0" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="753.7" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="758.3" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <text x="763.0" y="607" font-size="12" font-weight="700" fill="#cf222e" text-anchor="middle">×</text>
+  <rect x="766.7" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="771.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="776.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="780.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="785.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="790.0" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="794.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="799.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="803.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="808.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="813.3" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="817.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="822.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="827.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="831.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="836.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="841.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="845.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="850.6" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="855.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="859.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="864.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="869.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="873.9" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="878.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="883.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="887.8" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="892.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="897.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="901.8" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="906.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="911.2" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="915.8" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="920.5" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="925.1" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <rect x="929.8" y="590" width="2.2" height="24" fill="#1a7f37"/>
+  <path d="M 201.7 554 l 6 6 l -6 6 l -6 -6 z" fill="#1d6fd8"/>
+  <path d="M 265.0 554 l 6 6 l -6 6 l -6 -6 z" fill="#1d6fd8"/>
+  <path d="M 765.3 554 l 6 6 l -6 6 l -6 -6 z" fill="#1d6fd8"/>
+  <path d="M 828.7 554 l 6 6 l -6 6 l -6 -6 z" fill="#1d6fd8"/>
+  <path d="M 892.0 554 l 6 6 l -6 6 l -6 -6 z" fill="#1d6fd8"/>
+  <line x1="581.7" y1="540" x2="581.7" y2="620" stroke="#57606a" stroke-dasharray="3 3"/>
+  <text x="575.7" y="564" font-size="10.5" fill="#57606a" text-anchor="end">released: 5 s without its trailer</text>
+  <text x="733.7" y="583" font-size="10.5" fill="#cf222e" text-anchor="middle">heard, dropped (unlocked)</text>
+  <line x1="296.7" y1="630" x2="765.3" y2="630" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="531.0" y="646" font-size="11.5" fill="#cf222e" text-anchor="middle">all counted as missing once the trailer at 9.4 s relocks the same sensor</text>
+  <text x="30" y="676" font-size="12" fill="#57606a">Packets that get through after the fade but before the next status trailer are thrown away as wrong peer, and their samples count as missing.</text>
+  <text x="30" y="692" font-size="12" fill="#57606a">With peer any. On the 2026-10-24 walk that was 171 of the sensor's own packets. From 2.38.0 a configured peer keeps them,</text>
+  <text x="30" y="708" font-size="12" fill="#57606a">and a walk-test recording sets the peer for its length (#360).</text>
+</svg>

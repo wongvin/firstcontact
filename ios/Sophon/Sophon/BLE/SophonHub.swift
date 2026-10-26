@@ -33,6 +33,8 @@ final class SophonHub: NSObject {
     /// Internal, not private, for `SophonHub+Config.swift` (#329).
     var configCharacteristics: [UUID: CBCharacteristic] = [:]
     let walkTest = WalkTestRecorder() // #309: hub-owned so a recording outlives the detail view
+    /// The gateway peer set for a walk-test recording, to restore at Stop (#360).
+    var peerHold: PeerHold?
     /// The image this iPhone holds, and the update using it (#357). Hub-owned
     /// like `walkTest`: an update outlives leaving the detail view.
     let firmware = FirmwareStore()
@@ -74,6 +76,7 @@ final class SophonHub: NSObject {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
         updater.imageCheck = imageCheck // each waits for the other's SMP (#359)
+        walkTest.onStopping = { [weak self] in self?.releaseWalkTestPeer() }
 
         // Frames missed while the app is not running are not link loss. iOS
         // says exactly when that starts, which beats inferring it from how long

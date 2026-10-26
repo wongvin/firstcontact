@@ -26,6 +26,9 @@ cc "${CFLAGS[@]}" "$APP_DIR/src/lora_codec.c" "$APP_DIR/tests/lora_codec/test_co
   -o "$OUT/test_codec"
 cc "${CFLAGS[@]}" "$APP_DIR/src/lora_ber.c" "$APP_DIR/tests/lora_ber/test_ber.c" \
   -o "$OUT/test_ber"
+cc "${CFLAGS[@]}" "$APP_DIR/src/lora_lock.c" "$APP_DIR/tests/lora_lock/test_lock.c" \
+  -o "$OUT/test_lock"
 
 "$OUT/test_codec"
 "$OUT/test_ber"
+"$OUT/test_lock"

@@ -55,7 +55,7 @@ final class WalkTestRecorder: NSObject {
     /// first record: only then are the gateway, the sensor and the config known.
     @ObservationIgnored private var session: SessionKey?
     @ObservationIgnored private var columns: [String] = []
-    @ObservationIgnored private var gatewayID: UUID?
+    @ObservationIgnored private(set) var gatewayID: UUID?
     /// Events from before the preamble, written straight after it.
     @ObservationIgnored private var pending: [PendingEvent] = []
     /// Records waiting for the gateway's Config read, with the events that came
@@ -148,8 +148,13 @@ final class WalkTestRecorder: NSObject {
         UIApplication.shared.isIdleTimerDisabled = true
     }
 
+    /// Called as a recording stops, while it can still log: the hub restores
+    /// the gateway's peer it held for the walk (#360).
+    @ObservationIgnored var onStopping: (() -> Void)?
+
     func stop() {
         guard isRecording else { return }
+        onStopping?()
         drain()
         // A recording that never got a record still says what it was.
         if session == nil { writePreamble(device: nil, link: nil, sensor: nil, rotating: false) }
@@ -170,6 +175,12 @@ final class WalkTestRecorder: NSObject {
         // Before the first record the preamble carries it; only a pin moved
         // after rows exist is an event (review finding 7).
         if let pin, isRecording, session != nil { logEvent("pin: " + Self.pinText(pin)) }
+    }
+
+    /// An event the app itself logs at this moment, such as the peer hold (#360).
+    func noteEvent(_ text: String) {
+        guard isRecording else { return }
+        logEvent(text)
     }
 
     /// A note from the walker at this moment -- "antenna in hand", "stop 3".

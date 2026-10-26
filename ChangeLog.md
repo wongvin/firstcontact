@@ -2,6 +2,12 @@
 
 ## 2026-10-25
 
+### fix: hold the gateway's peer during a walk test (#360)
+
+- **Firmware 2.38.0:** a configured peer keeps its stream across a fade of up to 20 s: an untagged packet whose `seq` fits the time elapsed is kept, not dropped as wrong peer while waiting for a status trailer. Peer "any" is unchanged. The rule moved to `lora_lock.c`, host-tested by `scripts/test-codec.sh`.
+- **App:** once a walk-test recording's gateway locks onto a sensor with peer Any, the app writes that sensor as the peer (with restart) and writes the previous config back at Stop; `peer held` / `peer released` events in the CSV.
+- LORA-PROTOCOL.md § Locking onto a sensor with the lock figure; FIELD-TEST.md: no peer to set.
+
 ### feat: transporter role measures LoRa bit errors (#359)
 
 - **Firmware 2.37.0:** a board set to **Transporter** sends its own running image (slot 0, header + body) over LoRa with the payload CRC off, on the sensor's packet schedule. A gateway with the same image compares every bit, header included: a damaged header is rebuilt from the last good packet, and a header check seeded with the image hash flags a mismatched image.

@@ -33,6 +33,7 @@ target_sources(app PRIVATE
   src/imu.c
   src/lora_ber.c
   src/lora_codec.c
+  src/lora_lock.c
   src/lora_image.c
   src/lora_link.c
   src/lora_presets.c
