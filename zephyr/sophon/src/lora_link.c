@@ -35,6 +35,7 @@
 #include "config.h"
 #include "lora_ber.h"
 #include "lora_codec.h"
+#include "lora_lock.h"
 #include "lora_image.h"
 #include "lora_link.h"
 #include "lora_presets.h"
@@ -71,7 +72,8 @@ static uint32_t log_every = 1;
  *    that sensor's stream: the gap since the last accepted packet can be no more
  *    than the elapsed time allows at 54.3 Hz (SAMPLES_PER_S_X10) plus two
  *    packets' slack. Another sensor's seq lands elsewhere and is a wrong peer;
- *  - the anchor is trusted for ANCHOR_HOLD_MS only. After that much silence an
+ *  - the anchor is trusted for ANCHOR_HOLD_MS only (FADE_COUNT_MS for a configured
+ *    peer, the one sensor on the channel: #360). After that much silence an
  *    untagged packet waits for a status trailer from the locked sensor to
  *    re-anchor the stream. That bounds the tolerance (about 300 samples) so a
  *    quiet locked sensor can't hand its stream to another;
@@ -84,19 +86,17 @@ static uint32_t log_every = 1;
  * be mixed. That's accepted: two sensors on one channel collide anyway, so the
  * rule is one sensor per channel (LORA-PROTOCOL.md § Locking onto a sensor).
  */
-#define SAMPLES_PER_S_X10 543
-#define SEQ_SLACK         (2 * LORA_K_LIMIT)
-#define ANCHOR_HOLD_MS    5000
-#define FADE_COUNT_MS     20000 /* ~1086 samples, as the old 1024-sample rule */
+/* SAMPLES_PER_S_X10, SEQ_SLACK, ANCHOR_HOLD_MS and FADE_COUNT_MS, and the
+ * untagged-packet rule itself, are in lora_lock.h, where they're host-tested.
+ * A configured peer (#360) keeps its stream across a fade: see there. */
 
 /* With "any" peer, a lock is released when its sensor's status trailers stop
  * for this long, so the next sensor heard can be locked onto (#350). */
 #define PEER_SILENT_MS 5000
 
-/* Samples the elapsed time allows, plus slack; ms is capped by the caller. */
 static uint32_t seq_bound(int64_t ms)
 {
-	return (uint32_t)MAX(ms, 0) * SAMPLES_PER_S_X10 / 10000U + SEQ_SLACK;
+	return lora_lock_seq_bound(ms);
 }
 
 /* The preset's TX power, unless the stored config overrides it (#329). */
@@ -372,6 +372,9 @@ static int64_t last_rx_ms = -1; /* any packet, good or bad */
 
 /* From the stored config at start (#329); 0 locks onto the first sensor heard. */
 static uint16_t peer_id = CONFIG_SOPHON_LORA_PEER_ID;
+/* The peer came from the config, not a lock on the first sensor heard: the one
+ * sensor on this channel, whose stream is kept across a fade (#360). */
+static bool peer_configured;
 
 uint16_t lora_link_peer_id(void)
 {
@@ -832,8 +835,9 @@ static void gateway_rx(const struct device *dev, uint8_t *data, uint16_t size, i
 		uint16_t gap = (uint16_t)(seq0 - last_seq - 1);
 
 		if (!pkt.has_status) {
-			/* The locked sensor's only if it continues its stream, recently. */
-			if (since > ANCHOR_HOLD_MS || gap > seq_bound(since)) {
+			/* The locked sensor's only if it continues its stream, recently:
+			 * within ANCHOR_HOLD_MS, or the fade window for a configured peer. */
+			if (!lora_lock_untagged_ok(since, gap, peer_configured)) {
 				gw_stats.wrong_peer++;
 				return;
 			}
@@ -1066,6 +1070,7 @@ int lora_link_start(enum sophon_role role, lora_link_frame_cb on_frame)
 
 	preset = lora_preset_selected();
 	peer_id = sophon_config_boot()->peer_id;
+	peer_configured = peer_id != 0;
 	link_role = role;
 
 	/*

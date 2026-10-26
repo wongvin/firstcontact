@@ -96,6 +96,10 @@ low-current or "always on" mode if it has one.
 
 ## Configuring the units for each scenario
 
+**No peer to set.** Leave the gateway's peer on Any: when a walk-test recording
+starts, the app sets it to the sensor the gateway has locked onto, and puts it
+back at Stop. The gateway restarts once at each (#360).
+
 Each unit's role can be set from the app (#329; README.md § Configuring a
 board), so one set of hardware covers both scenarios without swapping boards or
 reflashing:

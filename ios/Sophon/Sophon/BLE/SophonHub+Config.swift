@@ -40,6 +40,7 @@ extension SophonHub {
         guard let device = devices.first(where: { $0.id == id }) else { return }
         if device.config != state { device.config = state }
         device.loraBer.note(role: state.active.role)
+        finishPeerRestore(device, state: state)
         if device.configMismatch != nil { device.configMismatch = nil }
         if device.configReadFailed { device.configReadFailed = false }
 

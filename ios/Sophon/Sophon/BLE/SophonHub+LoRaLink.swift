@@ -59,6 +59,7 @@ extension SophonHub {
             let transporter = device.loraBer.record?.transporterName.flatMap { name in
                 devices.first { $0.displayName == name }
             }
+            defer { holdWalkTestPeer(device) }
             walkTest.record(record, from: device, sensor: sensor, transporter: transporter,
                             gaps: device.takeLossGaps())
         }
