@@ -152,6 +152,11 @@ transmits as soon as it boots.
   § Variants.
 - **Frequency hopping and a downlink:** #304.
 
+### nRF54LM20A port (in progress)
+
+Sophon is being ported to the Seeed XIAO nRF54LM20A Sense (#368).
+[NRF54LM20A-PLAN.md](NRF54LM20A-PLAN.md) is the **frozen** plan as approved.
+
 ### Where the LoRa design lives
 
 | Document | What it is |
