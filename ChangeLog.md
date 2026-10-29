@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-10-28
+
+### docs: nRF54LM20A port plan (#368)
+
+- `zephyr/sophon/NRF54LM20A-PLAN.md`: the frozen plan for porting Sophon (MCUboot and the full app) to the Seeed XIAO nRF54LM20A Sense. It covers a factory backup first, a per-MCU `hw/<mcu>/` layout, the MCUboot partitions, then direct role, peripherals and LoRa.
+- The last nRF52840-only state is tagged `pre-nrf54lm20a-port`. The Sophon README links the plan.
+
 ## 2026-10-25
 
 ### fix: hold the gateway's peer during a walk test (#360)
