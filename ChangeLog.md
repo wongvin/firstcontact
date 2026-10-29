@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-28
+
+### docs: back up and inspect the XIAO nRF54LM20A (#369)
+
+- `zephyr/sophon/hw/nrf54lm20a/openocd-readonly.cfg`: Zephyr's board OpenOCD config without its auto-mass-erase on a locked part, its flash bank or its RRAM write-enable. The lock check tries a CPUID read; `SOPHON_PROBE_SERIAL` picks the probe, defaulting to the XIAO's onboard one.
+- The board arrived locked (APPROTECT) with Seeed's demo, so no factory backup was possible. It was unlocked by CTRL-AP ERASEALL, and the erased state was backed up (`Sophon-F9B0`, two matching dumps). FICR shows 2036 KB RRAM; on the nRF54L, debug access closes at every reset until firmware reopens it.
+- `hw/nrf54lm20a/HARDWARE.md` and `MEMORY-MAP.md`, checked against the KiCad V1.0 netlist and PCB: the nRF54 has no USB (D+/D− unconnected), the SAMD11 runs only on VBUS, the IMU is powered by the nPM1300's LDO1, and `power_en` (P1.12) is unconnected.
+
 ## 2026-10-25
 
 ### fix: hold the gateway's peer during a walk test (#360)
