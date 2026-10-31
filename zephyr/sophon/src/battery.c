@@ -21,14 +21,14 @@
 LOG_MODULE_REGISTER(sophon_battery, LOG_LEVEL_INF);
 
 /*
- * The node from app.overlay. DT_NODELABEL rather than a DT_ALIAS: the alias
- * would be one more indirection to keep in step, and this app declares the node
- * itself rather than inheriting it from a board.
+ * The node from the board overlay. DT_NODELABEL rather than a DT_ALIAS: the
+ * alias would be one more indirection to keep in step, and this app declares
+ * the node itself (boards/xiao_ble_nrf52840_sense.overlay).
  */
 #define VBATT_NODE DT_NODELABEL(vbatt)
 
 #if !DT_NODE_EXISTS(VBATT_NODE)
-#error "app.overlay is not being applied: no vbatt node. Check the build board."
+#error "no vbatt node: the board overlay is not being applied. Check the build board."
 #endif
 
 static const struct device *const vbatt = DEVICE_DT_GET(VBATT_NODE);
@@ -109,7 +109,7 @@ static uint16_t sample_once(void)
 }
 
 /*
- * The charger's /CHG (#323), active = charging. See app.overlay and
+ * The charger's /CHG (#323), active = charging. See the board overlay and
  * dts/bindings/sophon,charge-status.yaml.
  */
 static const struct gpio_dt_spec charge_status =
@@ -333,8 +333,8 @@ void sophon_battery_read(uint16_t *mv, uint16_t *age_s, uint8_t *flags)
 /*
  * P0.14, the divider's low leg. Owned here rather than handed to the driver via
  * power-gpios, because the driver would release it between samples and there is
- * no safe released state on this board -- see app.overlay. Held ACTIVE (low) for
- * the life of the application.
+ * no safe released state on this board -- see the board overlay. Held ACTIVE for
+ * the life of the application (low).
  */
 static const struct gpio_dt_spec vbatt_enable = GPIO_DT_SPEC_GET(DT_NODELABEL(vbatt_enable), gpios);
 

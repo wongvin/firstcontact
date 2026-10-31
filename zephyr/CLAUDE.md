@@ -13,7 +13,7 @@ Firmware for embedded boards, built with [Zephyr RTOS](https://zephyrproject.org
   (#294). It is a sibling app rather than a build mode of `sophon/`, because it
   is always a plain UF2 application: a UF2 bootloader is the only thing that
   will accept it, and a build at slot0 would be nonsense. Design in
-  [`sophon/UF2-MIGRATION.md`](sophon/UF2-MIGRATION.md).
+  [`sophon/hw/nrf52840/UF2-MIGRATION.md`](sophon/hw/nrf52840/UF2-MIGRATION.md).
 
 ## Workspace layout — freestanding, and not pinned
 
@@ -64,6 +64,27 @@ the older `xiao_ble_sense`. `west boards` lists them.
 runs it. `SOPHON_BOOT=uf2` builds a UF2 instead, for a board still on the
 Adafruit bootloader. An MCUboot build needs the signing key in
 `~/.sophon/keys/` (see `sophon/README.md`).
+
+## Shared vs per-MCU files (#373)
+
+Sophon builds for more than one MCU (nRF52840 now, nRF54LM20A in progress, #368).
+In `zephyr/sophon/`:
+
+- **A file or doc section is MCU-specific if it would be wrong on the other
+  MCU.** If so it lives in `hw/<mcu>/`; otherwise at the root.
+- **The app's board-specific devicetree and Kconfig go in `boards/`**, Zephyr's
+  own mechanism: `boards/<board>.overlay` / `.conf`, applied automatically.
+  Zephyr skips `app.overlay` whenever a board overlay exists, so there is none.
+  Devicetree shared by boards (the Wio-SX1262) is `boards/common/*.dtsi`.
+- **MCUboot-only files** shared by every MCU are in `mcuboot/`; per-MCU ones
+  (partition table, MCUboot console, flash/settings Kconfig) in `hw/<mcu>/`.
+  `scripts/build.sh` passes them, via `sophon_mcu` in `scripts/common.sh`.
+- **Docs:** the root `BOOTLOADER.md` and `HARDWARE.md` keep their names and hold
+  what is shared; each MCU has `hw/<mcu>/MEMORY-MAP.md` (flash, SWD, backups,
+  consoles, migration) and `hw/<mcu>/HARDWARE.md`. Root docs link down and never
+  repeat MCU facts.
+- **Frozen and historical records** (`*-PLAN.md` originals, `ChangeLog.md`) keep
+  the paths they were written with.
 
 ## Flashing and the console
 
@@ -116,7 +137,8 @@ to In review:
    `SOPHON_BOOT=uf2 scripts/build.sh` → `build/zephyr/zephyr.uf2`. No board
    uses the UF2 build day to day, so it can only stay working if every change
    builds it. It broke silently from #271 to #306. MCUboot-only Kconfig goes in
-   `sophon/swd/app-mcuboot.conf`, never `prj.conf`.
+   `sophon/mcuboot/app-mcuboot.conf` (or `sophon/hw/<mcu>/app-mcuboot.conf`
+   when it differs by MCU), never `prj.conf`.
 2. Flash, then read the console for the boot banner and init errors.
 3. For BLE work, confirm in **nRF Connect** (or any scanner) that the device
    appears with the expected name and service UUID. Several advertising mistakes

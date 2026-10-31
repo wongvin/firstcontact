@@ -465,7 +465,7 @@ Pack **absence** stays undetectable. `/CHG` would have been the extra evidence,
 but P0.17 does not carry it: the net is named `~{CHG}` while the pin lands on the
 BQ25101's `PRETERM` input, with programming resistor `R8` marked `DNP`.
 Established from the KiCad netlist, not the PDF — see
-`zephyr/sophon/HARDWARE.md`.
+`zephyr/sophon/hw/nrf52840/HARDWARE.md`.
 
 ### 5b. OPEN — which board revision, and therefore which divider constant
 
@@ -496,7 +496,7 @@ pulls it to the full pack voltage.
 
 | ID | Steps | Expected |
 |---|---|---|
-| 5.3 | Inspect `app.overlay`: the `vbatt` node must have **no `power-gpios`**, and `prj.conf` must not set `CONFIG_PM_DEVICE`. | Both absent. `power-gpios` hands the pin to the driver, whose entire purpose is to release it between samples. |
+| 5.3 | Inspect `zephyr/sophon/boards/xiao_ble_nrf52840_sense.overlay`: the `vbatt` node must have **no `power-gpios`**, and `prj.conf` must not set `CONFIG_PM_DEVICE`. | Both absent. `power-gpios` hands the pin to the driver, whose entire purpose is to release it between samples. |
 | 5.4 | With a scope or meter on P0.31 relative to GND, watch across several sample periods on a charged pack. | Stays near `Vbat × 499/1499` ≈ 1.4 V at all times. It must **never** approach 3.6 V. This is the case that catches a reintroduced release. |
 | 5.5 | Confirm the IMU still streams after any change to `prj.conf` power management. | `no IMU sample for 400 ms` must not appear. Enabling `CONFIG_PM_DEVICE_RUNTIME` alongside the divider changed every device's lifecycle and stopped the data-ready trigger firing — init still reported success. *Measured 2026-09-07.* |
 

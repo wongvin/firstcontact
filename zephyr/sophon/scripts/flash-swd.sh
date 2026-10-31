@@ -50,8 +50,9 @@ done
 # an application that do not trust each other reach a board by accident.
 #
 # Both artefacts are checked against every input that can affect EITHER image:
-# sysbuild/ configures MCUboot, swd/ carries the partition table both images are
-# built against, and the rest is the application.
+# sysbuild/ configures MCUboot, hw/<mcu>/ carries the partition table both
+# images are built against, and the rest is the application. Only hw/'s build
+# files count -- its docs live there too, and a doc edit is not a stale build.
 #
 # Deliberately NOT a "same build" check. Two hex files being written by one
 # sysbuild run is not something their mtimes can prove -- a long build separates
@@ -59,8 +60,9 @@ done
 # inputs is the part that is well defined, and it catches the case that matters:
 # an input changed and one of them did not keep up.
 SOURCES=("$APP_DIR/src" "$APP_DIR/prj.conf" "$APP_DIR/CMakeLists.txt"
-         "$APP_DIR/app.overlay" "$APP_DIR/VERSION" "$APP_DIR/sysbuild"
-         "$APP_DIR/swd" "$APP_DIR/dts")
+         "$APP_DIR/VERSION" "$APP_DIR/sysbuild" "$APP_DIR/dts"
+         "$APP_DIR/boards" "$APP_DIR/mcuboot"
+         "$APP_DIR/hw/$(sophon_mcu)"/*.overlay "$APP_DIR/hw/$(sophon_mcu)"/*.conf)
 for f in "$BOOT_HEX" "$APP_HEX"; do
   NEWER="$(find "${SOURCES[@]}" -newer "$f" -print -quit 2>/dev/null || true)"
   if [[ -n "$NEWER" ]]; then
@@ -219,7 +221,7 @@ if ! oocd_run "erase and write" \
   echo "       FIRST try running this script again -- the erase is idempotent and" >&2
   echo "       a re-run is the whole recovery in most cases." >&2
   echo "       If the core is wedged: openocd ... -c 'init; nrf52_recover; exit'," >&2
-  echo "       then re-run. See BOOTLOADER.md." >&2
+  echo "       then re-run. See hw/nrf52840/MEMORY-MAP.md." >&2
   echo "       Backups are in ~/.sophon/backups/, one pair per era. Restore the" >&2
   echo "       _mcuboot_ pair, NOT the _uf2-sdv7_ one -- the latter predates the" >&2
   echo "       migration and returns this board to the Adafruit UF2 bootloader." >&2

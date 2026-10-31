@@ -39,6 +39,18 @@ sophon_activate_west() {
   export ZEPHYR_BASE="$WORKSPACE/zephyr"
 }
 
+# Which MCU a board is, naming its directory under hw/ (#373). Everything that
+# would be wrong on the other MCU -- the MCUboot partition table, MCUboot's
+# console, the per-SoC Kconfig, the docs -- lives in hw/<mcu>/; the app's own
+# devicetree is Zephyr's boards/<board>.overlay. An unknown board is an error
+# here rather than a build that silently falls back to another MCU's layout.
+sophon_mcu() {
+  case "$BOARD" in
+    xiao_ble/nrf52840*) echo "nrf52840" ;;
+    *) echo "error: no hw/ directory for board '$BOARD'" >&2; exit 1 ;;
+  esac
+}
+
 # Which boot path a build targets. MCUboot by default since every board runs it
 # (#270); uf2 is kept for boards that still have the Adafruit bootloader.
 sophon_boot_mode() {

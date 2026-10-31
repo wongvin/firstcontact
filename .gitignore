@@ -234,7 +234,7 @@ zephyr/*/build-*/
 # clangd's compile database, symlinked from a build dir -- see zephyr/sophon/README.md
 zephyr/*/compile_commands.json
 # Third-party datasheets kept for reference (#319, #323). Not ours to
-# redistribute; HARDWARE.md cites each by URL and section.
+# redistribute; the HARDWARE.md files cite each by URL and section.
 zephyr/sophon/datasheets/
 
 # Signing keys must never reach this public repo (#274). The real ones live in

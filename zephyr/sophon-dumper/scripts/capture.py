@@ -4,7 +4,7 @@
     uv run --with pyserial scripts/capture.py [--port /dev/cu.usbmodemXXX]
 
 Writes the pair `~/.sophon/backups/<name>_<UTC>_<era>_{flash-1MB,uicr-4KB}.bin`,
-in the shape BOOTLOADER.md already documents for SWD backups, so the two are
+in the shape hw/nrf52840/MEMORY-MAP.md documents for SWD backups, so the two are
 interchangeable at restore time.
 
 WHY IT VERIFIES TWICE. Each data line carries a CRC32 of its own bytes, and each
@@ -39,7 +39,7 @@ def pick_port():
 def identify_era(flash):
     """Which era this image is, by content rather than by filename.
 
-    The markers are BOOTLOADER.md's: a SoftDevice at 0x3004 means the board was
+    The markers are hw/nrf52840/MEMORY-MAP.md's: a SoftDevice at 0x3004 means the board was
     still on the Adafruit bootloader, and the KEYHASH in slot0 says which key a
     migrated board trusts. Restoring the wrong era undoes something silently,
     which is why the era goes in the filename.

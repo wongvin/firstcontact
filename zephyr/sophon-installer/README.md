@@ -4,7 +4,7 @@ Migrates a board from the Adafruit UF2 bootloader to MCUboot **without a
 probe**, from a UF2 file copied onto the mounted volume.
 
 The design, the memory maps and the whole safety argument are in
-[`../sophon/UF2-MIGRATION.md`](../sophon/UF2-MIGRATION.md). This README covers
+[`../sophon/hw/nrf52840/UF2-MIGRATION.md`](../sophon/hw/nrf52840/UF2-MIGRATION.md). This README covers
 only how to build and what the current build does.
 
 ## Status: migrates — this build writes flash
@@ -15,7 +15,7 @@ MCUboot to `0x0`, slot1's trailer so MCUboot treats the staged image as a
 pending upgrade, and a stub that makes slot0 readable. Then it resets, and
 MCUboot does the move. It takes about 45 s end to end. After the countdown,
 only SWD recovers a failed run, so take the backups in
-[BOOTLOADER.md](../sophon/BOOTLOADER.md) first.
+[MEMORY-MAP.md](../sophon/hw/nrf52840/MEMORY-MAP.md#backup-and-recovery) first.
 
 Verified on `Sophon-4D88` (#294, #297) and `Sophon-0FAA` (#303).
 

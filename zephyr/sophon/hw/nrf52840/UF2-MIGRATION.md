@@ -4,7 +4,7 @@
 UF2 bootloader to MCUboot on 2026-10-06, unattended, from one file copied onto a
 mounted volume. No probe took part in the migration.
 
-Implemented in [`../sophon-installer/`](../sophon-installer/).
+Implemented in [`zephyr/sophon-installer/`](../../../sophon-installer/).
 
 This describes the design **as it now stands**, which is not the design #294
 started with: step 5 exists only because the board refused to migrate without
@@ -15,7 +15,7 @@ changing any address here — every one of those failures was silent.
 below**, which needs a direct-XIP MCUboot and therefore a decision belonging to
 #290.
 
-Companion to [BOOTLOADER.md](BOOTLOADER.md), which documents the two boot paths
+Companion to [MEMORY-MAP.md](MEMORY-MAP.md), which documents the two boot paths
 and the probe-based migration that already works.
 
 ## The problem
@@ -105,7 +105,7 @@ MCUboot layout alone. An image that fits slot0 comfortably could still be too
 large to migrate this way.
 
 Columns **A** and **C** are the stock and current layouts from
-[BOOTLOADER.md](BOOTLOADER.md). **B** is what this design adds: the same board as
+[MEMORY-MAP.md](MEMORY-MAP.md). **B** is what this design adds: the same board as
 A, with the UF2's contents landed in the application partition. Not to a shared
 scale; each column is internally proportional only.
 

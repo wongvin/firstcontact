@@ -41,21 +41,26 @@ fi
 
 # --- MCUboot -----------------------------------------------------------------
 #
+# Per-MCU files come from hw/<mcu>/, shared ones from mcuboot/ (#373).
+HW_DIR="$APP_DIR/hw/$(sophon_mcu)"
+
 # Two overlays, and they are NOT interchangeable. The partition table is shared
 # by both images; the code-partition choice is not -- MCUboot's own app.overlay
 # points itself at boot_partition, while the application must be pointed at
 # slot0. Applying app-slot0.overlay to the MCUboot image would build a
-# bootloader that expects to run from slot 0. See swd/app-slot0.overlay.
-PARTITIONS="$APP_DIR/swd/mcuboot-partitions.overlay"
-APP_SLOT0="$APP_DIR/swd/app-slot0.overlay"
+# bootloader that expects to run from slot 0. See mcuboot/app-slot0.overlay.
+PARTITIONS="$HW_DIR/mcuboot-partitions.overlay"
+APP_SLOT0="$APP_DIR/mcuboot/app-slot0.overlay"
 # The application's MCUboot-only Kconfig: MCUmgr/SMP and the image manager
-# (#271). Kept out of prj.conf so the UF2 build still compiles (#306).
-APP_MCUBOOT_CONF="$APP_DIR/swd/app-mcuboot.conf"
+# (#271), shared; plus this MCU's settings backend and flash options. Kept out
+# of prj.conf so the UF2 build still compiles (#306).
+APP_MCUBOOT_CONF="$APP_DIR/mcuboot/app-mcuboot.conf"
+APP_MCUBOOT_MCU_CONF="$HW_DIR/app-mcuboot.conf"
 # MCUboot only: its console goes to uart0, since it has no USB stack for
 # the board's default CDC ACM console.
-BOOT_CONSOLE="$APP_DIR/swd/mcuboot-console.overlay"
+BOOT_CONSOLE="$HW_DIR/mcuboot-console.overlay"
 
-for f in "$PARTITIONS" "$APP_SLOT0" "$BOOT_CONSOLE" "$APP_MCUBOOT_CONF"; do
+for f in "$PARTITIONS" "$APP_SLOT0" "$BOOT_CONSOLE" "$APP_MCUBOOT_CONF" "$APP_MCUBOOT_MCU_CONF"; do
   [[ -f "$f" ]] || { echo "error: missing MCUboot build file $f" >&2; exit 1; }
 done
 
@@ -109,5 +114,5 @@ exec west build -p always -b "$BOARD" --sysbuild -d "$BUILD_DIR" "$APP_DIR" "$@"
   -- -DSB_CONFIG_BOOTLOADER_MCUBOOT=y \
      -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\"$SIGNING_KEY\"" \
      -DEXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$APP_SLOT0" \
-     -DEXTRA_CONF_FILE="$APP_MCUBOOT_CONF" \
+     -DEXTRA_CONF_FILE="$APP_MCUBOOT_CONF;$APP_MCUBOOT_MCU_CONF" \
      -Dmcuboot_EXTRA_DTC_OVERLAY_FILE="$PARTITIONS;$BOOT_CONSOLE"

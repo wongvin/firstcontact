@@ -19,7 +19,7 @@
 # Never copy build-mcuboot/sophon/zephyr/zephyr.uf2 onto a UF2 board by hand.
 # The MCUboot build emits that file too, but it is linked for slot0 at 0xC000,
 # which on a UF2 board is inside the SoftDevice. That the Adafruit bootloader
-# drops such blocks is believed, not verified (UF2-MIGRATION.md).
+# drops such blocks is believed, not verified (hw/nrf52840/UF2-MIGRATION.md).
 #
 # Usage: scripts/flash-uf2.sh
 

@@ -6,7 +6,7 @@
 #
 # Produces build/sophon-migrate.uf2, carrying two disjoint regions: this
 # installer at 0x27000 with MCUboot linked inside it, and the signed Sophon
-# application at 0x085000. See UF2-MIGRATION.md, "Building the UF2".
+# application at 0x085000. See ../sophon/hw/nrf52840/UF2-MIGRATION.md, "Building the UF2".
 #
 # NO SOPHON_BOOT MODE, deliberately. The installer is always a plain UF2
 # application -- the Adafruit bootloader is the only thing that will accept it,

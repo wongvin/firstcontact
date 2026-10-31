@@ -64,7 +64,9 @@ command -v smpmgr >/dev/null 2>&1 || {
 # so the MCUboot config is not in the list -- a bootloader change cannot be
 # delivered this way at all, and needs the probe.
 SOURCES=("$APP_DIR/src" "$APP_DIR/prj.conf" "$APP_DIR/CMakeLists.txt"
-         "$APP_DIR/app.overlay" "$APP_DIR/VERSION" "$APP_DIR/swd" "$APP_DIR/dts")
+         "$APP_DIR/VERSION" "$APP_DIR/dts"
+         "$APP_DIR/boards" "$APP_DIR/mcuboot"
+         "$APP_DIR/hw/$(sophon_mcu)"/*.overlay "$APP_DIR/hw/$(sophon_mcu)"/*.conf)
 NEWER="$(find "${SOURCES[@]}" -newer "$IMAGE" -print -quit 2>/dev/null || true)"
 if [[ -n "$NEWER" ]]; then
   echo "error: $IMAGE is older than $NEWER" >&2
