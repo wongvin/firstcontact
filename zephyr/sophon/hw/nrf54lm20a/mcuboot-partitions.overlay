@@ -1,0 +1,68 @@
+/*
+ * Flash layout for MCUboot on the XIAO nRF54LM20A (#370).
+ *
+ * Unlike the nRF52840 XIAO -- whose board files define no partitions, because it
+ * ships with Adafruit's UF2 bootloader -- this board is MCUboot-shaped already.
+ * `xiao_nrf54lm20a_nrf54lm20a_cpuapp.dts` sets `zephyr,code-partition =
+ * &slot0_partition` and pulls in Zephyr's
+ * `dts/vendor/nordic/nrf54lm20_a_b_cpuapp_partition.dtsi`:
+ *
+ *   0x000000  boot_partition     "mcuboot"   62K   (sized for NCS's FPROTECT)
+ *   0x010000  slot0_partition    "image-0"  968K
+ *   0x102000  slot1_partition    "image-1"  968K
+ *   0x1F4000  storage_partition  "storage"   36K   -> ends at 0x1FD000 = 2036K
+ *
+ * 2036K is all of RRAM: FICR INFO.RRAM reads 0x7F4 on Sophon-F9B0 (#369), not
+ * the 1.5 MB the board doc claims. The FLPR variant of that table, which keeps
+ * the top 96K for the RISC-V core, is not selected: the board does not define
+ * WITH_FLPR_PARTITIONS.
+ *
+ * Nothing on the board conflicts with it. #369 found no bootloader of any kind
+ * on the nRF54 -- the USB-C goes only to the SAMD11, so there is no UF2 path --
+ * and, after ERASEALL, UICR with no RRAMC protection configured.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS CHANGES: storage only. boot, slot0 and slot1 are upstream's, kept
+ * exactly, because redefining them only creates drift against the next
+ * `west update` -- and their boundaries were chosen for FPROTECT, which this
+ * build does not use but may (NRF54LM20A-PLAN.md, Recommended layout).
+ *
+ *   - 62K boot partition: MCUboot measures ~40K on the nRF52840, and the
+ *     MCUboot build checks it fits.
+ *   - 968K slots against a ~170K image cost nothing: swap-using-offset moves
+ *     only the sectors the image occupies. slot1's usable size is one sector
+ *     (4K) less, as on the nRF52840.
+ *   - No external SPI-NOR slot1: the onboard PY25Q64HA is not needed when RRAM
+ *     already holds over five images' worth per slot.
+ *
+ * storage_partition is split exactly as #329 split the nRF52840's storage:
+ * an 8K settings area -- two 4K sectors for the config record -- and the rest
+ * reserved, unassigned and kept erased, so a later use does not have to move
+ * the settings area under boards that already hold a config.
+ *
+ * The 4K "sector" here is the RRAM driver's erase-block-size, an abstraction:
+ * RRAM has no erase, and the driver emulates one by writing 0xFF
+ * (hw/nrf54lm20a/MEMORY-MAP.md § RRAM is not flash).
+ * ---------------------------------------------------------------------------
+ */
+
+/delete-node/ &storage_partition;
+
+&cpuapp_rram {
+	partitions {
+		/* The config record (#329), chosen as zephyr,settings-partition by
+		 * mcuboot/app-slot0.overlay -- the application's, not MCUboot's.
+		 */
+		settings_partition: partition@1f4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "settings";
+			reg = <0x001f4000 0x00002000>;   /* 8K */
+		};
+
+		reserved_partition: partition@1f6000 {
+			compatible = "zephyr,mapped-partition";
+			label = "reserved";
+			reg = <0x001f6000 0x00007000>;   /* 28K, to 0x1FD000 */
+		};
+	};
+};

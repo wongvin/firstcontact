@@ -1,0 +1,37 @@
+/*
+ * Sophon on the XIAO nRF54LM20A Sense (#370; the rest of this board's
+ * devicetree arrives with the direct-role port, NRF54LM20A-PLAN.md Phase 3).
+ *
+ * THE CLOCK NODES THE BOARD FILE LEAVES OFF.
+ *
+ * Zephyr's boards/seeed/xiao_nrf54lm20a (at 4.4.99, 2026-08-08) enables the
+ * SoC's `lfxo` and `hfxo` but none of the nodes this Zephyr's clock driver
+ * uses: `xo`, `lfclk` and `xo24m`, all `status = "disabled"` in
+ * nrf54lm20_a_b.dtsi. The Bluetooth controller looks up an enabled
+ * `nordic,nrf-clock-lfclk` for its sleep-clock accuracy (lll_clock.c,
+ * DT_COMPAT_GET_ANY_STATUS_OKAY), finds none, and fails to COMPILE:
+ *
+ *     error: '__P_k32src_accuracy_ppm_IDX_0_ENUM_IDX' undeclared
+ *
+ * So no Bluetooth application builds for this board -- Zephyr's own
+ * samples/bluetooth/peripheral included, unmodified (#370). Nordic's
+ * nrf54lm20dk enables exactly these three; doing the same here fixes the build.
+ *
+ * `lfclk` keeps its binding defaults: k32src "xtal", 50 ppm. The board has a
+ * 32.768 kHz crystal (X1, 7 pF, +/-20 ppm, per the KiCad V1.0 schematic), so a
+ * crystal source and a 50 ppm accuracy class are both honest.
+ *
+ * To be removed once the board file is fixed upstream.
+ */
+
+&xo {
+	status = "okay";
+};
+
+&lfclk {
+	status = "okay";
+};
+
+&xo24m {
+	status = "okay";
+};

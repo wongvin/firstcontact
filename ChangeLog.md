@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-31
+
+### feat: MCUboot partition layout for the XIAO nRF54LM20A (#370)
+
+- `zephyr/sophon/hw/nrf54lm20a/mcuboot-partitions.overlay`: upstream's boot (62 K) and slots (968 K each) kept, and storage split into settings (8 K) and reserved (28 K). Verified on `Sophon-F9B0` with Zephyr's `smp_svr`: MCUboot (35,296 B) boots it, and BLE OTA upload, test swap, rollback and confirm all pass.
+- `boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay` / `.conf`: two fixes for the board, found on the way. The clock nodes Bluetooth needs, without which no BLE app compiles (#375). A 32-line RRAM write buffer, without which writes time out while a BLE link is up (#377).
+- `hw/nrf54lm20a/MEMORY-MAP.md` and `README.md`: memory-map diagrams in the nRF52840 file's style, including the 2 KB unassigned after MCUboot and the registers above RRAM (FICR, UICR, the SICR, and an undefined `0xFFF000`, neither of the last two readable over SWD), the layout, the flash and OTA run, and two hazards: `west flash` can drop an image's last partial line (#377), and the RRAM write timeout. A Zephyr image is shown to keep debug open across a power cycle. The nRF52840 builds are unchanged.
+
 ## 2026-10-30
 
 ### refactor: move nRF52840-only files into hw/nrf52840/ (#373)

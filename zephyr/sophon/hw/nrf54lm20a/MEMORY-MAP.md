@@ -10,11 +10,105 @@ here follow it, so the two read side by side.
 
 ## Memory map
 
-| Region | Address | Size |
-|---|---|---|
-| RRAM | `0x00000000` | `0x1FD000` = 2036 KB (FICR `INFO.RRAM` = `0x7F4`) |
-| FICR | `0x00FFC000` | `0x1000` |
-| UICR | `0x00FFD000` | `0x1000` |
+Not to a shared scale; each column is internally proportional only.
+
+```
+        A: UPSTREAM TABLE            B: SOPHON MCUBOOT (in use, #370)
+           (board file)                 (storage split as in #329)
+
+0x1FD000 ┌──────────────────┐  0x1FD000 ┌──────────────────┐
+         │ storage    36 KB │           │ reserved   28 KB │
+         │                  │  0x1F6000 ├──────────────────┤
+         │                  │           │ settings    8 KB │
+0x1F4000 ├──────────────────┤  0x1F4000 ├──────────────────┤
+         │ slot1 "image-1"  │           │ slot1 "image-1"  │
+         │        968 KB    │           │        968 KB    │
+         │                  │           │ DFU target       │
+         │                  │           │ image at +4 KB   │
+0x102000 ├──────────────────┤  0x102000 ├──────────────────┤
+         │ slot0 "image-0"  │           │ slot0 "image-0"  │
+         │        968 KB    │           │        968 KB    │
+         │                  │           │ smp_svr test     │
+         │                  │           │ 184 KB   (19.0%) │
+0x010000 ├──────────────────┤  0x010000 ├──────────────────┤
+         │ unassigned  2 KB │           │ unassigned  2 KB │
+0x00F800 ├──────────────────┤  0x00F800 ├──────────────────┤
+         │ mcuboot    62 KB │           │ mcuboot    62 KB │
+         │                  │           │ 34.5 KB  (55.6%) │
+0x000000 └──────────────────┘  0x000000 └──────────────────┘
+```
+
+**Column B is what runs today** (#370). Column A is the table Zephyr's board
+file brings in (`nrf54lm20_a_b_cpuapp_partition.dtsi`); B keeps its boot
+partition and slots exactly and splits only its 36 KB storage, as #329 split the
+nRF52840's: **`settings_partition`** at `0x1F4000`, 8 KB (two sectors), for the
+config record, and **`reserved_partition`** at `0x1F6000`, 28 KB, unassigned and
+kept erased. The image figures are the `smp_svr` test's (MCUboot as built;
+the signed app 188,376 B) until the Sophon app runs here (Phase 3).
+
+**The 2 KB at `0xF800`–`0xFFFF` belongs to nothing.** Upstream sizes
+`boot_partition` at 62 KB, for FPROTECT (§ MCUboot on this board), but starts
+slot0 at the next 64 KB boundary.
+
+**There is no factory column**, unlike the nRF52840's. The board arrived locked,
+so its factory layout could not be read, and unlocking erased it (#369,
+HARDWARE.md § Factory state).
+
+Above RRAM, Zephyr's devicetree has no node until the configuration and
+information registers at `0xFFC000` (checked across the SoC and cpuapp
+`.dtsi` files). Column C's top boundary is where the reads stopped, not a known
+end of the region:
+
+```
+         C: ABOVE RRAM
+
+0x1000000 ┌──────────────────┐
+          │ undefined        │
+          │ SWD read fails   │
+ 0xFFF000 ├──────────────────┤
+          │ SICR        4 KB │
+          │ secure-only;     │
+          │ SWD read fails   │
+ 0xFFE000 ├──────────────────┤
+          │ UICR        4 KB │
+          │ user config      │
+ 0xFFD000 ├──────────────────┤
+          │ FICR        4 KB │
+          │ factory info     │
+ 0xFFC000 └──────────────────┘
+```
+
+| Region | Address | Size | Over SWD (unlocked) |
+|---|---|---|---|
+| RRAM | `0x00000000` | `0x1FD000` = 2036 KB (FICR `INFO.RRAM` = `0x7F4`) | read and written |
+| *(nothing in the devicetree)* | `0x001FD000`–`0x00FFBFFF` | | not tried |
+| FICR | `0x00FFC000` | `0x1000` | read (#369) |
+| UICR | `0x00FFD000` | `0x1000` | read (#369) |
+| SICR | `0x00FFE000` | `0x1000` reserved; 4 B defined | **read fails** |
+| *(undefined)* | `0x00FFF000` | | **read fails** |
+
+### SICR
+
+`0x00FFE000`, the region after UICR. All that is known, from Nordic's MDK
+(`nrf54lm20a_types.h`, `nrf54lm20a_global.h`) and from the board:
+
+- **Defined as one reserved, read-only word.** `NRF_SICR_Type` is a single
+  `__IM uint32_t RESERVED`, size 4 bytes; no fields are documented. Its
+  `@brief` repeats FICR's ("Factory Information Configuration Registers"), so
+  the header gives no reliable expansion of the name, and none is assumed here.
+- **Secure address only.** The MDK defines `NRF_SICR_S_BASE` and maps `NRF_SICR`
+  to it, with no non-secure alias. FICR, by contrast, is defined at its
+  non-secure address (`NRF_FICR_NS_BASE`).
+- **Not in Zephyr's devicetree**, which has `ficr@ffc000` and `uicr@ffd000` and
+  nothing at `0xffe000`. Nothing Sophon builds refers to it.
+- **Not readable over SWD.** On `Sophon-F9B0`, running Zephyr and unlocked
+  (CPUID read back in the same session), `read_memory 0xFFE000` fails. So do
+  `0xFFF000`, `0xFFF100` and `0xFFFFF0`.
+
+A failed read does not show that a region is empty: SICR is defined and still
+fails, so access is restricted rather than absent. What the SICR holds, and
+whether anything is mapped at `0xFFF000`, is for the nRF54LM20A Product
+Specification's memory map; it is not in this workspace.
 
 ### RRAM is not flash
 
@@ -105,8 +199,9 @@ So:
   `Sophon-F9B0`, after an erase and a USB-C power cycle, memory reads were refused
   again with UICR still all-unprotected.
 - **A board running a Zephyr image opens itself on every boot** — MCUboot's own
-  `SystemInit` does it before the application runs. *Expected from the code; not
-  yet verified on hardware (needs a write; #370).*
+  `SystemInit` does it before the application runs. Verified on `Sophon-F9B0`
+  (#370): with MCUboot and an app flashed, a USB-C power cycle left debug open
+  (CPUID readable, core running), where a blank part had relocked.
 - **A board where neither MCUboot nor slot0 boots stays locked**, and the only way
   in is ERASEALL — which also wipes settings. On the nRF52840, UICR alone decided,
   so a broken image never cost debug access.
@@ -191,10 +286,107 @@ survives an erase.
 
 ## MCUboot on this board
 
-Not yet: #370. Upstream's partition table (`nrf54lm20_a_b_cpuapp_partition.dtsi`)
-is the starting point — boot 62 K, slot0 and slot1 968 K each, storage 36 K —
-and the plan splits storage into settings + reserved. This section gets the
-final table, the flashing procedure, and MCUboot's measured size.
+Established in #370. Unlike the nRF52840, this board is MCUboot-shaped
+upstream: its `.dts` already chooses `slot0_partition` as the code partition,
+from Zephyr's `nrf54lm20_a_b_cpuapp_partition.dtsi`.
+[mcuboot-partitions.overlay](mcuboot-partitions.overlay) keeps upstream's boot
+and slots exactly and splits only its storage, as #329 did on the nRF52840:
+
+| Partition | Offset | Size | |
+|---|---|---|---|
+| `boot_partition` | `0x000000` | 62 K | upstream; MCUboot uses 35,296 B (55.6%) |
+| `slot0_partition` | `0x010000` | 968 K | upstream |
+| `slot1_partition` | `0x102000` | 968 K | upstream; 964 K usable under swap-using-offset |
+| `settings_partition` | `0x1F4000` | 8 K | the config record (#329): two 4 K sectors |
+| `reserved_partition` | `0x1F6000` | 28 K | unassigned, kept erased; ends at `0x1FD000` = 2036 K |
+
+Both images are built against the same table. MCUboot's code partition is
+`boot_partition`, the application's is `slot0` with `settings_partition` as its
+settings partition, as `mcuboot/app-slot0.overlay` sets for every MCU. MCUboot is
+swap-using-offset with the fleet's RSA-2048 key, configured by the shared
+`sysbuild/mcuboot.conf`.
+
+**Why upstream's boot and slots are kept.** Redefining them only creates drift
+against the next `west update`, and their boundaries suit FPROTECT, the NCS
+library that write-protects MCUboot's partition until reset. Vanilla Zephyr
+never enables it, so the 62 K is inherited; MCUboot fits with 28 K to spare, and
+the room is kept for adding that protection later. Slot size costs nothing:
+swap-using-offset moves only the sectors an image occupies.
+
+### Bluetooth needs the clock nodes the board file leaves off
+
+Zephyr's board file (4.4.99) enables `lfxo`/`hfxo` but not `xo`, `lfclk` and
+`xo24m`, and the Bluetooth controller fails to compile without an enabled
+`lfclk`. No Bluetooth app builds for this board unmodified, Zephyr's own
+`samples/bluetooth/peripheral` included. Sophon's
+[boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay](../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay)
+enables all three, as Nordic's nRF54LM20 DK does. The upstream report is #375.
+MCUboot is unaffected: it has no radio.
+
+### Building, until build.sh learns this board
+
+`scripts/build.sh` builds only the nRF52840 until Phase 2 of the port, and the
+Sophon app itself waits for Phase 3. #370 proved the layout with Zephyr's
+`smp_svr` sample (BLE SMP and image management) built against this repo's
+files, from the activated venv with `ZEPHYR_BASE` set:
+
+```bash
+R=zephyr/sophon
+west build -p always -b xiao_nrf54lm20a/nrf54lm20a/cpuapp --sysbuild -d <build> \
+  $ZEPHYR_BASE/samples/subsys/mgmt/mcumgr/smp_svr -- \
+  -DEXTRA_CONF_FILE="bt.conf;<no-fs.conf>;$R/boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf" \
+  -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\"$HOME/.sophon/keys/sophon-fw-rsa-2048.pem\"" \
+  -DEXTRA_DTC_OVERLAY_FILE="$R/hw/nrf54lm20a/mcuboot-partitions.overlay;$R/mcuboot/app-slot0.overlay;$R/boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay" \
+  -Dmcuboot_EXTRA_DTC_OVERLAY_FILE=$R/hw/nrf54lm20a/mcuboot-partitions.overlay \
+  -Dmcuboot_EXTRA_CONF_FILE=$R/sysbuild/mcuboot.conf
+```
+
+Two things about the sample, neither about the layout:
+
+- **Its `bt.conf`** (this Zephyr has no `overlay-bt.conf`) mounts LittleFS on
+  `storage_partition`, and its "zephyr basic" MCUmgr group erases it. Sophon's
+  layout has no `storage_partition`, so `<no-fs.conf>` turns both off:
+  `CONFIG_MCUMGR_GRP_FS=n`, `CONFIG_FILE_SYSTEM=n`,
+  `CONFIG_FILE_SYSTEM_LITTLEFS=n`, `CONFIG_MCUMGR_GRP_ZBASIC=n`,
+  `CONFIG_MCUMGR_GRP_ZBASIC_STORAGE_ERASE=n`.
+- **`sysbuild/mcuboot.conf` must be passed explicitly.** Sysbuild picks it up
+  only for the app whose directory it is in.
+
+### Flashing and the OTA test
+
+Run on `Sophon-F9B0` (#370), from a blank, locked board.
+
+1. **`west flash -d <build>`** uses Zephyr's OpenOCD config, which found the part
+   locked and **erased it by itself** before writing MCUboot (§ Hazards). MCUboot
+   then ran and reopened debug, so the app's session needed no erase.
+2. **The app's write was short by 8 bytes.** A read-back
+   (`scripts/ihex-cmp.py` against both `.hex` files) matched MCUboot and all of
+   the app except `0x3DFD0`–`0x3DFD7`, still `0xFF`: the end of the signature
+   TLV. MCUboot correctly refused it: "Image in the primary slot is not valid!".
+   Cause: the board's `nrf54lm20a-load` turns on RRAM writes with a one-line
+   write buffer and never commits it (§ Hazards). Rewritten with the commit:
+
+   ```
+   init; reset halt; mww 0x5004e500 0x101; load_image <app>.signed.hex;
+   mww 0x5004e008 1; sleep 20; mww 0x5004e500 0; reset run; exit
+   ```
+
+   The read-back then matched both images. The console showed the boot:
+   `Image version: v0.0.0`, `Jumping to the first image slot`, then the Bluetooth
+   controller and "Advertising successfully started".
+3. **The first OTA upload failed** on the device, `flash_write error -116
+   offset=0x00103000` (`-ETIMEDOUT`), 25 s in: RRAM writes cannot complete while
+   a BLE link is up with the default write buffer (§ Hazards). With
+   `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE=32`, now in the board's `.conf`:
+
+   | Step (`smpmgr --ble`) | Result |
+   |---|---|
+   | `image upload` 0.0.2 | 188,376 B in 22 s, to slot1 |
+   | `image state-write <hash>`, `os reset` | "Starting swap using offset algorithm", `v0.0.2` booted, unconfirmed |
+   | `os reset` without confirming | **reverted**: `v0.0.0`, confirmed |
+   | test again, `state-write --confirm`, `os reset` | **kept** `v0.0.2`, confirmed, "Swap type: none" |
+
+The layout, swap-using-offset on RRAM, and rollback all work on this board.
 
 ## Console
 
@@ -217,6 +409,20 @@ constraint*), and nothing may depend on it.
 - **Never build with `CONFIG_NRF_APPROTECT_LOCK=y`** (or
   `NRF_SECURE_APPROTECT_LOCK`): debug would stay shut on every boot, short of
   ERASEALL. Sophon relies on the nRF54L default.
+- **`west flash` can drop the end of an image.** The board's `nrf54lm20a-load`
+  (`support/openocd.cfg`) sets RRAMC `CONFIG` to `0x101` — writes on, one-line
+  buffer — and never triggers `TASKS_COMMITWRITEBUF` (`0x5004E008`). An image that
+  doesn't end on a 16-byte line loses its last partial line, which is part of its
+  signature, so MCUboot rejects it. **Always read back after flashing** and commit
+  the buffer after `load_image` (§ Flashing and the OTA test). Reported upstream:
+  #377.
+- **RRAM writes time out while a BLE link is up** unless
+  `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE` is raised. With Zephyr's controller the
+  driver's one-line default gives a 500 µs radio slot, and the ticker backend's
+  `500 − 1700 µs` interval underflows; writes longer than one line fail with
+  `-ETIMEDOUT` after ~24 s. Sophon sets 32 in
+  `boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf`. It affects OTA and the config
+  record alike. Reported upstream: #377.
 - **One SWD session at a time while USB is connected.** The onboard SAMD11 and
   an external probe on `SWDIO` / `SWCLK` / `RST` (TP2 / TP1 / TP4) drive the same
   nets. The `…2` pads are the SAMD11's, not the nRF54's.
@@ -232,8 +438,8 @@ production board needs pads and an external probe.
 
 ## Not established
 
-- That a Zephyr image keeps debug open across a power cycle (#370).
 - RRAM write endurance, from the datasheet.
 - The external Debug Probe path on TP1/TP2/TP4, untested; and whether U4's B
   side is high-impedance with OE low, as the USB-disconnected case assumes.
 - What the patterned reserved UICR words are.
+- What the SICR holds, and whether anything is mapped at `0xFFF000` (§ SICR).
