@@ -2,7 +2,7 @@
  * Battery terminal voltage, from the XIAO nRF52840's on-module divider (#268).
  *
  * 1 MOhm / 510 kOhm on AIN7 (P0.31), switched in by P0.14 sinking. The divider
- * node and the SAADC channel are declared in `app.overlay`, because the board
+ * node and the SAADC channel are declared in the board overlay, as the board
  * files declare neither; Zephyr's `voltage-divider` driver owns the enable, the
  * settle delay and the scaling.
  *
@@ -106,7 +106,7 @@ int sophon_battery_init(void);
  *   not CHARGING -> /CHG released: the pack is full, OR no pack is fitted, OR
  *                   USB is absent. The pin cannot separate the first two.
  *
- * Pack ABSENCE therefore stays undetectable; see HARDWARE.md.
+ * Pack ABSENCE therefore stays undetectable; see hw/nrf52840/HARDWARE.md.
  */
 #define SOPHON_BATTERY_FLAG_USB       BIT(0)
 #define SOPHON_BATTERY_FLAG_CHARGING  BIT(1)

@@ -322,7 +322,7 @@ would assert a measurement that never happened.
 
 Summarised here only as far as the protocol needs; the full account — netlist,
 component values, the enable pin's hazard, the charger, and how the schematic was
-read — is in [HARDWARE.md](HARDWARE.md).
+read — is in [hw/nrf52840/HARDWARE.md](hw/nrf52840/HARDWARE.md).
 
     VBAT ──[ R16 1M 1% ]──┬──[ R17 499k 1% ]── P0.14_READ_BAT
                           │
@@ -330,7 +330,7 @@ read — is in [HARDWARE.md](HARDWARE.md).
 
 P0.14 sinks to enable and is **held low permanently**: it is the divider's low
 leg, so releasing it lets AIN7 rise toward the ADC pin's 3.6 V absolute maximum.
-Declared in `app.overlay`, because the board files declare none of it.
+Declared in `boards/xiao_ble_nrf52840_sense.overlay`, because the board files declare none of it.
 
 **R17 is unconfirmed.** Seeed's wiki archive holds a rev v1.0 schematic with
 510 kΩ while the KiCad source for v1.1 says 499 kΩ — a 1.46% difference in the
@@ -605,8 +605,8 @@ Writing that config with **restart** is `02 13 02 0E E0 6B 91 36 F0 86 01 00`.
 
 - **Storage:** the config is a Zephyr settings record, `sophon/cfg`, on NVS in
   `settings_partition` (0xFC000, 8 KB). It survives power-off, OTA updates and
-  SWD reflashing (`flash-swd.sh` leaves 0xFC000–0xFFFFF alone). BOOTLOADER.md §
-  Memory map has the layout.
+  SWD reflashing (`flash-swd.sh` leaves 0xFC000–0xFFFFF alone).
+  hw/nrf52840/MEMORY-MAP.md § Memory maps has the layout.
 - **Bluetooth stays reachable.** No valid stored config takes the board off
   Bluetooth. A board set to **sensor** or **transporter** advertises SMP and
   its name, not the Sophon service, so the app also scans for SMP and lists

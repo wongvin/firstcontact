@@ -13,8 +13,16 @@ relays continuously to a distant receiver.
 
 **Seeed XIAO nRF52840 Sense Plus.** Everything established about its battery
 sensing — the divider, the enable pin's hazard, the charger, what the hardware
-can and cannot report, and how to read the schematic — is in
-[HARDWARE.md](HARDWARE.md).
+can and cannot report — is in [hw/nrf52840/HARDWARE.md](hw/nrf52840/HARDWARE.md),
+and how to read the schematic in [HARDWARE.md](HARDWARE.md).
+
+What differs between MCUs lives in `hw/<mcu>/` (#373); the rest of this
+directory is shared:
+
+| MCU | Board | Board facts | Memory map, SWD, backups |
+|---|---|---|---|
+| nRF52840 | XIAO nRF52840 Sense Plus; plain XIAO nRF52840 (gateway) | [hw/nrf52840/HARDWARE.md](hw/nrf52840/HARDWARE.md) | [hw/nrf52840/MEMORY-MAP.md](hw/nrf52840/MEMORY-MAP.md) |
+| nRF54LM20A | XIAO nRF54LM20A Sense (port in progress, #368) | [hw/nrf54lm20a/HARDWARE.md](hw/nrf54lm20a/HARDWARE.md) | [hw/nrf54lm20a/MEMORY-MAP.md](hw/nrf54lm20a/MEMORY-MAP.md) |
 
 Two things from there worth knowing before touching this app:
 
@@ -24,11 +32,11 @@ Two things from there worth knowing before touching this app:
 - **P0.14 must be held low.** It looks like a power-saving enable; releasing it
   can push P0.31 to its 3.6 V limit.
 
-HARDWARE.md also covers the other two boards a relay uses:
+The other two boards a relay uses:
 - the **Seeed Studio XIAO nRF52840** (formerly XIAO BLE: no IMU, no microphone),
-  the gateway board;
+  the gateway board, in [hw/nrf52840/HARDWARE.md](hw/nrf52840/HARDWARE.md);
 - the **Wio-SX1262 for XIAO** carrier and module, the LoRa radio: its pin map,
-  module facts and antenna warning.
+  module facts and antenna warning, in [HARDWARE.md](HARDWARE.md).
 
 ## Status
 
@@ -256,8 +264,10 @@ MCUboot build.
 or an absolute path in `SOPHON_SIGNING_KEY`. Without it the build stops with an
 error. A UF2 build needs no key.
 
-Which path a board takes, the memory maps, the backup and recovery procedure, and
-the hazards of working over SWD are all in [BOOTLOADER.md](BOOTLOADER.md).
+The rules that hold on every MCU — backups, MCUboot's configuration, signing,
+the hazards of working over SWD — are in [BOOTLOADER.md](BOOTLOADER.md). Which
+path a board takes, the memory map and the backup procedure are per MCU, in
+`hw/<mcu>/MEMORY-MAP.md`.
 
 The one worth knowing before you touch a probe: **never end an SWD session with
 `resume` — always `reset run`.** Resuming after a halt leaves the BLE stack
@@ -338,9 +348,11 @@ src/lora_link.c/.h   sensor TX thread, gateway RX + DIO1 watchdog, link stats (#
 src/lora_codec.c/.h  LoRa packet v1/v2 encode/decode; plain C, host-tested (#303)
 src/lora_presets.c/.h  air-rate presets V0-V6b (#303)
 Kconfig              app options: LoRa preset, frequency, peer id
-app.overlay          battery divider, Wio-SX1262 node on spi2
+boards/<board>.overlay  each board's devicetree: battery divider, charge pin
+boards/common/wio-sx1262.dtsi  the Wio-SX1262 node, included by each board
 prj.conf             Kconfig; note what is deliberately NOT set
-swd/app-mcuboot.conf MCUboot-only Kconfig (MCUmgr, image manager) (#306)
+mcuboot/             MCUboot-only, every MCU: app Kconfig (MCUmgr, image manager) (#306), slot0
+hw/<mcu>/            per MCU: MCUboot partitions/console, app Kconfig, HARDWARE.md, MEMORY-MAP.md
 tests/lora_codec/    host test for the codec (scripts/test-codec.sh)
 PROTOCOL.md          the wire contract shared with the iOS app
 LORA-PROTOCOL.md     the sensor <-> gateway LoRa contract

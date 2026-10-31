@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-30
+
+### refactor: move nRF52840-only files into hw/nrf52840/ (#373)
+
+- **Build files:** the MCUboot partition and console overlays and the nRF52840's flash/settings Kconfig move to `zephyr/sophon/hw/nrf52840/`. The shared MCUboot-only files go to `mcuboot/`. `app.overlay` becomes `boards/xiao_ble_nrf52840_sense.overlay`, with the Wio-SX1262 node in `boards/common/wio-sx1262.dtsi`. `scripts/common.sh` gains `sophon_mcu`, and `build.sh` and the stale-build checks read from `hw/<mcu>/`.
+- **Docs:** the nRF52840-only sections of `BOOTLOADER.md` and `HARDWARE.md` move, verbatim, to `hw/nrf52840/MEMORY-MAP.md` and `hw/nrf52840/HARDWARE.md`; `UF2-MIGRATION.md` moves whole. The root files keep what is shared and link to each MCU's. The rules are in `zephyr/CLAUDE.md`.
+- **No behaviour change:** MCUboot and `sophon-installer` build byte-identical to `main`, the MCUboot and UF2 app images differ only in their build timestamp, and every `.config` is identical.
+
 ## 2026-10-28
 
 ### docs: back up and inspect the XIAO nRF54LM20A (#369)

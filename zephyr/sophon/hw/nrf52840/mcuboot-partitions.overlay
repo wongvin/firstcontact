@@ -6,7 +6,7 @@
  * which is not MCUboot and needs none. A sysbuild with MCUboot therefore fails
  * at configure time with `required nodelabel not found: slot0_partition`.
  *
- * Kept OUT of `app.overlay` deliberately. Applying it to the normal build would
+ * Kept OUT of the board overlay deliberately. Applying it to the normal build would
  * move the application's load address and produce a UF2 that the Adafruit
  * bootloader places wrongly -- a bricked-looking board from a file that flashed
  * without complaint. This overlay is opt-in, for the MCUboot build only.

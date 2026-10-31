@@ -38,7 +38,9 @@ IMAGE="$BUILD_DIR/sophon/zephyr/zephyr.signed.bin"
 # The same guard as flash-ota.sh: an image older than any input is the one
 # silent failure, and here it would travel to a phone and on to a board.
 SOURCES=("$APP_DIR/src" "$APP_DIR/prj.conf" "$APP_DIR/CMakeLists.txt"
-         "$APP_DIR/app.overlay" "$APP_DIR/VERSION" "$APP_DIR/swd" "$APP_DIR/dts")
+         "$APP_DIR/VERSION" "$APP_DIR/dts"
+         "$APP_DIR/boards" "$APP_DIR/mcuboot"
+         "$APP_DIR/hw/$(sophon_mcu)"/*.overlay "$APP_DIR/hw/$(sophon_mcu)"/*.conf)
 NEWER="$(find "${SOURCES[@]}" -newer "$IMAGE" -print -quit 2>/dev/null || true)"
 if [[ -n "$NEWER" ]]; then
   echo "error: $IMAGE is older than $NEWER" >&2

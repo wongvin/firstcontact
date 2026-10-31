@@ -26,7 +26,7 @@ whenever — it waits for a whole cycle.
 
 | | |
 |---|---|
-| default | writes the pair into `~/.sophon/backups/`, named as BOOTLOADER.md documents |
+| default | writes the pair into `~/.sophon/backups/`, named as [MEMORY-MAP.md](../sophon/hw/nrf52840/MEMORY-MAP.md) documents |
 | `--raw` | writes plain `flash.bin` and `uicr.bin`, no naming convention, no era detection |
 
 ## What it cannot save

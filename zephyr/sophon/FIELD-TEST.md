@@ -82,9 +82,9 @@ from a power pack:
 
 - **If the pack shuts off, the board carries on from the LiPo.** The XIAO
   switches its supply from USB to the battery automatically, with no reset
-  (HARDWARE.md § Power path).
+  (hw/nrf52840/HARDWARE.md § Power path).
 - **While the pack is on, it charges the LiPo**, at about 50 mA until full
-  (HARDWARE.md § The charger). That current also helps keep the pack from
+  (hw/nrf52840/HARDWARE.md § The charger). That current also helps keep the pack from
   shutting off; once the LiPo is full it stops, and the draw falls back.
 - **The LiPo alone lasts hours, not a day.** At +22 dBm a 200 mAh pack runs
   the sensor for very roughly 3–4 hours; the receiver, which only listens,

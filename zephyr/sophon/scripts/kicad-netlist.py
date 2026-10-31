@@ -7,7 +7,7 @@ component values to symbols by their position on the page, and that produced two
 wrong conclusions: `P0.17` was taken for a charge-status readback because its net
 is named `~{CHG}`, when it lands on the charger's `PRETERM` input; and `R17` was
 read as 510k from an archive that turned out to hold the *previous* board
-revision. See ../HARDWARE.md.
+revision. See ../hw/nrf52840/HARDWARE.md.
 
 Usage:
     kicad-netlist.py <file.kicad_sch> [filter ...]
@@ -38,7 +38,7 @@ Note the coordinate quirk: library pin Y is up while sheet Y is down, so a pin's
 absolute position is `origin + rotate((px, -py), rot)`.
 
 Validate any change against a net whose answer is already known -- for this
-board, `VBAT - R16 - AIN7 - R17 - P0.14` from HARDWARE.md.
+board, `VBAT - R16 - AIN7 - R17 - P0.14` from hw/nrf52840/HARDWARE.md.
 
 The schematics this parses may be licensed; Seeed's XIAO designs are CC BY-SA
 4.0. This script is ours, but its output is a derivative of whatever it is run

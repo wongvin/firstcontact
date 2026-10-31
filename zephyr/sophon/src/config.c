@@ -140,8 +140,8 @@ static bool config_equal(const struct sophon_config *a, const struct sophon_conf
 
 #if defined(CONFIG_SETTINGS)
 /*
- * Settings are MCUboot-build only (swd/app-mcuboot.conf). Without them a board
- * runs on the build's defaults and refuses config writes.
+ * Settings are MCUboot-build only (mcuboot/app-mcuboot.conf). Without them a
+ * board runs on the build's defaults and refuses config writes.
  */
 static int load_cb(const char *key, size_t len, settings_read_cb read_cb, void *cb_arg, void *param)
 {

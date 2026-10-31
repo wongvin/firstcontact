@@ -17,7 +17,7 @@ endif()
 #
 # MCUboot travels INSIDE this binary; the application does not.
 #
-# UF2-MIGRATION.md, "Building the UF2", is the argument: 40 KB is small enough
+# hw/nrf52840/UF2-MIGRATION.md, "Building the UF2", is the argument: 40 KB is small enough
 # that the linker does not care, it travels with the code that writes it, and
 # there is no second address to keep in step. The 190 KB application is merged
 # in as hex records at 0x085000 instead, by scripts/mkuf2.sh, because it is the

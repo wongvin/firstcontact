@@ -5,7 +5,7 @@ losing what is on it. Established in #369 (part of the port, #368; plan in
 [NRF54LM20A-PLAN.md](../../NRF54LM20A-PLAN.md)).
 
 Companion: [HARDWARE.md](HARDWARE.md) is what the board *is*. The nRF52840
-equivalent of this file is [BOOTLOADER.md](../../BOOTLOADER.md); the headings
+equivalent of this file is [../nrf52840/MEMORY-MAP.md](../nrf52840/MEMORY-MAP.md); the headings
 here follow it, so the two read side by side.
 
 ## Memory map

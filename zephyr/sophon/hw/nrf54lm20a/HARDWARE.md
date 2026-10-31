@@ -6,7 +6,9 @@ backing up and inspecting the first board (#369), as part of the nRF54LM20A port
 
 Companion: [MEMORY-MAP.md](MEMORY-MAP.md) is what occupies RRAM, the SWD path,
 the lock, and backups. The nRF52840 boards' equivalents are
-[HARDWARE.md](../../HARDWARE.md) and [BOOTLOADER.md](../../BOOTLOADER.md).
+[../nrf52840/HARDWARE.md](../nrf52840/HARDWARE.md) and
+[../nrf52840/MEMORY-MAP.md](../nrf52840/MEMORY-MAP.md); what both share is in the
+root [HARDWARE.md](../../HARDWARE.md) and [BOOTLOADER.md](../../BOOTLOADER.md).
 
 As on the nRF52840, entries that were wrong on the first attempt are kept, with
 the correction next to them.
