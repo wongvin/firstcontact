@@ -140,16 +140,22 @@ with EN from R41/R45.
 
 **The IMU is powered by the nPM1300, not by a GPIO.** That is consistent with
 Zephyr's board file, which declares the nPM1300's LDO1 `regulator-boot-on`, and
-with the factory demo reading the IMU. Zephyr's file sets LDO1 to **1.8 V** on a
-rail the schematic names `…_3V3`; the LSM6DS3TR-C runs from either, but its I²C
-pull-ups and logic levels then need checking (hardware review).
+with the factory demo reading the IMU. Zephyr 4.4.99's file set LDO1 to 1.8 V on
+a rail the schematic names `…_3V3`. **v4.5.0 sets 3.3 V in LDO mode**
+(`97da33c77ad`: "LDO1 supplies the 3.3 V rail that powers the IMU and the PDM
+microphone"). It also marks BUCK2 (`VSYS_3V3`) always-on, since it powers the
+nRF54 and the SAMD11, and orders regulator init after the charger: LDO1's
+soft-start inrush exceeds the PMIC's 100 mA power-up VBUS limit and would
+brown-out boot-loop the board. Sophon requires v4.5.0 (#379), so it gets this
+configuration from the board file.
 
 ### `power_en` (P1.12) drives nothing
 
-*PCB:* P1.12 (U8 pad C4) is `unconnected-(U8D-P1.12-PadC4)`. Zephyr's board file
-declares a `regulator-fixed` named `power_en` on `gpio1 12`, `regulator-boot-on`;
-on this V1.0 board that pin goes nowhere. It is harmless, but **nothing in
-Sophon should rely on it** — the IMU rail is the nPM1300's.
+*PCB:* P1.12 (U8 pad C4) is `unconnected-(U8D-P1.12-PadC4)`. Zephyr 4.4.99's
+board file declared a `regulator-fixed` named `power_en` on `gpio1 12`,
+`regulator-boot-on`, on a pin that goes nowhere on this V1.0 board. v4.5.0
+removes it ("non-existent power_en node", `19d36c89cc5`). Nothing in Sophon ever
+relied on it: the IMU rail is the nPM1300's.
 
 ## Factory state
 
@@ -202,7 +208,8 @@ Kept, as on the nRF52840, because each read as plausible:
 
 - **Whether U4's B side is high-impedance with OE low** — what an external probe
   on the nRF54 pads sees with USB disconnected (UM3204H datasheet).
-- **LDO1 at 1.8 V on `IMU&MIC_3V3`**: what Seeed intended, and what the IMU's
-  I²C pull-ups (R28/R29, 4.7 K) are tied to.
+- **What the IMU's I²C pull-ups (R28/R29, 4.7 K) are tied to.** With LDO1 at
+  3.3 V in v4.5.0 the rail matches its name, so the earlier 1.8 V concern is gone.
+  The pull-ups' rail is still to be traced.
 - **The XIAO header pin map from the netlist** (above, from PDF text + pinctrl).
 - **Why the factory part was locked.**

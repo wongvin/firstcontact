@@ -23,12 +23,10 @@ is shared (`zephyr/CLAUDE.md` § Shared vs per-MCU files).
 | [mcuboot-partitions.overlay](mcuboot-partitions.overlay) | MCUboot's partition table, applied to both images |
 | [openocd-readonly.cfg](openocd-readonly.cfg) | OpenOCD that cannot erase or write: use it on any board whose contents matter |
 
-Also per-board, in Zephyr's own place:
-[../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay](../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay),
-which enables the clock nodes Bluetooth needs (#375), and
-[../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf](../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf),
-which sizes the RRAM write buffer so writes complete while a BLE link is up
-(#377).
+Sophon has no `boards/` file for this board yet; Phase 3 adds one. The two
+workarounds #370 needed (the Bluetooth clock nodes, and the RRAM write buffer for
+writes during a BLE link) were removed in #379, because Zephyr v4.5.0 fixes both
+upstream.
 
 ## Before touching one
 
@@ -37,8 +35,9 @@ which sizes the RRAM write buffer so writes complete while a BLE link is up
   mass-erase it automatically. Read with `openocd-readonly.cfg` first
   (MEMORY-MAP.md § SWD access).
 - **A blank board relocks at every power-on.** Erase and write in one session.
-- **Read back after every flash.** `west flash` can leave an image's last
-  partial 16-byte line unwritten, which MCUboot then rejects
-  (MEMORY-MAP.md § Hazards, #377).
+- **Zephyr v4.5.0 or later.** Older board files leave an image's last partial
+  16-byte line unwritten under `west flash`, and RRAM writes time out during a
+  BLE link (MEMORY-MAP.md § Hazards). A read-back is still the proof that a
+  write landed.
 - **One SWD session at a time while USB is connected.** The SAMD11 drives the
   same nets as the back pads `SWDIO` / `SWCLK` / `RST`.

@@ -16,11 +16,15 @@ project(sophon)
 #     human-readable one is PROJECT_VERSION_STR.
 #
 # The code is a decimal int: (major << 16) | (minor << 8) | patchlevel.
-set(SOPHON_MIN_ZEPHYR_CODE 263168) # 4.4.0
+# 4.5.0 (#379): the XIAO nRF54LM20A builds rely on its board-file and Bluetooth
+# controller fixes (clock nodes, the RRAM write sync, the RRAM load commit), and
+# the nRF52840 overlay relies on its ADC cells. sophon-installer and
+# sophon-dumper stay at 4.4.0: nothing in them needs 4.5.
+set(SOPHON_MIN_ZEPHYR_CODE 263424) # 4.5.0
 
 if(ZEPHYR_VERSION_CODE LESS SOPHON_MIN_ZEPHYR_CODE)
   message(FATAL_ERROR
-    "Sophon requires Zephyr >= 4.4.0; found ${PROJECT_VERSION_STR} at ${ZEPHYR_BASE}. "
+    "Sophon requires Zephyr >= 4.5.0; found ${PROJECT_VERSION_STR} at ${ZEPHYR_BASE}. "
     "Run 'west update' in ~/zephyrproject.")
 endif()
 

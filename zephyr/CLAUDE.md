@@ -38,7 +38,7 @@ ways of doing that here are worse:
 follow whatever `~/zephyrproject` is at, so a `west update` there can change the
 firmware's dependencies with no record here. `sophon/CMakeLists.txt` guards the
 minimum version and fails at *configure* time with a readable message. Expected
-version is **>= 4.4**.
+version is **>= 4.5** (#379; `sophon-installer` and `sophon-dumper` still accept 4.4).
 
 If CI or a second machine ever needs to build this, the migration path is to add
 a `west.yml` and switch to T2. Nothing in the current layout blocks that.
