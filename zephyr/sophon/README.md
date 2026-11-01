@@ -163,7 +163,12 @@ transmits as soon as it boots.
 ### nRF54LM20A port (in progress)
 
 Sophon is being ported to the Seeed XIAO nRF54LM20A Sense (#368).
-[NRF54LM20A-PLAN.md](NRF54LM20A-PLAN.md) is the **frozen** plan as approved.
+
+| Document | What it is |
+|---|---|
+| [NRF54LM20A-UPDATED-PLAN.md](NRF54LM20A-UPDATED-PLAN.md) | the **current design record**: what is done, what changed and why |
+| [NRF54LM20A-PLAN.md](NRF54LM20A-PLAN.md) | the **frozen** plan as approved |
+| [hw/nrf54lm20a/](hw/nrf54lm20a/README.md) | the board: hardware, memory map, the lock, backups |
 
 ### Where the LoRa design lives
 

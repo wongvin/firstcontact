@@ -2,7 +2,7 @@
 
 What the board *is*, independent of any firmware on it. Established while
 backing up and inspecting the first board (#369), as part of the nRF54LM20A port
-(#368; plan in [NRF54LM20A-PLAN.md](../../NRF54LM20A-PLAN.md)).
+(#368; plan in [NRF54LM20A-UPDATED-PLAN.md](../../NRF54LM20A-UPDATED-PLAN.md)).
 
 Companion: [MEMORY-MAP.md](MEMORY-MAP.md) is what occupies RRAM, the SWD path,
 the lock, and backups. The nRF52840 boards' equivalents are

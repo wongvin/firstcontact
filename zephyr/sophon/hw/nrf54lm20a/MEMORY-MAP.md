@@ -2,7 +2,7 @@
 
 What occupies RRAM, how a probe reaches it, and how to read a board without
 losing what is on it. Established in #369 (part of the port, #368; plan in
-[NRF54LM20A-PLAN.md](../../NRF54LM20A-PLAN.md)).
+[NRF54LM20A-UPDATED-PLAN.md](../../NRF54LM20A-UPDATED-PLAN.md)).
 
 Companion: [HARDWARE.md](HARDWARE.md) is what the board *is*. The nRF52840
 equivalent of this file is [../nrf52840/MEMORY-MAP.md](../nrf52840/MEMORY-MAP.md); the headings
