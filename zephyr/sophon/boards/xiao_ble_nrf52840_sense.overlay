@@ -106,10 +106,12 @@
 	};
 };
 
+/*
+ * No #address-cells / #size-cells here: since Zephyr 4.5 nrf52840.dtsi sets
+ * them on adc@40007000 itself (81266b8dc55), and repeating them changed
+ * nothing (#379, #380).
+ */
 &adc {
-	#address-cells = <1>;
-	#size-cells = <0>;
-
 	/*
 	 * AIN7 = P0.31, fixed silicon mapping. Note AIN6 is P0.30, which the
 	 * board uses for LED1 -- the neighbouring channel is already spoken

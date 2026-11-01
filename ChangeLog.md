@@ -2,6 +2,14 @@
 
 ## 2026-10-31
 
+### build: Zephyr v4.5.0 (#379)
+
+- **Firmware 2.40.0**, built on Zephyr v4.5.0 (MCUboot `725d63c9d5b`), which `zephyr/sophon/CMakeLists.txt` now requires. `prj.conf` drops `CONFIG_BT_CONN_TX_MAX`, removed upstream; the TX pool still follows `CONFIG_BT_BUF_ACL_TX_COUNT=8`.
+- **XIAO nRF54LM20A:** the Bluetooth clock-node overlay and the 32-line RRAM write-buffer `.conf` are removed, now that v4.5.0 fixes both upstream (#375, #377). A plain `west flash` writes correctly, and BLE OTA works with the default buffer.
+- **nRF52840:** the board overlay drops `&adc`'s `#address-cells`/`#size-cells`, which v4.5.0's SoC dtsi now sets (#380). Verified on `Sophon-01A7`: v4.5.0 MCUboot and app by SWD, then OTA test / revert / confirm through the iOS app.
+- `sysbuild/mcuboot.conf`: each comment now sits above the setting it explains; the no-op `CONFIG_LOG_BACKEND_UART` is dropped, ending its warning on every MCUboot build while both MCUs' MCUboot binaries stay byte-identical; and it explains the new test-RNG warning (Mbed TLS 4.x).
+- Docs: the nRF54LM20A docs record what v4.5.0 fixed, and `openocd-readonly.cfg` is checked against upstream's new shared script.
+
 ### feat: MCUboot partition layout for the XIAO nRF54LM20A (#370)
 
 - `zephyr/sophon/hw/nrf54lm20a/mcuboot-partitions.overlay`: upstream's boot (62 K) and slots (968 K each) kept, and storage split into settings (8 K) and reserved (28 K). Verified on `Sophon-F9B0` with Zephyr's `smp_svr`: MCUboot (35,296 B) boots it, and BLE OTA upload, test swap, rollback and confirm all pass.

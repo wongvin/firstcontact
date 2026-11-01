@@ -29,12 +29,12 @@ Not to a shared scale; each column is internally proportional only.
          │ slot0 "image-0"  │           │ slot0 "image-0"  │
          │        968 KB    │           │        968 KB    │
          │                  │           │ smp_svr test     │
-         │                  │           │ 184 KB   (19.0%) │
+         │                  │           │ 194 KB   (20.1%) │
 0x010000 ├──────────────────┤  0x010000 ├──────────────────┤
          │ unassigned  2 KB │           │ unassigned  2 KB │
 0x00F800 ├──────────────────┤  0x00F800 ├──────────────────┤
          │ mcuboot    62 KB │           │ mcuboot    62 KB │
-         │                  │           │ 34.5 KB  (55.6%) │
+         │                  │           │ 38.3 KB  (61.9%) │
 0x000000 └──────────────────┘  0x000000 └──────────────────┘
 ```
 
@@ -43,8 +43,9 @@ file brings in (`nrf54lm20_a_b_cpuapp_partition.dtsi`); B keeps its boot
 partition and slots exactly and splits only its 36 KB storage, as #329 split the
 nRF52840's: **`settings_partition`** at `0x1F4000`, 8 KB (two sectors), for the
 config record, and **`reserved_partition`** at `0x1F6000`, 28 KB, unassigned and
-kept erased. The image figures are the `smp_svr` test's (MCUboot as built;
-the signed app 188,376 B) until the Sophon app runs here (Phase 3).
+kept erased. The image figures are the `smp_svr` test's on Zephyr v4.5.0
+(#379): MCUboot as built, 39,268 B, and the signed app, 198,948 B. They stand
+until the Sophon app runs here (Phase 3).
 
 **The 2 KB at `0xF800`–`0xFFFF` belongs to nothing.** Upstream sizes
 `boot_partition` at 62 KB, for FPROTECT (§ MCUboot on this board), but starts
@@ -294,7 +295,7 @@ and slots exactly and splits only its storage, as #329 did on the nRF52840:
 
 | Partition | Offset | Size | |
 |---|---|---|---|
-| `boot_partition` | `0x000000` | 62 K | upstream; MCUboot uses 35,296 B (55.6%) |
+| `boot_partition` | `0x000000` | 62 K | upstream; MCUboot uses 39,268 B (61.9%) on v4.5.0, 35,296 B on 4.4.99 |
 | `slot0_partition` | `0x010000` | 968 K | upstream |
 | `slot1_partition` | `0x102000` | 968 K | upstream; 964 K usable under swap-using-offset |
 | `settings_partition` | `0x1F4000` | 8 K | the config record (#329): two 4 K sectors |
@@ -313,15 +314,15 @@ never enables it, so the 62 K is inherited; MCUboot fits with 28 K to spare, and
 the room is kept for adding that protection later. Slot size costs nothing:
 swap-using-offset moves only the sectors an image occupies.
 
-### Bluetooth needs the clock nodes the board file leaves off
+### Bluetooth and the clock nodes (fixed in Zephyr v4.5.0)
 
-Zephyr's board file (4.4.99) enables `lfxo`/`hfxo` but not `xo`, `lfclk` and
+Zephyr 4.4.99's board file enabled `lfxo`/`hfxo` but not `xo`, `lfclk` and
 `xo24m`, and the Bluetooth controller fails to compile without an enabled
-`lfclk`. No Bluetooth app builds for this board unmodified, Zephyr's own
-`samples/bluetooth/peripheral` included. Sophon's
-[boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay](../../boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay)
-enables all three, as Nordic's nRF54LM20 DK does. The upstream report is #375.
-MCUboot is unaffected: it has no radio.
+`lfclk`. No Bluetooth app built for this board, Zephyr's own
+`samples/bluetooth/peripheral` included (#370). Sophon carried an overlay enabling
+all three until v4.5.0 enabled them upstream (`97da33c77ad`, `e82c1044c31`).
+The overlay was removed in #379, and Bluetooth builds from the board file alone.
+MCUboot was never affected: it has no radio.
 
 ### Building, until build.sh learns this board
 
@@ -334,9 +335,9 @@ files, from the activated venv with `ZEPHYR_BASE` set:
 R=zephyr/sophon
 west build -p always -b xiao_nrf54lm20a/nrf54lm20a/cpuapp --sysbuild -d <build> \
   $ZEPHYR_BASE/samples/subsys/mgmt/mcumgr/smp_svr -- \
-  -DEXTRA_CONF_FILE="bt.conf;<no-fs.conf>;$R/boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf" \
+  -DEXTRA_CONF_FILE="bt.conf;<no-fs.conf>" \
   -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="\"$HOME/.sophon/keys/sophon-fw-rsa-2048.pem\"" \
-  -DEXTRA_DTC_OVERLAY_FILE="$R/hw/nrf54lm20a/mcuboot-partitions.overlay;$R/mcuboot/app-slot0.overlay;$R/boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.overlay" \
+  -DEXTRA_DTC_OVERLAY_FILE="$R/hw/nrf54lm20a/mcuboot-partitions.overlay;$R/mcuboot/app-slot0.overlay" \
   -Dmcuboot_EXTRA_DTC_OVERLAY_FILE=$R/hw/nrf54lm20a/mcuboot-partitions.overlay \
   -Dmcuboot_EXTRA_CONF_FILE=$R/sysbuild/mcuboot.conf
 ```
@@ -354,7 +355,24 @@ Two things about the sample, neither about the layout:
 
 ### Flashing and the OTA test
 
-Run on `Sophon-F9B0` (#370), from a blank, locked board.
+**On Zephyr v4.5.0 (#379), it just works.** On `Sophon-F9B0`:
+
+- **`west flash -d <build> --erase`** mass-erased the board, wrote MCUboot and
+  the app, and committed the write buffer (upstream's `nrf54l_load`). A read-back
+  matched both images byte for byte, including the app's last line: it ends at
+  `0x40924`, 4 bytes into a line, the case that failed on 4.4.99.
+- **The BLE OTA cycle passed with the default one-line RRAM write buffer**:
+  upload of 199 KB in 18 s, then test swap, revert and confirm.
+- **New on v4.5.0:** each time the central ends a connection, the console logs
+  `bt_ctlr_hci: Invalid Tx Enqueue` → `bt_conn: Unable to send to driver (err
+  -22)` → `Fatal error (-5). Disconnecting` → `Unable to disconnect (err -13)`, at
+  the same timestamp as "Disconnected, reason 0x13". The host still had a packet
+  queued for a link the controller had already torn down. Nothing failed: every
+  operation had completed. Seen with `smp_svr`, and not yet checked with the
+  Sophon app or on the nRF52840.
+
+The rest of this section is the original run, on Zephyr 4.4.99 (#370), from a
+blank, locked board, kept because it is how both upstream defects were found.
 
 1. **`west flash -d <build>`** uses Zephyr's OpenOCD config, which found the part
    locked and **erased it by itself** before writing MCUboot (§ Hazards). MCUboot
@@ -377,7 +395,7 @@ Run on `Sophon-F9B0` (#370), from a blank, locked board.
 3. **The first OTA upload failed** on the device, `flash_write error -116
    offset=0x00103000` (`-ETIMEDOUT`), 25 s in: RRAM writes cannot complete while
    a BLE link is up with the default write buffer (§ Hazards). With
-   `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE=32`, now in the board's `.conf`:
+   `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE=32` (a board `.conf` until #379):
 
    | Step (`smpmgr --ble`) | Result |
    |---|---|
@@ -409,20 +427,20 @@ constraint*), and nothing may depend on it.
 - **Never build with `CONFIG_NRF_APPROTECT_LOCK=y`** (or
   `NRF_SECURE_APPROTECT_LOCK`): debug would stay shut on every boot, short of
   ERASEALL. Sophon relies on the nRF54L default.
-- **`west flash` can drop the end of an image.** The board's `nrf54lm20a-load`
-  (`support/openocd.cfg`) sets RRAMC `CONFIG` to `0x101` — writes on, one-line
-  buffer — and never triggers `TASKS_COMMITWRITEBUF` (`0x5004E008`). An image that
-  doesn't end on a 16-byte line loses its last partial line, which is part of its
-  signature, so MCUboot rejects it. **Always read back after flashing** and commit
-  the buffer after `load_image` (§ Flashing and the OTA test). Reported upstream:
-  #377.
-- **RRAM writes time out while a BLE link is up** unless
-  `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE` is raised. With Zephyr's controller the
-  driver's one-line default gives a 500 µs radio slot, and the ticker backend's
-  `500 − 1700 µs` interval underflows; writes longer than one line fail with
-  `-ETIMEDOUT` after ~24 s. Sophon sets 32 in
-  `boards/xiao_nrf54lm20a_nrf54lm20a_cpuapp.conf`. It affects OTA and the config
-  record alike. Reported upstream: #377.
+- **Zephyr older than v4.5.0: `west flash` can drop the end of an image.** The
+  4.4.99 board's `nrf54lm20a-load` set RRAMC `CONFIG` to `0x101` (writes on,
+  one-line buffer) and never triggered `TASKS_COMMITWRITEBUF` (`0x5004E008`). An
+  image not ending on a 16-byte line lost its last partial line, part of its
+  signature, so MCUboot rejected it. v4.5.0's `nrf54l_load` commits and the
+  runner verifies (`ca77b788f93`; #377, #379). Sophon requires v4.5.0, but a
+  read-back stays the proof that a write landed.
+- **Zephyr older than v4.5.0: RRAM writes time out while a BLE link is up.**
+  With Zephyr's controller, the RRAM driver's one-line write buffer gives a
+  500 µs radio slot, and the ticker backend's `500 − 1700 µs` interval
+  underflowed, so writes longer than one line failed with `-ETIMEDOUT` after
+  ~24 s, for OTA and the config record alike. Fixed upstream in `c91fb6ead29`
+  (#377). Sophon's `CONFIG_NRF_RRAM_WRITE_BUFFER_SIZE=32` workaround was removed
+  in #379.
 - **One SWD session at a time while USB is connected.** The onboard SAMD11 and
   an external probe on `SWDIO` / `SWCLK` / `RST` (TP2 / TP1 / TP4) drive the same
   nets. The `…2` pads are the SAMD11's, not the nRF54's.
