@@ -1,7 +1,7 @@
 # XIAO nRF54LM20A Sense
 
 Sophon's second MCU, being ported in #368 (plan:
-[NRF54LM20A-PLAN.md](../../NRF54LM20A-PLAN.md)). This directory holds
+[NRF54LM20A-UPDATED-PLAN.md](../../NRF54LM20A-UPDATED-PLAN.md)). This directory holds
 everything that would be wrong on the nRF52840; the rest of `zephyr/sophon/`
 is shared (`zephyr/CLAUDE.md` § Shared vs per-MCU files).
 

@@ -25,7 +25,7 @@
  * WHAT THIS CHANGES: storage only. boot, slot0 and slot1 are upstream's, kept
  * exactly, because redefining them only creates drift against the next
  * `west update` -- and their boundaries were chosen for FPROTECT, which this
- * build does not use but may (NRF54LM20A-PLAN.md, Recommended layout).
+ * build does not use but may (NRF54LM20A-UPDATED-PLAN.md, Recommended layout).
  *
  *   - 62K boot partition: MCUboot measures ~40K on the nRF52840, and the
  *     MCUboot build checks it fits.

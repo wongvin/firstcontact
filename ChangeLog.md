@@ -2,6 +2,11 @@
 
 ## 2026-10-31
 
+### docs: nRF54LM20A updated plan (#376)
+
+- `zephyr/sophon/NRF54LM20A-UPDATED-PLAN.md`: the current design record for the port, started from the frozen plan. A dated changes table and notes in each overtaken section cover: Phase 0's findings (locked board, no UF2 path); Step R and Phase 1 done; the new Zephyr v4.5.0 step (#379); Phase 3 needing no nPM1300 work for the IMU; Phase 2's lock-aware flash path; and the UF2-to-MCUboot migration app dropped.
+- The Sophon README lists the current and frozen plans and the board docs; `hw/nrf54lm20a/` points at the current plan.
+
 ### build: Zephyr v4.5.0 (#379)
 
 - **Firmware 2.40.0**, built on Zephyr v4.5.0 (MCUboot `725d63c9d5b`), which `zephyr/sophon/CMakeLists.txt` now requires. `prj.conf` drops `CONFIG_BT_CONN_TX_MAX`, removed upstream; the TX pool still follows `CONFIG_BT_BUF_ACL_TX_COUNT=8`.
