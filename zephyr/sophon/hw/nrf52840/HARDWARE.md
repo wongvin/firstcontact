@@ -331,10 +331,13 @@ resources](https://wiki.seeedstudio.com/XIAO_BLE/#resources):
 nRF52840", with three sheets. The nRF52840 and the header are on
 `02 XIAO Header & nRF52840.kicad_sch`.
 
-[`scripts/kicad-netlist.py`](../../scripts/kicad-netlist.py) reads one sheet and
-ignores hierarchical connections, so it was run on that sheet alone. It was
+[`scripts/kicad-netlist.py`](../../scripts/kicad-netlist.py) then read one sheet
+and ignored hierarchical connections, so it was run on that sheet alone. It was
 first checked against the net whose answer is known: it reproduces the battery
-divider topology, `VBAT – R16 – P0.31/AIN7 – R17 – P0.14`.
+divider topology, `VBAT – R16 – P0.31/AIN7 – R17 – P0.14`. That version also had
+a pin-transform bug for parts both rotated and mirrored, fixed in #384; this
+section's findings have not been re-run with the fixed script, as the v1.1
+Sense Plus's have.
 
 **This design file is not a BOM for the board.** It draws the IMU (`U3`,
 LSM6DS3TR-C) and the microphone (`MIC1`) with no DNP flag, yet the fitted board
