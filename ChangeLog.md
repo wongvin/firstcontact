@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-02
+
+### docs: XIAO nRF54LM20A hardware review (#384)
+
+- `zephyr/sophon/scripts/kicad-netlist.py`: resolves a whole hierarchical design from its root sheet, with power-net names, multi-unit symbols and DNP flags. New `--check-pcb` compares every pad's net with the PCB's: both XIAO designs pass with no disagreement, after it exposed and fixed a pin-transform bug for rotated and mirrored parts.
+- `hw/nrf54lm20a/HARDWARE.md`: the board reviewed from the netlist and datasheets. It covers the header map, IMU, microphone, the nPM1300's strapping, the load path, U4 high-impedance on battery, RF and NFC, hazards, and a battery quiescent budget. Two corrections: ANT2 is an IPEX connector with no antenna on the board, and the nRF54's USB VBUS is only reachable through a DNP resistor.
+- `NRF54LM20A-UPDATED-PLAN.md`: the review is recorded, adding two firmware items: NOR deep power-down (Phase 3) and the charge LED's host mode (Phase 4).
+- `Brewfile`: adds `poppler`, for datasheet text (`pdftotext -layout`) and page rendering (`pdftoppm`).
+
 ## 2026-10-31
 
 ### docs: nRF54LM20A updated plan (#376)

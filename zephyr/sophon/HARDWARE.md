@@ -69,10 +69,13 @@ scripts/kicad-netlist.py 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' AIN7_BAT RE
 scripts/kicad-netlist.py 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' --values R16 R17
 ```
 
-Read its docstring before trusting it on another board: it handles a single
-sheet and ignores hierarchical sheets, buses and no-connects. Every claim in this
-file is reproducible with it, which is the point — the numbers below are not
-asked to be taken on faith.
+Read its docstring before trusting it on another board. Since #384 it loads a
+hierarchical design from its root sheet, names power nets, handles multi-unit
+symbols and flags DNP parts; it still ignores buses and no-connects. Its
+`--check-pcb <file.kicad_pcb>` compares every pad's net with the PCB's, and both
+XIAO designs pass with no disagreement — run it first on any new design. Every
+claim in this file is reproducible with it, which is the point — the numbers
+below are not asked to be taken on faith.
 
 **No generated netlist is committed.** The script is ours; its output is a
 derivative of a design that is CC BY-SA 4.0, and this repo is public with no

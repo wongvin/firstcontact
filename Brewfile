@@ -44,3 +44,9 @@ brew "pre-commit"
 # Bluetooth semantics; this catches the mechanical layer beneath.
 # Configured by ios/Sophon/.swiftlint.yml -- the defaults do not fit this code.
 brew "swiftlint"
+
+# PDF text and page rendering for datasheets and schematic exports (#384):
+# pdftotext extracts text with `-layout`, which keeps tables readable, and
+# pdftoppm renders pages, which Claude Code's Read tool needs for PDFs.
+# Without it, reading a datasheet meant a throwaway PyMuPDF environment.
+brew "poppler"

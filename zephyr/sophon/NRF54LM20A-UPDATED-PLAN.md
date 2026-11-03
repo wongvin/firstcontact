@@ -21,6 +21,7 @@
 | 2026-10-31 | **Phase 3 needs no nPM1300 work for the IMU.** v4.5.0's board file powers the IMU rail itself: LDO1 at 3.3 V in LDO mode, `regulator-boot-on`, with regulator init ordered after the charger to avoid a USB brown-out. The IMU-power gate on Phase 3 is gone; only the battery backend stays in Phase 4. | § Later issues → Phase 3, Phase 4 |
 | 2026-10-31 | **Phase 2's flash path changes:** no UF2 guard (there is no UF2), but a lock check, since v4.5.0's board config still mass-erases a locked part on connect. Its `nrf54l_load` now commits the write buffer and verifies. | § Later issues → Phase 2 |
 | 2026-10-31 | **The UF2-to-MCUboot migration app is dropped.** With no UF2 path on this board there is nothing to migrate from; a board is set up by SWD (erase, then MCUboot and an image in one session), which the onboard probe makes a USB-C cable. | § Later issues |
+| 2026-10-31 | **Hardware design review done (#384)**, from the whole netlist, now checked pad by pad against the PCB. **ANT2 is an IPEX Gen4 receptacle, not a chip antenna:** the board has no antenna of its own. The nRF54's USB VBUS reaches `VBUS` only through a DNP resistor. U4 is high-impedance on battery, so an external probe is safe then. `3V3_OUT`, the header's 3V3, is always on. Two firmware items follow: v4.5.0 puts the charge LED in host mode, and the always-on 8 MB NOR idles at 15 µA unless it is put into deep power-down. Datasheets are in the gitignored `datasheets/`, not `hw/nrf54lm20a/`. | § Later issues → Hardware design review, Phase 3, Phase 4 |
 
 ## Context
 
@@ -425,7 +426,11 @@ disconnect-time `Invalid Tx Enqueue` log race with no failed operation.
 
 ## Later issues (outlined only, cross-linked to this one)
 
-- **Hardware design review**. *Updated 2026-10-31:* much of it is answered by #369
+- **Hardware design review** — **done 2026-10-31 (#384)**; the board is documented in
+  [hw/nrf54lm20a/HARDWARE.md](hw/nrf54lm20a/HARDWARE.md), and the text below is the
+  plan as it stood. Its "chip antenna ANT2" was wrong: ANT2 is an IPEX Gen4 receptacle.
+  The datasheets went to the gitignored `zephyr/sophon/datasheets/`.
+  *Updated 2026-10-31:* much of it is answered by #369
   and #376 — the power rails (netlist with rail names), the SAMD11 powered only from
   VBUS, U4's OE, the back-pad silkscreen, no USB on the nRF54, `power_en`
   unconnected, LDO1 at 3.3 V upstream. Still open: the header pin map from the
@@ -506,8 +511,12 @@ disconnect-time `Invalid Tx Enqueue` log race with no failed operation.
     nPM1300's LDO1, which v4.5.0's board file brings up at 3.3 V (`regulator-boot-on`, init
     ordered after the charger). So Sophon needs no regulator code, and this phase has no
     IMU-power gate. Confirm the rail and the IMU stream on hardware.
+  - **NOR deep power-down** (#384): the 8 MB PY25Q64HA on the always-on `VSYS_3V3` idles
+    at 15 µA in standby, most of the board's sleep draw, and its node is disabled, so
+    nothing sends it to deep power-down (1 µA). Put it there at boot. Then measure the
+    whole board on battery.
   - **Per-board `.conf`:** the BLE TX power level (−4 dBm was chosen for the nRF52's antenna;
-    re-measure on ANT2), and ZMS from Phase 2. `prj.conf` comments that name the nRF52840 (FICR,
+    re-measure on ANT2, *with a known antenna fitted: ANT2 is a connector, #384*), and ZMS from Phase 2. `prj.conf` comments that name the nRF52840 (FICR,
     CDC ACM console, radio TX steps) move to the nRF52 board file or get reworded.
   - **Verify on hardware:** build both MCUs and confirm the nRF52 image is byte-identical. Flash
     over the onboard probe. The console must show the MCUboot banner, `role: direct`, and no init
@@ -520,6 +529,8 @@ disconnect-time `Invalid Tx Enqueue` log race with no failed operation.
   *Updated 2026-10-31:* v4.5.0's board file already instantiates the nPM1300 charger (under
   the sensor subsystem, with `SENSOR` on by default) and its LEDs, so the backend reads an
   existing device rather than adding one.
+  *#384:* that board file sets the charge LED (D2, nPM1300 LED1) to `host` mode, so it no
+  longer shows charging by itself. Restore `charging` in Sophon's overlay, or drive it here.
   Fit a Wio-SX1262 and confirm the board resolves to sensor/gateway/transporter, checking
   the shared `&xiao_d` pin map on hardware, and run a LoRa link against an nRF52 board.
 - ~~**UF2-to-MCUboot migration app**~~ — **dropped 2026-10-31:** this board has no UF2 path
