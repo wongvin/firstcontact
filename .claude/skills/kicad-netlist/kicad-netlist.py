@@ -7,18 +7,57 @@ component values to symbols by their position on the page, and that produced two
 wrong conclusions: `P0.17` was taken for a charge-status readback because its net
 is named `~{CHG}`, when it lands on the charger's `PRETERM` input; and `R17` was
 read as 510k from an archive that turned out to hold the *previous* board
-revision. See ../hw/nrf52840/HARDWARE.md.
+revision. See zephyr/sophon/hw/nrf52840/HARDWARE.md.
 
 Usage:
     kicad-netlist.py <file.kicad_sch> [filter ...]
     kicad-netlist.py <file.kicad_sch> --values [filter ...]
     kicad-netlist.py <file.kicad_sch> --check-pcb <file.kicad_pcb>
 
-With no filter, prints everything. Filters are case-insensitive substrings,
-matched against a net's labels and its "REF pin N" members:
+With no filter, prints everything. Filters ignore case, and are EXACT unless
+they end in `*` or `=`:
 
-    kicad-netlist.py board.kicad_sch P0.17 P0.13
-    kicad-netlist.py board.kicad_sch --values R16 R17 U2
+  * `R1` matches only what is named exactly that: in a net query, a net label,
+    a reference (every net that part is on), or one pin written "R1 pin 2"; in
+    --values, the reference;
+  * `R1*` matches anything containing "R1" -- R1, R10, VR1 -- anywhere in a
+    net's labels and its "REF pin N [name]" members, or in a reference.
+
+    `U3 pin *` lists every net U3 is on (the same as `U3`). The `*` works
+    only at the end: `U8*K7` is an exact filter that matches nothing.
+
+  * `VBUS=` searches PIN NAMES only (the part in brackets in the output), and
+    `[` / `]` anchor the start / end of the name, as they are printed:
+
+        [VBUS]=   the pin name is exactly VBUS
+        [VBUS=    starts with VBUS (also VBUSOUT)
+        VBUS]=    ends with VBUS (also A4/B9/VBUS)
+        VBUS=     contains VBUS
+
+    In --values an `=` filter matches nothing: a part has no pin name. See
+    SKILL.md for results on a real design.
+
+Quote a filter with `*`, or the shell may expand it against file names:
+
+    kicad-netlist.py board.kicad_sch P0.17 'AIN7*' "U2 pin 5"
+    kicad-netlist.py board.kicad_sch --values R16 R17 'U*'
+
+--values prints one row per placed part -- reference, `Value` field, footprint
+(`library:name`) -- then a count. Its filters match the REFERENCE only: `R1` is
+R1 alone, `'R1*'` adds R10-R19 and VR1. Rows sort as text (R10 before R2). A
+multi-unit part prints once, and power symbols and flags (`#PWR`, `#FLG`) are
+left out. For example:
+
+    $ kicad-netlist.py board.kicad_sch --values 'R1*' U3 J1
+             J1  USB_C_Receptacle         Connector_USB:USB_C_Receptacle_GCT_USB4105
+             R1  10k                      Resistor_SMD:R_0402_1005Metric
+            R10  100k                     Resistor_SMD:R_0402_1005Metric
+       R11(DNP)  0R                       Resistor_SMD:R_0402_1005Metric
+             U3  STM32G031K8T6            Package_QFP:LQFP-32_7x7mm_P0.8mm
+    5 component(s)
+
+The `Value` field is whatever the designer typed: a part number, a resistance,
+or nothing useful. Read the footprint before naming a part's role.
 
 Give it the ROOT sheet of a multi-sheet design and it loads every sub-sheet
 (#384, for the XIAO nRF54LM20A). Connectivity follows KiCad's scoping:
@@ -32,7 +71,7 @@ appearing as `#PWRnn` parts; `#FLG` power flags are ignored. Multi-unit symbols
 (the nRF54LM20A, U8, is six units) attach each pin to its own unit's placement.
 A part marked Do Not Populate is flagged `(DNP)` -- after each of its pins in a
 net, after its reference in --values: it is drawn, and on the PCB, but not
-fitted. The flag follows the pin so that a "REF pin N" filter still matches.
+fitted. The flag is not part of any name a filter is compared with.
 
 --check-pcb compares the result with the nets the PCB assigns to every pad: for
 each pair of pads, does the schematic put them on one net exactly when the PCB
@@ -55,7 +94,7 @@ Note the coordinate quirk: library pin Y is up while sheet Y is down, so a pin's
 absolute position is `origin + rotate((px, -py), rot)`.
 
 Validate any change against a net whose answer is already known -- for this
-board, `VBAT - R16 - AIN7 - R17 - P0.14` from hw/nrf52840/HARDWARE.md.
+board, `VBAT - R16 - AIN7 - R17 - P0.14` from zephyr/sophon/hw/nrf52840/HARDWARE.md.
 
 The schematics this parses may be licensed; Seeed's XIAO designs are CC BY-SA
 4.0. This script is ours, but its output is a derivative of whatever it is run
@@ -449,8 +488,47 @@ def check_pcb(sch_path, pcb_path):
 # --- output --------------------------------------------------------------
 
 
-def matches(text, filters):
-    return not filters or any(f.lower() in text.lower() for f in filters)
+def pin_name_hit(pattern, pin_names):
+    """A `=` filter, with the `=` removed, against pin names. `[` anchors the
+    start of the name and `]` the end: `[VBUS]` is exactly VBUS, `[VBUS` starts
+    with it, `VBUS]` ends with it, and bare `VBUS` contains it."""
+    start, end = pattern.startswith("["), pattern.endswith("]")
+    core = pattern[1:] if start else pattern
+    core = core[:-1] if end and core.endswith("]") else core
+    for name in pin_names:
+        name = name.lower()
+        if start and end:
+            hit = name == core
+        elif start:
+            hit = name.startswith(core)
+        elif end:
+            hit = name.endswith(core)
+        else:
+            hit = core in name
+        if hit:
+            return True
+    return False
+
+
+def matches(names, text, filters, pin_names=()):
+    """True if any filter hits; the filter's last character picks the mode. `*`:
+    a substring of `text` (`R1*` hits R1, R10 and VR1). `=`: a pin name, see
+    pin_name_hit(). Otherwise it must equal one of `names` exactly (`R1` hits
+    R1 only). All ignore case. No filters means everything."""
+    if not filters:
+        return True
+    names = {n.lower() for n in names}
+    for f in filters:
+        f = f.lower()
+        if f.endswith("*"):
+            if f[:-1] in text.lower():
+                return True
+        elif f.endswith("="):
+            if pin_name_hit(f[:-1], pin_names):
+                return True
+        elif f in names:
+            return True
+    return False
 
 
 def print_nets(path, filters):
@@ -462,7 +540,11 @@ def print_nets(path, filters):
             f"{r} pin {n} [{pn}]{' (DNP)' if r in dnp else ''}" for r, n, pn in data["pins"]
         )
         haystack = " ".join(data["labels"] + members)
-        if not matches(haystack, filters):
+        # Exact filters name a label, a reference, or one pin as "REF pin N".
+        names = set(data["labels"])
+        for r, n, _ in data["pins"]:
+            names |= {r, f"{r} pin {n}"}
+        if not matches(names, haystack, filters, [pn for _, _, pn in data["pins"]]):
             continue
         print(", ".join(sorted(set(data["labels"]))) or "(unnamed net)")
         print("     " + (", ".join(members) or "(no pins)"))
@@ -472,13 +554,16 @@ def print_nets(path, filters):
 
 
 def print_values(path, filters):
+    """One `REF  VALUE  FOOTPRINT` row per placed part, then a count; see the
+    module docstring for an example. Filters match the reference only. A part
+    placed as several units yields identical rows, which the set() collapses."""
     rows = []
     for _, root, _ in load_sheets(path):
         for sym, _, props in placed_symbols(root):
             ref = props["Reference"]
             if ref.startswith(("#PWR", "#FLG")):
                 continue
-            if matches(ref, filters):
+            if matches({ref}, ref, filters):
                 ref += "(DNP)" if is_dnp(sym) else ""
                 rows.append((ref, props.get("Value", ""), props.get("Footprint", "")))
     for ref, value, footprint in sorted(set(rows)):

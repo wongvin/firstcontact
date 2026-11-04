@@ -207,7 +207,7 @@ Consequences:
 - **With no pack fitted, the charger drives just 2.2 µF and ~2.8 µA.** Whatever
   the reading does then is the charger's own output behaviour, not a battery.
 
-Reproduce with `scripts/kicad-netlist.py '<sch>' VIN VBUS VBAT 3V3` and
+Reproduce with `kicad-netlist.py '<sch>' VIN VBUS VBAT 3V3` and
 `--values U6 Q1 D1 C30 C4 R9`. The base XIAO nRF52840's v1.2 schematic (sheet
 `02 XIAO Header & nRF52840`) has the same members on `VBUS`, `VIN` and `VBAT`.
 
@@ -234,7 +234,7 @@ and `&adc` enabled with no channel children. All of it lives in `boards/xiao_ble
 
 The source the SAADC sees is the divider's Thévenin resistance, 1 MΩ ∥ 499 kΩ ≈
 **333 kΩ**, and nothing holds the node: `AIN7` carries only R16, R17, the pin
-and the header (`kicad-netlist.py '<sch>' AIN7`).
+and the header (`kicad-netlist.py '<sch>' 'AIN7*'`).
 
 The nRF52840 product specification sets the acquisition time by source
 resistance ([§ SAADC, Acquisition time, Table 1](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/saadc.html)):
@@ -331,7 +331,7 @@ resources](https://wiki.seeedstudio.com/XIAO_BLE/#resources):
 nRF52840", with three sheets. The nRF52840 and the header are on
 `02 XIAO Header & nRF52840.kicad_sch`.
 
-[`scripts/kicad-netlist.py`](../../scripts/kicad-netlist.py) then read one sheet
+[`kicad-netlist.py`](../../../../.claude/skills/kicad-netlist/kicad-netlist.py) then read one sheet
 and ignored hierarchical connections, so it was run on that sheet alone. It was
 first checked against the net whose answer is known: it reproduces the battery
 divider topology, `VBAT – R16 – P0.31/AIN7 – R17 – P0.14`. That version also had

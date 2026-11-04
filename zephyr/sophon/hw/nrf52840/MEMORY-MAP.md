@@ -123,7 +123,7 @@ when you look at the back**.
 | **TP5** | SWDIO | 19.05 mm | 7.62 mm |
 
 There is no TP4 and no 3V3 test point. Derived from the KiCad netlist with
-[`scripts/kicad-netlist.py`](../../scripts/kicad-netlist.py), not by probing pads.
+[`kicad-netlist.py`](../../../../.claude/skills/kicad-netlist/kicad-netlist.py), not by probing pads.
 
 **K1** is the reset button — `BUTTON-4P`, on the front, shorting `RESET` to GND.
 It shares a net with TP2. `UICR PSELRESET` reads `0x12` (pin 18), which is what

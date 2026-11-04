@@ -1,7 +1,8 @@
-# Ruff configuration (#279). Repo-wide, because the Python here lives in two
-# unrelated places: zephyr/sophon/scripts/ (build and flash tooling) and
-# api/server/ (the local FastAPI backend). Neither owns the other, so the config
-# sits at the root rather than in either manifest.
+# Ruff configuration (#279). Repo-wide, because the Python here lives in three
+# unrelated places: zephyr/sophon/scripts/ (build and flash tooling),
+# api/server/ (the local FastAPI backend), and .claude/skills/kicad-netlist/
+# (the kicad-netlist skill's script, #386). None owns the others, so the config
+# sits at the root rather than in any one manifest.
 #
 # Run with `ruff check .` and `ruff format .` from the repo root.
 
@@ -38,4 +39,4 @@ ignore = [
 # kicad-netlist.py parses S-expressions with short-lived locals whose names match
 # the schematic's own vocabulary; renaming them to satisfy a linter would make
 # the parser harder to check against the file format it reads.
-"zephyr/sophon/scripts/kicad-netlist.py" = ["E741"]
+".claude/skills/kicad-netlist/kicad-netlist.py" = ["E741"]

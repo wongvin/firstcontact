@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-03
+
+### feat: kicad-netlist skill (#386)
+
+- `.claude/skills/kicad-netlist/SKILL.md`: a project skill for establishing board facts from a KiCad design. It takes a design from a URL, a local archive or a local directory, handles archives as untrusted data, validates with `--check-pcb` before reporting any net, and covers DNP flags and source tags, datasheet handling (including same-package proxies), and the licence rule.
+- `kicad-netlist.py` moves from `zephyr/sophon/scripts/` into the skill. `ruff.toml` and the live HARDWARE.md and MEMORY-MAP.md links follow it.
+- `kicad-netlist.py` filters are now **exact unless they end in `*` or `=`**: `R1` is R1 only, `'R1*'` matches anything containing it (R10, VR1), and `'[VBUS]='` matches pin names, with `[` and `]` anchoring the start and end of the name. Documented commands that relied on substrings now carry the `*`. `--values` output is documented, with an example.
+- `.gitignore`: `**/datasheets/`, so each subproject keeps its own datasheets folder.
+
 ## 2026-11-02
 
 ### docs: XIAO nRF54LM20A hardware review (#384)
