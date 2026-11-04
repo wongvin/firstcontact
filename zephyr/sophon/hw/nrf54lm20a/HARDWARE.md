@@ -62,7 +62,7 @@ as netlist facts. Two were wrong (§ Corrections).
 
 | Tag | Meaning |
 |---|---|
-| *netlist* | resolved from the root `.kicad_sch` with `scripts/kicad-netlist.py`, across all sheets |
+| *netlist* | resolved from the root `.kicad_sch` with the [`kicad-netlist` skill](../../../../.claude/skills/kicad-netlist/SKILL.md), across all sheets |
 | *PCB* | read from the `.kicad_pcb`: a pad's net, a footprint, or silkscreen position |
 | *datasheet* | the part's datasheet, from the table above, with the page or table |
 | *PDF text* | from the PDF's extracted text only — weakest; not used for a conclusion here unless stated |

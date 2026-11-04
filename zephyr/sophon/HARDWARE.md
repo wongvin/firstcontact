@@ -61,12 +61,14 @@ inserting a `/CropBox` into the page first zooms a region to full resolution.
 not** — it must be computed from symbol placement, library pin offsets, wire
 segments and label positions.
 
-[`scripts/kicad-netlist.py`](scripts/kicad-netlist.py) does that, and is what
+The [`kicad-netlist` skill](../../.claude/skills/kicad-netlist/SKILL.md)'s
+[`kicad-netlist.py`](../../.claude/skills/kicad-netlist/kicad-netlist.py) does that, and is what
 settled P0.17 after two wrong guesses from the PDF:
 
 ```bash
-scripts/kicad-netlist.py 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' AIN7_BAT READ_BAT
-scripts/kicad-netlist.py 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' --values R16 R17
+K=.claude/skills/kicad-netlist/kicad-netlist.py   # from the repo root
+python3 -I $K 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' 'AIN7_BAT*' 'READ_BAT*'
+python3 -I $K 'Seeed Studio XIAO nRF52840 v1.1.kicad_sch' --values R16 R17
 ```
 
 Read its docstring before trusting it on another board. Since #384 it loads a
