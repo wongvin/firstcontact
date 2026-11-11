@@ -36,13 +36,15 @@ python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.
 ```
 
 Never execute anything from inside an extracted design. Pass its paths to the
-script as arguments, and always run Python with `-I`.
+script as arguments, and always run Python with `-I`. **Quote every path**:
+Seeed's nRF54LM20A archive extracts to a folder with `&` in its name, and
+KiCad sheet files often have spaces (`05 nRF54LM20A.kicad_sch`).
 
 **Check the revision before anything else.** Read the title block of every
 sheet and compare it with what the archive's name claims:
 
 ```bash
-grep -h -A4 '(title_block' <dir>/*.kicad_sch | grep -E 'rev|date'
+grep -h -A4 '(title_block' "<dir>"/*.kicad_sch | grep -E 'rev|date'
 ```
 
 Seeed's `…_SCH_PCB_v1.1.zip` holds a v1.0 schematic
@@ -171,15 +173,85 @@ Reading the output:
 - **`(DNP)`** follows each pin of a Do Not Populate part, and in `--values` it
   follows the reference. **Check what every DNP part disconnects.** On the
   XIAO nRF54LM20A, a DNP 0 Ω (R23) is all that links the nRF54's USB VBUS pin.
-  Test points are DNP as a matter of course: bare pads.
+  Test points are DNP as a matter of course: bare pads. The mark is KiCad's DNP
+  attribute, or a Value of `DNP` / `DNF`: Seeed's XIAO nRF52840 v1.1 marks its
+  not-fitted parts only by Value, with every DNP attribute left at `no`.
 - **A single-pin net means the pin is unconnected.** The script ignores
   no-connect flags. Confirm in the `.kicad_pcb`: an unconnected pad's net is
   named `unconnected-(…)`.
 - **A reference designator is not a function.** Read the footprint in
   `--values` before naming a part's role: `ANT2` is an IPEX connector footprint.
-  The `Value` field can be unhelpful too (U4's is `英联`, "Union").
+  The `Value` field can be unhelpful too (U4's is `英联`, "Union"; the
+  nRF52840's LDO is just `3.3V`). The symbol's library name sometimes carries
+  the part number instead: `grep -o '(lib_id "[^"]*"' <dir>/*.kicad_sch | sort -u`.
 - **Ball names on multi-unit parts** come from the library symbol. For a BGA or
   WLCSP part, check them against the datasheet's ball map once.
+
+### Copper on a net: `--copper`
+
+```bash
+python3 -I $K --copper <root.kicad_pcb> 'Net-(ANT*' '*RF*'
+```
+
+For each PCB net matching the filters (exact / `*`, on the PCB's net name),
+this lists:
+
+- its pads, as `REF.pad`;
+- its track count and length;
+- its vias;
+- its copper zones.
+
+It ends with the board's copper that carries no net: board graphics on copper
+layers, copper graphics inside footprints, and keepout areas. A **copper
+antenna** shows up as a footprint's or the board's copper graphics, or a zone,
+on the RF net. A chip antenna shows up as a footprint pad. A bare connector
+shows up as neither. On the XIAO nRF54LM20A, the RF net reaches only
+`ANT2.1`, with no zones and no copper graphics anywhere on the board. On the
+XIAO nRF52840, `Net-(ANT1-S)` reaches the chip antenna's pad `ANT1.1`.
+
+PCB net names are not schematic labels. Unlabelled nets are named after a pin
+(`Net-(ANT2-D)`), so when a filter finds nothing, list everything and search
+for the part: `python3 -I $K --copper <pcb> | grep -B1 -A1 'ANT1\.'`.
+
+### Drawing the board: `--draw`
+
+```bash
+python3 -I $K --draw "<root.kicad_pcb>" "<dir>" 'TP*' 'J*' --credit "<credit text>" --name probe
+qlmanage -t -s 2400 -o "<dir>" "<dir>"/*.svg    # PNGs, for the Read tool
+```
+
+This writes `<board>[-<name>]-front.svg` and `-back.svg`; `--name` keeps several drawings apart in one folder. Each shows:
+
+- the board outline;
+- every pad in its true shape, coloured by side;
+- the silkscreen text at its real size, angle and position;
+- on each pad whose reference matches the filters, its `REF.pad` and net.
+
+The back is drawn **as seen from the back**, the way the board is held to
+probe it.
+
+This is how a printed label is tied to a pad. **The pad's identity on the
+drawing is exact**, from the PCB, and pad positions match the Gerbers'
+plotted pads exactly. Which pad a label belongs to is read by eye,
+with the whole layout in view, as on the real board. Labels usually follow a
+pattern that settles it: on both XIAO boards, every SWD label sits beside its
+pad on the same side, reading upward. A distance can't show that, and can
+mislead. A text's position is its anchor, usually a corner, and labels often
+sit between pads. On the XIAO nRF52840 the pad nearest `CLK` is TP1 (GND) and
+nearest `DIO` is TP2 (RESET), but the labels belong to TP3 (SWDCLK) and TP5
+(SWDIO), each sitting to the right of its pad.
+
+Rotated and mirrored text matches the strokes KiCad plotted in the XIAO
+nRF52840's `B_Silkscreen` Gerber. KiCad mirrors in the text's own frame, so a
+mirrored text also reads the other way along its angle. The drawing derives
+from the design. Every SVG carries a change note in a footer and in its
+metadata, and `--credit` adds the creator, source and licence (§ 6). Without
+`--credit` it stays in the scratchpad. Show it to the user, and read the PNG
+yourself.
+
+Small parts with close pads (an 0201's are 0.47 mm apart) get one ringed label
+listing each pad's net, with a leader line. Test pads and widely spaced pads
+get a label each.
 
 ## 4. Tag every fact with its source
 
@@ -204,6 +276,16 @@ in the document the facts go into. The model is
 - **Report only URLs that were actually fetched.** A URL built from a vendor's
   naming pattern is a guess. A 403 or 404 on one says nothing about whether the
   document exists.
+- **When a vendor blocks scripted downloads** (Nordic's documentation sites
+  returned 403 to curl in #387), ask the user for the
+  file or the real link, or use a reputable third-party copy (a distributor or a
+  dev-board maker). Record it as a mirror ("Arduino's copy of Nordic's PS
+  v1.1"), with its document revision and hash.
+- **Check that a download is a PDF** before hashing or citing it: `file <f>`, or
+  its first bytes are `%PDF`. A bot-protection page ("Just a moment…") or a
+  distributor's HTML comes back with HTTP 200. When only an HTML version can be
+  had, the datasheet is not held: say so under § Not established, rather than
+  citing pages read through a web fetch.
 - **Read** with poppler: `pdftotext -layout <pdf> -` for tables, or the Read
   tool's `pages` for figures and ball maps.
 - **A part with no datasheet of its own:** use a same-package proxy only after
@@ -214,11 +296,63 @@ in the document the facts go into. The model is
 
 ## 6. Licence
 
-Commit **no generated netlist and no third-party design file**. Seeed's are
-CC BY-SA 4.0, and this repo has no LICENSE. The script's output derives from
-the design, so re-run it rather than saving it. For a third-party design, the
+**The rule:** commit no generated netlist and no third-party design file.
+Re-run the script rather than saving its output. For a third-party design, the
 URL or archive name and its hash are the record. A design that already lives
-in the repo is cited by its path.
+in the repo is cited by its path. **Figures**, i.e. `--draw` drawings and
+schematic snippets, may be committed with credits, as described at the end of
+this section.
+
+**Why.** Seeed's XIAO designs are CC BY-SA 4.0 (the boards carry
+`LOGO_CC_BY-SA_4.0` footprints). The script's output and the drawings are
+adaptations of the design, and the licence (§ 3) attaches obligations to an
+adaptation only when it is **shared**, i.e. distributed or made publicly
+available. Making and using one privately, in the scratchpad, triggers
+nothing. Once shared, an adaptation must carry:
+
+- **Attribution:**
+  - credit to the creator, keeping any copyright notice;
+  - a link to the licence;
+  - a statement that it was changed, keeping any earlier such statements;
+  - the creator's disclaimer, if any.
+- **ShareAlike:** it must be licensed under CC BY-SA 4.0 or later, or a licence
+  CC lists as compatible (GPLv3, one way).
+- **No added restrictions:** no extra terms or DRM that stop others using it
+  under the licence.
+
+**What the licence doesn't reach.**
+
+- **Facts.** "R23 is DNP on the nRF54's VBUS" is a fact about the board, not
+  the design's expression. So HARDWARE.md can state every finding, with its
+  *netlist* tag, and carry no obligation.
+- **The rest of the repo.** ShareAlike covers the adapted material itself, so
+  a BY-SA file doesn't put anything else in the repo under BY-SA.
+- **Patents and trademarks**, e.g. Seeed's name and logo.
+
+**So keeping netlist output out is a choice, not a requirement.** A raw dump
+has no reason to be in a doc, and re-running costs nothing.
+
+**Figures in a document carry credits at two levels.**
+
+1. **In the document**, a note at the top: *Credits and licence for figures*.
+   It names the source (creator, design and revision, URL), links CC BY-SA 4.0,
+   says how the figures were changed, and marks which figures it covers (†). It
+   also says that only those figures are licensed CC BY-SA 4.0, and that the
+   rest of the document isn't covered. CC BY-SA 4.0 allows attribution "in any
+   reasonable manner", and a document's own text stays outside ShareAlike,
+   since including a figure doesn't make the document an adaptation.
+2. **On every figure file**, because a file in the repo can be opened, copied
+   or linked on its own. `--draw --credit "<text>"` stamps the credit into each
+   SVG, in the footer and the metadata, alongside its change note. Use the
+   same source and licence wording as the document's note, ending "This figure
+   is licensed CC BY-SA 4.0."
+
+A schematic snippet cropped from the published PDF (`pdftoppm -f N -l N -x … -y
+… -W … -H … -r 300 -png`) needs the same two levels, but a raw PNG has no
+footer. Until a tool adds one, cite schematic facts in text and use layout
+drawings as figures.
+
+This is a reading of the licence, not legal advice.
 
 ## Changing the script
 
@@ -234,3 +368,15 @@ in the repo is cited by its path.
 3. Check a net whose answer is known: on the nRF52840 v1.1,
    `'AIN7_BAT*' 'READ_BAT*'` gives `VBAT – R16 – P0.31/AIN7 – R17 – P0.14`, with
    R16 1M and R17 499k.
+4. For a change to the pad transform (`pcb_pads`, used by `--draw` and
+   `--copper`): on the XIAO nRF52840 v1.1, every pad must land on a pad flash
+   (`D03`) in its archive's `F_Cu` / `B_Cu` Gerber. Currently all 250 pads do,
+   to within 0.000 mm.
+5. For a change to `--draw`: draw the XIAO nRF52840 v1.1 and overlay the
+   `B_Silkscreen` Gerber from its archive. The archive was plotted in board
+   coordinates with Y negated; mirror X as the back view does. Every label's
+   text must lie on the plotted strokes.
+6. For a change to `--copper`: on the nRF54LM20A, `'Net-(U8B-ANT)'` gives pads
+   `L5.1, U8.E1` and `'Net-(ANT2-D)'` gives `ANT2.1, R25.2`, with no zones and
+   no copper graphics on the board. On the nRF52840, `Net-(ANT1-S)` reaches
+   `ANT1.1`.
