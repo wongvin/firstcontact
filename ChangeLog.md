@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-11
+
+### feat: kicad-design-review skill (#387)
+
+- `.claude/skills/kicad-design-review/SKILL.md`: a hardware design review for any KiCad project, built on the `kicad-netlist` skill. It is a checklist from the #384 review, each item a question with the queries that answer it: parts and datasheets, power and load path, strapping, debug access, USB, header map, peripherals, RF, DNP parts, hazards, a battery quiescent budget, then corrections and what isn't established. It writes a dated, standalone review report to `hw/<mcu>/reviews/`, frozen once committed, and lists the verified facts to merge into `hw/<mcu>/HARDWARE.md`, which stays the live record. A later review re-checks from scratch unless nothing changed, and then compares with the last report.
+- `kicad-netlist.py --draw <pcb> <dir>`: front and back SVGs of the outline, every pad and the silkscreen, with each pad labelled by reference and net. The back is drawn as seen from the back. A printed label is tied to a pad by looking, not by distance: on the XIAO nRF52840, the nearest pad to two SWD labels is the wrong one. Pad positions are checked against the Gerber pad flashes (all 250 exact), and rotated and mirrored text against the plotted Gerber silkscreen. The review's debug-access step uses it.
+- `kicad-netlist` skill § Licence: records the reasoning. CC BY-SA 4.0 binds an adaptation only once it is shared, and facts aren't covered. Figures may go in a document under a top-of-document credits note, as long as every figure file carries its own credit. `--draw` takes `--credit TEXT`, stamped into each SVG's footer and metadata with a change note, and `--name NAME` to keep drawings apart. The review's output outline adds the credits note and `hw/<mcu>/reviews/figures/<YYYY-MM-DD>/`, and its DNP step draws where the parts are.
+- `kicad-netlist.py --copper <pcb>`: each net's pads, tracks, vias and zones, plus copper with no net, so "antenna or only a connector?" is one command.
+- `kicad-netlist.py`: a Value of `DNP`/`DNF` now counts as not fitted (the XIAO nRF52840 v1.1 marks C40, R8 and U7 only that way), and `\n` escapes in KiCad strings are decoded.
+- Verified by blind runs on both XIAO boards, which reproduced #384's and #319's findings. They also found two errors in #384's HARDWARE.md, filed as #389, and their feedback is folded into both skills.
+
 ## 2026-11-03
 
 ### feat: kicad-netlist skill (#386)
