@@ -102,7 +102,15 @@ bootloader mounts a volume. The script tries `west flash -r uf2` and falls back
 to a plain `cp` of `build/zephyr/zephyr.uf2`, because the uf2 runner matches on a
 board-id string that a given board revision may not report.
 
-**The XIAO has no UART-to-USB bridge**, so USB CDC ACM is the only console:
+**The console depends on the board.**
+
+- **XIAO nRF52840 (Sense Plus, and the plain gateway):** no UART-to-USB bridge,
+  so USB CDC ACM is the only console.
+- **XIAO nRF54LM20A:** the nRF54's own USB isn't wired. The console is `uart20`,
+  bridged to the USB-C by the onboard SAMD11, which also enumerates as a
+  CMSIS-DAP probe (`sophon/hw/nrf54lm20a/HARDWARE.md`).
+
+Both appear as a `cu.usbmodem*` device:
 
 ```bash
 minicom -D /dev/cu.usbmodem* -b 115200
@@ -115,8 +123,9 @@ opening it against a CDC ACM peripheral fails with
 This is a macOS distinction, not a Zephyr one, and the failure looks like a dead
 board rather than a wrong device node.
 
-Do **not** set `CONFIG_USB_DEVICE_STACK=y` to get that console. The board's own
-defconfig (`boards/common/usb/Kconfig.cdc_acm_serial.defconfig`) already enables
+On the nRF52840, do **not** set `CONFIG_USB_DEVICE_STACK=y` to get that console.
+The board's own defconfig (`boards/common/usb/Kconfig.cdc_acm_serial.defconfig`)
+already enables
 the *new* USB stack (`USB_DEVICE_STACK_NEXT`), `CDC_ACM_SERIAL_INITIALIZE_AT_BOOT`,
 and a 4000 ms `LOG_PROCESS_THREAD_STARTUP_DELAY_MS` so the boot banner survives
 enumeration. Adding the legacy stack on top links both and fails at link time with

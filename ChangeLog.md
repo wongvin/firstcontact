@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-12
+
+### docs: nRF54LM20A review report and HARDWARE.md merge (#389)
+
+- `zephyr/sophon/hw/nrf54lm20a/reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md`: the first `kicad-design-review` report, frozen, with three credited figures (probe pads, DNP parts, RF chain) in `reviews/figures/2026-11-10/`. Its § For HARDWARE.md records how each finding was verified.
+- `hw/nrf54lm20a/HARDWARE.md`, corrected and extended:
+  - the IMU's INT1 idles driven low against its pull-up, about 33 µA, the largest sleep term ahead of the NOR (budget about 53 µA, about 6.4 µA with both fixed);
+  - R3 is on the buck's VSET pin;
+  - LDO1 must never be enabled as a load switch;
+  - 12 unconnected GPIOs, not 14;
+  - the level shifter's off state, R16 and TPS22916CN, CC pins and BUCK1 wiring.
+
+  New open questions: a possible 140 µA draw through the level shifter's pull-ups, and the 32 kHz crystal's load.
+- NTC decision: Sophon's overlay will set `thermistor-ohms = <0>` (NTC disabled, as the nPM1300 PS requires without a thermistor). `NRF54LM20A-UPDATED-PLAN.md` gains the INT1 fix in Phase 3 and this in Phase 4.
+- `zephyr/CLAUDE.md`: the console note is per board. The nRF54LM20A's is `uart20` through the SAMD11, not USB CDC ACM.
+
 ## 2026-11-11
 
 ### feat: kicad-design-review skill (#387)
