@@ -22,6 +22,7 @@
 | 2026-10-31 | **Phase 2's flash path changes:** no UF2 guard (there is no UF2), but a lock check, since v4.5.0's board config still mass-erases a locked part on connect. Its `nrf54l_load` now commits the write buffer and verifies. | § Later issues → Phase 2 |
 | 2026-10-31 | **The UF2-to-MCUboot migration app is dropped.** With no UF2 path on this board there is nothing to migrate from; a board is set up by SWD (erase, then MCUboot and an image in one session), which the onboard probe makes a USB-C cable. | § Later issues |
 | 2026-10-31 | **Hardware design review done (#384)**, from the whole netlist, now checked pad by pad against the PCB. **ANT2 is an IPEX Gen4 receptacle, not a chip antenna:** the board has no antenna of its own. The nRF54's USB VBUS reaches `VBUS` only through a DNP resistor. U4 is high-impedance on battery, so an external probe is safe then. `3V3_OUT`, the header's 3V3, is always on. Two firmware items follow: v4.5.0 puts the charge LED in host mode, and the always-on 8 MB NOR idles at 15 µA unless it is put into deep power-down. Datasheets are in the gitignored `datasheets/`, not `hw/nrf54lm20a/`. | § Later issues → Hardware design review, Phase 3, Phase 4 |
+| 2026-11-11 | **The `kicad-design-review` skill's review, merged (#387, #389).** The largest sleep term is the IMU's INT1, about 33 µA, not the NOR: it idles driven low against its 100 kΩ pull-up. R3 sets `3V3_OUT` through VSET. Never enable LDO1 as a load switch. The NTC must be disabled, and Sophon's overlay will set `thermistor-ohms = <0>`. The report is in `hw/nrf54lm20a/reviews/`. | § Later issues → Phase 3, Phase 4 |
 
 ## Context
 
@@ -511,10 +512,16 @@ disconnect-time `Invalid Tx Enqueue` log race with no failed operation.
     nPM1300's LDO1, which v4.5.0's board file brings up at 3.3 V (`regulator-boot-on`, init
     ordered after the charger). So Sophon needs no regulator code, and this phase has no
     IMU-power gate. Confirm the rail and the IMU stream on hardware.
+  - **IMU INT1 drain** (#389): INT1 idles driven low against R38 (100 kΩ to `IMU_VDD`), about
+    33 µA whenever LDO1 is on, the largest sleep term. Set INT1 open-drain (`PP_OD`) or
+    active-low (`H_LACTIVE`, with `irq-gpios` to match). Zephyr's `lsm6dsl` driver does neither,
+    so this needs a driver option, a register write after init, or an upstream change.
   - **NOR deep power-down** (#384): the 8 MB PY25Q64HA on the always-on `VSYS_3V3` idles
-    at 15 µA in standby, most of the board's sleep draw, and its node is disabled, so
-    nothing sends it to deep power-down (1 µA). Put it there at boot. Then measure the
-    whole board on battery.
+    at 15 µA in standby, and its node is disabled, so nothing sends it to deep power-down
+    (1 µA). Put it there at boot. Then measure the whole board on battery: about 53 µA
+    before these two fixes, about 6.4 µA after, plus the MCU (`hw/nrf54lm20a/HARDWARE.md`).
+    The measurement also settles whether the level shifter's pull-ups draw ~140 µA
+    on battery.
   - **Per-board `.conf`:** the BLE TX power level (−4 dBm was chosen for the nRF52's antenna;
     re-measure on ANT2, *with a known antenna fitted: ANT2 is a connector, #384*), and ZMS from Phase 2. `prj.conf` comments that name the nRF52840 (FICR,
     CDC ACM console, radio TX steps) move to the nRF52 board file or get reworded.
@@ -531,6 +538,8 @@ disconnect-time `Invalid Tx Enqueue` log race with no failed operation.
   existing device rather than adding one.
   *#384:* that board file sets the charge LED (D2, nPM1300 LED1) to `host` mode, so it no
   longer shows charging by itself. Restore `charging` in Sophon's overlay, or drive it here.
+  *#389:* set `thermistor-ohms = <0>` in the overlay. The board has a fixed 10 kΩ, not a thermistor,
+  and the PS requires the NTC function disabled then (p29); the driver disables it for 0.
   Fit a Wio-SX1262 and confirm the board resolves to sensor/gateway/transporter, checking
   the shared `&xiao_d` pin map on hardware, and run a LoRa link against an nRF52 board.
 - ~~**UF2-to-MCUboot migration app**~~ — **dropped 2026-10-31:** this board has no UF2 path
