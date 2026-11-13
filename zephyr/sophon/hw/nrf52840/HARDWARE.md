@@ -8,6 +8,22 @@ root keeps how these facts were established, and the Wio-SX1262.
 
 Companion: [MEMORY-MAP.md](MEMORY-MAP.md) is what occupies this board's flash.
 
+## Design reviews
+
+Both boards were reviewed from their KiCad source with the
+`kicad-design-review` skill (#391). The reports are frozen records; their
+verified findings are merged below, each citing its report. Where a report and
+this file disagree, this file is right.
+
+| Board | Design archive | Report |
+|---|---|---|
+| Sense Plus | [`Seeed_Studio_XIAO_nRF52840_Plus.zip`](https://files.seeedstudio.com/wiki/XIAO-BLE/Seeed_Studio_XIAO_nRF52840_Plus.zip), SHA-256 `f5e4e0e9…a99bdd9`. The file names say v1.1; the bundled PDF and folder say V1.0; there is no title block | [2026-11-12, Sense Plus v1.1](reviews/2026-11-12-xiao-nrf52840-sense-plus-v1.1.md) |
+| plain XIAO nRF52840 (gateway) | [`260828_Seeed_Studio_XIAO_nRF52840_v1.2.zip`](https://files.seeedstudio.com/wiki/XIAO-BLE/Res/260828_Seeed_Studio_XIAO_nRF52840_v1.2.zip), SHA-256 `973a5543…511ea95`, title blocks V1.2, 2026-08-28 | [2026-11-12, V1.2](reviews/2026-11-12-xiao-nrf52840-v1.2.md) |
+
+Both designs pass `--check-pcb` (266 and 252 pads, no split or merged nets).
+The reports' figures show the SWD pads, the not-fitted parts and the RF chain.
+The V1.2 report adds where the Sense-only parts would sit.
+
 ## The battery sense circuit
 
 ```
@@ -21,20 +37,22 @@ Netlist-derived, not read off a drawing:
 | Net | Members |
 |---|---|
 | `VBAT` | `U2.A1` (charger `OUT`), `BAT0` pad, `C30.1`, `R16.1`, `Q1.1` |
-| `P0.31_AIN7_BAT` | `R16.2`, `R17.1`, `U1.A8` (P0.31/AIN7), `U4.20` |
+| `P0.31_AIN7_BAT` | `R16.2`, `R17.1`, `U1.A8` (P0.31/AIN7), and on the Sense Plus `U4.20`, an extra castellated pad: **the divider's midpoint is on the board's edge** ([review](reviews/2026-11-12-xiao-nrf52840-sense-plus-v1.1.md)). Not on the plain V1.2's header |
 | `P0.14_~{READ_BAT}` | `R17.2`, `U1.AC9` (P0.14) |
 
 | Part | Value | Note |
 |---|---|---|
 | R16 | **1 MΩ 1%** | upper leg, from VBAT |
-| R17 | **499 kΩ 1%** (v1.1) / **510 kΩ 1%** (v1.0) | lower leg, to P0.14 |
+| R17 | **499 kΩ 1%** in the Sense Plus KiCad archive / **510 kΩ 1%** in the `…_SCH_PCB_v1.1.zip` PDF (a v1.0 drawing) and in the plain V1.2 design | lower leg, to P0.14 |
 
 Both `R0201`. The schematic's own note: *"Set P0.14 to output Sink only to enable
 BAT voltage read"*.
 
 **R17 is the open question.** 499 kΩ vs 510 kΩ is a **1.46%** difference in the
 ratio — about 60 mV at a full pack, which reads as a perfectly ordinary battery
-voltage. Sophon is configured for 499 kΩ. Settle it by measuring the pack with a
+voltage. Sophon is configured for 499 kΩ. State it by archive, not by revision:
+the archive with 499 kΩ is labelled v1.1 by its file names, but its own PDF and
+folder say V1.0. Settle it by measuring the pack with a
 meter and comparing against what the board reports; see `TEST-PLAN.md` §5b.
 
 ## P0.14 must be held low. It is not a power-saving control.
@@ -53,6 +71,10 @@ The arithmetic agrees. P0.14 is the divider's **low leg**, so:
 | driven low (enabled) | `Vbat × 499/1499` ≈ **1.4 V** at 4.2 V | 2.8 µA |
 | driven high | `3.3 + (Vbat − 3.3) × 499/1499` = **3.60 V** at 4.2 V — the limit | 0.6 µA |
 | high-impedance | pulled toward **Vbat** by R16; ESD clamp conducts | ~0.5 µA via the clamp |
+
+On the plain V1.2, with R17 = 510 kΩ, the driven-high case is `3.3 + 0.9 ×
+510/1510` = **3.604 V**: just *over* the 3.6 V absolute maximum (VDD + 0.3 V,
+nRF52840 PS Table 173), not at it ([review](reviews/2026-11-12-xiao-nrf52840-v1.2.md)).
 
 There is **no safe released state**: nothing else holds the node down. Holding
 P0.14 low costs ~2.8 µA — about 25 mAh a year, against a 200 mAh pack whose own
@@ -139,8 +161,9 @@ module's shield, so the evidence is the schematics and the board's behaviour
 |---|---|---|
 | U2 | `Value = BQ25100`, on an Eagle-imported `BQ25101` symbol and footprint | **`BQ25101YFPT`**, an orderable part number |
 | Ball C1 named | `PRETERM` | **`~{CHG}`** |
-| Net `P0.17_~{CHG}` | U2.C1, R8 (DNP), P0.17 | **charge LED `CHG0` cathode**, R8 (DNP), P0.17, U2.C1 |
-| `CHG0` anode | R5 (the parser leaves the LED unconnected on this sheet) | **R5 → 3V3** |
+| Net `P0.17_~{CHG}` | **charge LED `CHG0` cathode**, R8 (DNP), P0.17, U2.C1 | **charge LED `CHG0` cathode**, R8 (DNP), P0.17, U2.C1 |
+| `CHG0` Value | `RED` | `RED` (the LED measured green is on the Sense Plus, 86F0; V1.2's colour isn't established) |
+| `CHG0` anode | **R5 → 3V3** (2.2 kΩ). The LED *is* connected; an earlier version of the parser left it unconnected ([review](reviews/2026-11-12-xiao-nrf52840-sense-plus-v1.1.md)) | **R5 → 3V3** |
 
 An LED from 3V3 onto C1 is the standard `/CHG` indicator. **On hardware**
 (86F0, a Sense Plus, read over SWD without halting): P0.17 reads **low while
@@ -154,8 +177,9 @@ said the opposite until #323, from those labels.
 | Net | Lands on | Also on the net |
 |---|---|---|
 | `P0.17_~{CHG}` | `U2.C1` **`/CHG`**, open drain | green charge LED `CHG0` + `R5` to 3V3; `R8` → GND, **`DNP`** |
-| `P0.13_HICHG` | `U2.B2` `ISET` | `R18` 2.7k, `R12` 2.7k to GND |
-| — | `U2.B1` `TS` | `R20` 10k to GND — temp sense disabled per the sheet note |
+| `P0.13_HICHG` | `R12` 2.7k, **in series** to the ISET net | — (only R12 and P0.13 are on this net) |
+| ISET (unnamed) | `U2.B2` `ISET` | `R12` from P0.13; `R18` 2.7k to GND |
+| `/CE` (a misleading label) | `U2.B1` **`TS`**; the BQ2510x has no CE pin | `R20` 10k to GND: TI's configuration when no thermistor is used ("a fixed 10-k can be placed between TS and VSS"), so charging is never temperature-limited |
 
 **Reading `/CHG`.** Sophon reads P0.17 as an input **with the internal
 pull-up**: with `/CHG` released, the LED and R5 pull the net only weakly toward
@@ -178,13 +202,30 @@ fitted) separates it from a full pack.
 range, 13.5 kΩ for 10 mA to 0.54 kΩ for 250 mA, is about 135 mA·kΩ). Sophon
 does not touch it, so the charger runs at 50 mA. Measured: a 200 mAh pack went
 from ~60% to terminated in 1.7–3.3 h. Driving it **high** would push current
-into ISET through R12 and disturb the setting; only low is meaningful.
+into ISET through R12 and disturb the setting, and costs a continuous ~0.6 mA
+(3.3 V across R12 + R18, 5.4 kΩ) on battery too. Only low is meaningful (both
+reviews; the net table above was corrected by them).
+
+Both variants regulate `OUT` to `VO(REG)` = **4.20 V**, so the BQ25100/BQ25101
+question doesn't change the charge voltage (SLUSBV8 p3).
 
 ## Power path: VBAT is not on the load path while USB is present (#319)
 
-The 3.3 V rail comes from **U6**, a 3.3 V LDO (X2SON-4; the schematic gives
-`Value = 3.3V` and no part number). Its input, `VIN`, is fed through a
-diode-or of USB and the battery:
+The 3.3 V rail comes from **U6**, a 3.3 V LDO (X2SON-4) whose EN is tied to its
+input, so **3V3 is always on** whenever VIN is: on battery, the header's 3V3
+pin, and a Wio-SX1262 on it, are powered all the time. The two boards fit
+different parts:
+
+| | Sense Plus | plain V1.2 |
+|---|---|---|
+| U6 | `Value = 3.3V`; the symbol library names a **TLV733P** | **`SGM2040-3.3YUDH4G/TR`** (the symbol is still `TLV733P`) |
+| Ground / quiescent current, no load | **34 µA** typ, 60 µA max (TI TLV733P) | **1.0 µA** typ, 1.5 µA max (SGM2040) |
+| Q1 / D1 | no part numbers | `LP0404N3T5G` P-MOSFET / `SDM20U40-7` Schottky |
+
+If the Sense Plus's U6 really is a TLV733P, it alone is about 90% of that board's
+fixed sleep draw (§ Sleep current on battery). Its marking is not established.
+
+Its input, `VIN`, is fed through a diode-or of USB and the battery:
 
 | Net | Members |
 |---|---|
@@ -210,6 +251,32 @@ Consequences:
 Reproduce with `kicad-netlist.py '<sch>' VIN VBUS VBAT 3V3` and
 `--values U6 Q1 D1 C30 C4 R9`. The base XIAO nRF52840's v1.2 schematic (sheet
 `02 XIAO Header & nRF52840`) has the same members on `VBUS`, `VIN` and `VBAT`.
+There is no reverse-polarity protection on the battery pads ([V1.2
+review](reviews/2026-11-12-xiao-nrf52840-v1.2.md)).
+
+## Sleep current on battery
+
+What each board draws from the pack with the MCU asleep, excluding the MCU.
+From the reviews, which give the per-part tables:
+
+| | Sense Plus ([review](reviews/2026-11-12-xiao-nrf52840-sense-plus-v1.1.md) § 14) | plain V1.2 ([review](reviews/2026-11-12-xiao-nrf52840-v1.2.md) § 13) |
+|---|---|---|
+| Fixed draw, typical | **≈ 37 µA** (≤ 64 µA bound) | **≈ 22 µA** |
+| Dominant term | U6 TLV733P, 34 µA | U7, the QSPI flash, in standby: ~18 µA (Puya P25Q16H as a proxy; U7's Value is empty) |
+| With the flash in deep power-down | — (U7 not fitted in the design) | ≈ 4.5 µA |
+
+**The QSPI flash.** Zephyr's board file declares a `p25q16h` on `&qspi`, and
+Sophon's MCUboot build includes its driver (`CONFIG_NORDIC_QSPI_NOR=y`). That
+driver enters deep power-down only through device power management, and Sophon
+has no `CONFIG_PM_DEVICE`. So a fitted flash idles in standby. On the Sense
+Plus the design marks U7 **not fitted** (Value `DNP`; P0.20–P0.25 reach only its
+pads). Whether real units carry it isn't established (§ Not established).
+
+**The IMU, not the board, sets the Sense Plus's sleep current as Sophon runs
+today:** it streams at 52 Hz and is never powered down. The LSM6DS3TR-C's
+datasheet gives 0.29 mA at 52 Hz in *low-power* mode (`IddLP`), and the part
+powers up in high-performance mode. So expect more, roughly ten times the
+board's own floor. Battery-life work starts there.
 
 ## ADC configuration
 
@@ -220,8 +287,8 @@ Reproduce with `kicad-netlist.py '<sch>' VIN VBUS VBAT 3V3` and
 | Resolution | 12-bit |
 | Acquisition time | **40 µs**, the SAADC's longest (#319) |
 
-A 4.2 V pack presents `4.2 × 499/1499` = **1.42 V** at the pin: comfortable
-headroom without waste. Gain 1/2 (1.2 V FS) would clip; 1/6 (3.6 V FS) would
+A 4.2 V pack presents `4.2 × 499/1499` = **1.40 V** at the pin (1.42 V with
+R17 = 510 kΩ): comfortable headroom without waste. Gain 1/2 (1.2 V FS) would clip; 1/6 (3.6 V FS) would
 discard a third of the resolution.
 
 Note **AIN6 is P0.30, which the board uses for LED1** — the neighbouring channel
@@ -234,7 +301,7 @@ and `&adc` enabled with no channel children. All of it lives in `boards/xiao_ble
 
 The source the SAADC sees is the divider's Thévenin resistance, 1 MΩ ∥ 499 kΩ ≈
 **333 kΩ**, and nothing holds the node: `AIN7` carries only R16, R17, the pin
-and the header (`kicad-netlist.py '<sch>' 'AIN7*'`).
+and, on the Sense Plus, header pad 20 (`kicad-netlist.py '<sch>' 'AIN7*'`).
 
 The nRF52840 product specification sets the acquisition time by source
 resistance ([§ SAADC, Acquisition time, Table 1](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/saadc.html)):
@@ -327,28 +394,31 @@ that is harmless.
 
 The base board's own KiCad project, from the [wiki's
 resources](https://wiki.seeedstudio.com/XIAO_BLE/#resources):
-**"XIAO nRF52840 v1.2.zip"**. That is revision **V1.2**, titled "XIAO
-nRF52840", with three sheets. The nRF52840 and the header are on
-`02 XIAO Header & nRF52840.kicad_sch`.
+[`260828_Seeed_Studio_XIAO_nRF52840_v1.2.zip`](https://files.seeedstudio.com/wiki/XIAO-BLE/Res/260828_Seeed_Studio_XIAO_nRF52840_v1.2.zip),
+SHA-256 `973a5543514b2a6799fdb658666a803c0694a784f21ef8633debbccd1511ea95`.
+That is revision **V1.2**, titled "XIAO nRF52840", with three sheets. The
+nRF52840 and the header are on `02 XIAO Header & nRF52840.kicad_sch`.
 
-[`kicad-netlist.py`](../../../../.claude/skills/kicad-netlist/kicad-netlist.py) then read one sheet
-and ignored hierarchical connections, so it was run on that sheet alone. It was
-first checked against the net whose answer is known: it reproduces the battery
-divider topology, `VBAT – R16 – P0.31/AIN7 – R17 – P0.14`. That version also had
-a pin-transform bug for parts both rotated and mirrored, fixed in #384; this
-section's findings have not been re-run with the fixed script, as the v1.1
-Sense Plus's have.
+This section's findings were first made with an early
+[`kicad-netlist.py`](../../../../.claude/skills/kicad-netlist/kicad-netlist.py), run on that one
+sheet, with a pin-transform bug fixed later in #384. The [V1.2
+review](reviews/2026-11-12-xiao-nrf52840-v1.2.md) (#391) re-ran the whole design: `--check-pcb` passes
+(252 pads, 67 nets), and every V1.2 statement here held, apart from the
+corrections now made in place (§ Corrections).
 
-**This design file is not a BOM for the board.** It draws the IMU (`U3`,
-LSM6DS3TR-C) and the microphone (`MIC1`) with no DNP flag, yet the fitted board
-has neither: 01A7's IMU driver fails to initialise on every boot. Read it for
-connectivity. What is actually fitted can't be read from it.
+**This design file is not a BOM for the board.** It marks the IMU (`U3`,
+LSM6DS3TR-C), the microphone (`MIC1`) and their support parts (C1, C8, R14, R15)
+fitted; only R8 and C40 are DNP. Yet 01A7's IMU driver fails to initialise on
+every boot. That shows nothing answers at 0x6A, not that the mic or the support
+parts are absent. Read the file for connectivity; what is actually fitted can't
+be read from it (§ Not established). The V1.2 review's last figure shows where
+U3 and MIC1 would sit, to check a board by eye.
 
 ### The Sense-only pins are harmless here
 
 | Pin | Net (V1.2 schematic) | What the Sense image does | On this board |
 |---|---|---|---|
-| **P1.08** | `6D_PWR`: C1 100 nF, R14/R15 10 kΩ I²C pull-ups, IMU VDD/VDDIO/CS | driven **high** at boot (`lsm6ds3tr-c-en`, `regulator-boot-on`) | feeds a capacitor and two pull-ups on idle-high lines; no load to fight |
+| **P1.08** | `6D_PWR`: C1 100 nF, R14/R15 10 kΩ I²C pull-ups, IMU VDD/VDDIO/CS | driven **high** at boot (`lsm6ds3tr-c-en`, `regulator-boot-on`) | feeds whatever of C1, R14, R15 is fitted, on idle-high lines; no load to fight either way |
 | **P0.07 / P0.27** | `INTERNAL_I2C_SDA/SCL`: R15/R14 pull-ups, IMU SDA/SCL | `i2c0` at 400 kHz; TWIM only ever pulls low | nothing answers, so the IMU driver fails cleanly: the "no IMU" path |
 | **P0.11** | `6D_INT1` → IMU INT1 | input | harmless |
 | **P1.10** | `MIC_PWR`: C8, MIC1 VDD | microphone regulator, **not** boot-on, so held low | the mic stays unpowered |
@@ -368,11 +438,13 @@ agrees with 01A7 running the Sense image as a gateway, continuously, since
 | TP3 | SWDCLK | |
 | TP5 | SWDIO | |
 
-The horizontal offsets match the Sense Plus exactly (16.51 mm and 19.05 mm from
-the left edge). The vertical offsets weren't measured, because this PCB file's
-`Edge.Cuts` layer carries drawings beyond the board outline. BOOTLOADER.md's
-probe instructions apply unchanged. 01A7 was migrated, and is debugged, this
-way.
+The offsets match the Sense Plus: 16.51 mm and 19.05 mm from the TX/RX edge,
+and 7.62 mm and 10.16 mm from the D0–D6 edge (*PCB*, [V1.2 review](reviews/2026-11-12-xiao-nrf52840-v1.2.md)).
+Unlike the Sense Plus, **no silkscreen text names these pads**, so identify them
+by position, seen from the back: TP5 (SWDIO) and TP2 (RESET) in the row nearer
+D0–D6, TP3 (SWDCLK) and TP1 (GND) in the row nearer D7–D10. The review's back
+view shows them. BOOTLOADER.md's probe instructions apply unchanged. 01A7 was
+migrated, and is debugged, this way.
 
 ### The battery divider differs: R17 is 510 kΩ
 
@@ -390,4 +462,75 @@ about **1.5% high**, ≈60 mV at a full 4.2 V pack: the ratio is 1499/499 agains
 relayed battery reading, not its own (LORA-PROTOCOL.md § How the gateway maps
 onto the BLE protocol). It would matter only if a base board ran as a direct
 board on battery. The fix then is a per-board divider value, which Sophon has
-no mechanism for yet.
+no mechanism for yet: #393.
+
+## Corrections
+
+From the 2026-11-12 design reviews ([Sense Plus](reviews/2026-11-12-xiao-nrf52840-sense-plus-v1.1.md), [V1.2](reviews/2026-11-12-xiao-nrf52840-v1.2.md), #391).
+Each was checked against the netlist, the PCB or the datasheet before being
+corrected in place above:
+
+- **"`CHG0` anode | R5 (the parser leaves the LED unconnected on this sheet)"**
+  (Sense Plus). The LED is connected: cathode on `P0.17_~{CHG}`, anode through
+  R5 to 3V3, as on V1.2. An early parser version missed it.
+- **"`P0.13_HICHG` | `U2.B2` `ISET` | `R18` 2.7k, `R12` 2.7k to GND".** The
+  `P0.13_HICHG` net is only R12 and P0.13. R12 is *in series* to the ISET net,
+  where R18 goes to GND, on both boards. The 50/100 mA prose had the topology
+  right; only the table row was wrong.
+- **"A 4.2 V pack presents 4.2 × 499/1499 = 1.42 V".** 1.40 V; 1.42 V is the
+  510 kΩ figure. Sophon's overlay has the same stale comment: #393.
+- **"U6 … the schematic gives `Value = 3.3V` and no part number"**, stated for
+  both boards. True of the Sense Plus only, whose symbol names a TLV733P. V1.2
+  gives `SGM2040-3.3YUDH4G/TR`.
+- **"P0.14 driven high … = 3.60 V at 4.2 V — the limit".** True for 499 kΩ. On
+  V1.2 (510 kΩ) it is 3.604 V, just over.
+- **"Driving [P0.13] high would push current into ISET … only low is
+  meaningful".** Incomplete: it also draws a continuous ~0.6 mA.
+- **"`AIN7` carries only R16, R17, the pin and the header".** On V1.2 AIN7 is
+  not on the header; on the Sense Plus it is extra pad 20.
+- **"The vertical offsets weren't measured, because this PCB file's `Edge.Cuts`
+  layer carries drawings beyond the board outline"** (V1.2). In the archive now
+  recorded (`973a5543…`), `Edge.Cuts` holds only the outline, and the offsets
+  are measured. #301 recorded no hash for its "XIAO nRF52840 v1.2.zip", so it
+  may have read another file.
+- **"the fitted board has neither"** (the IMU and mic, on V1.2). The design
+  marks both, and their support parts, fitted. 01A7's boot log shows only that
+  nothing answers at 0x6A. Which parts a plain board carries is now under
+  § Not established.
+- **R17 stated by revision ("499 kΩ (v1.1) / 510 kΩ (v1.0)").** The archive
+  with 499 kΩ calls itself V1.0 in its own PDF. R17 is now stated by archive.
+
+## Not established
+
+- **R17 on real Sense Plus units** (§ The battery sense circuit): a meter on the
+  pack against the reported voltage.
+- **Whether real units carry the QSPI flash (U7)**, and, on V1.2, which part it
+  is (its Value is empty; the review used the P25Q16H as a proxy). An MCUboot
+  build's boot log on 86F0 and 01A7 shows the `p25q16h` init result, or read the
+  JEDEC ID (9Fh). A fitted flash needs deep power-down for battery life.
+  Sophon's build doesn't do that today (§ Sleep current on battery); an absent
+  one means `&qspi` should be disabled.
+- **Which Sense-only parts a plain V1.2 board carries** (U3, MIC1, C1, C8, R14,
+  R15): look at the board's front, at the positions in the V1.2 review's last
+  figure.
+- **The fitted part numbers on the Sense Plus** for U6 (TLV733P by symbol), U2,
+  Q1 and D1: read the markings. The TLV733P's 34 µA dominates that board's sleep
+  draw only if it is really fitted.
+- **The charge LED's colour on V1.2** (Value `RED`; 86F0's is green).
+- **The IMU's real draw under Sophon**, and the nRF52840's own sleep current: a
+  pack-current measurement. That measurement also bounds Q1's and D1's leakage.
+- **P0.14 floats from reset until `sophon_battery_init()`**, all through
+  MCUboot, so AIN7 sits above its absolute maximum through 1 MΩ during every
+  boot. Driving P0.14 low earlier, in MCUboot, would close that window; whether
+  it's worth doing is a judgement call.
+- **`&reg0` is enabled** in Zephyr's board file, which sets DCDCEN0 with no
+  inductor on DCCH. The PS says that's inert in normal voltage mode (VDDH tied to
+  VDD, as here); `&reg0 { status = "disabled"; }` would remove the question.
+- **The Wio-SX1262's SPI** runs at 8 MHz on P1.13–P1.15, which the nRF52840 PS
+  lists as "Standard drive, low frequency I/O". Any effect on BLE or LoRa
+  sensitivity would need an RF measurement.
+- **The Sense Plus's extra pads 18/19** (P0.09/P0.10, printed RX1/TX1) stay in
+  NFC mode unless `nfct-pins-as-gpios` is set, and none of the extra pads 15–23
+  is in Zephyr's XIAO connector map.
+- **ANT1's pad 3**: a ground or a tuning terminal. The antenna's datasheet
+  (AN3216) isn't held.
