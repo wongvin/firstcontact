@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-11-13
+
+### docs: nRF52840 review reports and HARDWARE.md merge (#391)
+
+- `zephyr/sophon/hw/nrf52840/reviews/`: `kicad-design-review` reports for both XIAO nRF52840 boards, frozen, with credited figures in `figures/2026-11-12/`. The Sense Plus v1.1 design has no licence mark, so its figures cite Seeed's documentation licence; V1.2's PCB carries CC BY-SA logos. The V1.2 archive is now recorded by URL and SHA-256.
+- `hw/nrf52840/HARDWARE.md`, corrected and extended:
+  - a design-reviews section;
+  - each board's LDO (the TLV733P's ~34 µA dominates the Sense Plus's ~37 µA floor; the SGM2040 on V1.2 draws 1 µA);
+  - a sleep-current section: the QSPI flash idles in standby without device PM, and the IMU dominates as Sophon runs;
+  - P0.14-high on V1.2 is just over the limit;
+  - P0.13-high costs ~0.6 mA.
+
+  Corrections: the charge LED *is* connected on v1.1, the P0.13/ISET net row, 1.40 V not 1.42 V, the V1.2 SWD offsets now measured, and R17 stated by archive, not revision. New Corrections and Not established sections.
+- Follow-up #393: a per-board battery divider for the gateway (V1.2's R17 is 510k), and the overlay's stale 1.42 V comment.
+
 ## 2026-11-12
 
 ### docs: nRF54LM20A review report and HARDWARE.md merge (#389)
