@@ -130,6 +130,11 @@ used for anything here.
 | LED1 | FC-B1010RGBT-HG | RGB user LED |
 | K1 / K2 | TS-1001S | reset / user button |
 
+**U8's ball names agree with the datasheet, 98 of 98** (*netlist*; *datasheet*
+Table 81, p1226–1233; [review](reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md)).
+Nordic's own symbol, on the nRF54LM20-DK, agrees too, 98 of 98
+([DK review](reviews/2026-11-15-nrf54lm20-dk-0.7.0.md) § 2, #397).
+
 ## The nRF54 has no USB, and no UF2 path
 
 *Netlist:* the nRF54LM20A's USB block is not wired.
@@ -404,6 +409,11 @@ connector**, as the Wio-SX1262 needs one on its own.
 *Netlist:* P1.01/`NFC1` and P1.02/`NFC2` (U8 J6/J7) → R39/R40 (0 Ω) → TP19/TP20,
 each with a 300 pF shunt (C25/C26). They are **not on the XIAO header**; an
 NFC coil goes on those two pads. The 300 pF loads make them poor GPIOs.
+
+**They are NFC pins from reset.** Using either as a GPIO needs NFCT
+`PADCONFIG.ENABLE` set to `Disabled` (reset value 1, NFC) (*datasheet*
+nRF54LM20A p293 and p391, § 8.13.14.74; found in the
+[DK review](reviews/2026-11-15-nrf54lm20-dk-0.7.0.md) § 12.5, #397).
 
 ### Buttons and LEDs
 

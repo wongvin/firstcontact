@@ -22,6 +22,7 @@ is shared (`zephyr/CLAUDE.md` § Shared vs per-MCU files).
 | [MEMORY-MAP.md](MEMORY-MAP.md) | RRAM, the lock, SWD, backups, MCUboot's layout, console, hazards |
 | [mcuboot-partitions.overlay](mcuboot-partitions.overlay) | MCUboot's partition table, applied to both images |
 | [openocd-readonly.cfg](openocd-readonly.cfg) | OpenOCD that cannot erase or write: use it on any board whose contents matter |
+| [reviews/2026-11-15-nrf54lm20-dk-0.7.0.md](reviews/2026-11-15-nrf54lm20-dk-0.7.0.md) | Nordic's reference design, the nRF54LM20-DK (PCA10184) 0.7.0, reviewed for comparison (#397). Not this board: its facts are not merged into HARDWARE.md |
 
 Sophon has no `boards/` file for this board yet; Phase 3 adds one. The two
 workarounds #370 needed (the Bluetooth clock nodes, and the RRAM write buffer for
