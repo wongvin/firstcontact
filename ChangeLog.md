@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-15
+
+### feat: altium-netlist and hardware-design-review skills (#395)
+
+- New `altium-netlist` skill: guides the user through KiCad 10's Altium import (*Import Non-KiCad Project*, then saving both editors), on Windows or macOS, from a copy in the scratchpad (the source is never modified), and answers questions from the result with `kicad-netlist.py`, validated by `--check-pcb`. Its `altium-netlist.py` helper prepares the copy (libraries removed, SHA-256s, title blocks with `=Name` expressions resolved, a warning for harnesses and hidden pins), checks that every imported file was saved, and checks each variant's not-fitted parts against Altium's unique IDs, which catches the importer's false DNP on cyber60-mx's CON303.
+- `kicad-netlist.py`: `--pcb-nets` for nets as the board connects them, with the schematic's pin names (KiCad's import splits 121 of the nRF54LM20 DK's 241 nets at its harnesses; on designs that pass `--check-pcb` it matches the schematic exactly); `--variant NAME` for KiCad 10 variants; `--values` shows Altium's value as `(ALTIUM_VALUE 5k1)` and expands a `${ALTIUM_VALUE}` field reference; `--draw` keeps ringed labels inside the drawing and clear of silkscreen text; no crash on a non-UTF-8 Windows console. Output on both XIAO reference designs is unchanged.
+- `kicad-design-review` renamed to `hardware-design-review`, which now takes a KiCad or an Altium project (directory, archive or URL). For Altium it runs the preparation, the guided import and the checks itself, then picks schematic or board mode (`--pcb-nets`) for every net query. HARDWARE.md references updated.
+- Skill docs: how to treat a two-pin part with swapped pin numbers in `--check-pcb`; check datasheet units against the page image (`pdftotext` turns µ and Ω into `m` and `W` in some PDFs).
+- `CLAUDE.md`: `skills:` issue-title prefix.
+
 ## 2026-11-13
 
 ### docs: nRF52840 review reports and HARDWARE.md merge (#391)

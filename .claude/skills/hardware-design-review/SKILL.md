@@ -1,6 +1,6 @@
 ---
-name: kicad-design-review
-description: Review a board's hardware design from its KiCad project — power tree and load path, always-on rails, regulator and PMIC strapping, debug access, USB, header pin map, peripherals, RF, DNP parts, hazards, and a battery quiescent budget — producing a dated, standalone review report in hw/<mcu>/reviews/ with every fact tagged by source, plus the verified facts to merge into hw/<mcu>/HARDWARE.md. Use when asked to review a board, a KiCad design, or a schematic for firmware work.
+name: hardware-design-review
+description: Review a board's hardware design from its KiCad or Altium project (a project directory, archive or URL; an Altium project is first imported into KiCad with the user, through altium-netlist) — power tree and load path, always-on rails, regulator and PMIC strapping, debug access, USB, header pin map, peripherals, RF, DNP parts and variants, hazards, and a battery quiescent budget — producing a dated, standalone review report in hw/<mcu>/reviews/ with every fact tagged by source, plus the verified facts to merge into hw/<mcu>/HARDWARE.md. Use when asked to review a board, a KiCad or Altium design, or a schematic for firmware work.
 ---
 
 A review asks the same questions of every board, deliberately. On the XIAO
@@ -12,13 +12,32 @@ from asking them, not from reading the schematic top to bottom:
 - which GPIO a battery divider depends on;
 - what idles on an always-on rail.
 
-**All netlist work goes through the `kicad-netlist` skill**
-(`.claude/skills/kicad-netlist/SKILL.md`). Follow it for getting the design,
-`--check-pcb`, filters, `--draw`, `--copper`, source tags, datasheets and the
-licence rule.
+**The design can be KiCad or Altium.** Every question below is answered by
+`kicad-netlist.py`, on KiCad files:
+
+- **A KiCad design** is read as it is, through the `kicad-netlist` skill
+  (`.claude/skills/kicad-netlist/SKILL.md`). Follow it for getting the design,
+  `--check-pcb`, filters, `--draw`, `--copper`, source tags, datasheets and the
+  licence rule.
+- **An Altium design** is first turned into a KiCad one, through the
+  `altium-netlist` skill (`.claude/skills/altium-netlist/SKILL.md`): you
+  prepare a copy, the user runs KiCad's import on it, and you check the result.
+  § 0 runs those steps; the user needs no KiCad files beforehand. After that,
+  everything in `kicad-netlist` applies to the imported files, plus
+  `altium-netlist`'s notes on values, variants and tags.
+
 This skill adds the questions. Below,
 `K=.claude/skills/kicad-netlist/kicad-netlist.py`, run from the repo root, and
-`$SCH` / `$PCB` are the design's root `.kicad_sch` and `.kicad_pcb`.
+`$SCH` / `$PCB` are the design's root `.kicad_sch` and `.kicad_pcb` (for an
+Altium design, the imported ones). In PowerShell, set them as
+`$K = ".claude/skills/kicad-netlist/kicad-netlist.py"` and so on; the commands
+then run unchanged, except that `| grep X` is `| Select-String X`.
+
+**Net queries take one of two forms, chosen in § 0 step 3.** In *schematic
+mode* they run as written below, `python3 -I $K $SCH <filters>`. In *board
+mode*, every net query adds `--pcb-nets $PCB`:
+`python3 -I $K $SCH --pcb-nets $PCB <filters>`. `--values`, `--draw` and
+`--copper` are the same in both.
 
 **Pin names vary by symbol library, so search loosely first.** On the XIAO
 nRF52840 (an Eagle import) the SWD pins are `SWDIO@AC24` and `SWDCLK@AA24`,
@@ -34,7 +53,11 @@ function is absent.
 
 ## Input and output
 
-**Input:** a KiCad project (URL, local archive, or local directory). Optional:
+**Input:** a KiCad or Altium project, as a URL, a local archive or a local
+directory. Its files say which: a `.kicad_pro` with its `.kicad_sch` and
+`.kicad_pcb` is KiCad; a `.PrjPcb` with its `.SchDoc` and `.PcbDoc` files is
+Altium. If an archive or folder holds several projects, or both kinds, ask
+which to review. Optional:
 - the MCU and the firmware's intended use (battery-powered, USB-powered, which
   peripherals matter);
 - the subproject it belongs to, e.g. `zephyr/sophon/`.
@@ -63,9 +86,11 @@ The report's outline:
    are under the licence. The text is in `kicad-netlist` § 6.
 1. **Where the authoritative data is**: the design (URL or archive, SHA-256,
    revision) and a datasheet table (part, ref, source URL, SHA-256, proxy or
-   not).
-2. **How each fact was established**: the tag table, and the `--check-pcb`
-   result.
+   not). For an Altium design, also the KiCad version that imported it, and
+   the messages the import showed.
+2. **How each fact was established**: the tag table, the `--check-pcb`
+   result, and the query mode (§ 0 step 3). In board mode, say why at the top
+   of the report: `prepare`'s warning, or the split and merged nets.
 3. **This board**: parts table (ref, part, role).
 4. One section per checklist area below, in the same order.
 5. **Corrections**, then **Not established**.
@@ -75,12 +100,15 @@ The report's outline:
 **Figures** go in `<subproject>/hw/<mcu>/reviews/figures/<YYYY-MM-DD>/`, made with
 `--draw … --credit "<credit>"`. Each is marked † where the document uses it, and
 gets a caption saying what it shows. Each section below that calls for a
-drawing says which.
+drawing says which. For an Altium design, the credit names the Altium design
+(its creator, URL and licence), and the imported KiCad files stay in the
+scratchpad, uncommitted (`altium-netlist` § 7).
 
 **Every fact carries a tag**: *netlist*, *PCB*, *datasheet* (with page or
 table), or *PDF text*, plus *Zephyr* (with the file) for what the board's
-devicetree or a driver does. A sentence without one is an inference; say so,
-or move it to § Not established.
+devicetree or a driver does. In board mode, each connection is *PCB* and each
+pin name *netlist*. A sentence without a tag is an inference; say so, or move
+it to § Not established.
 
 **A devicetree node acts only if its driver is built.** Before calling a
 board-file node a hazard (e.g. a PWM node claiming a pin the board uses for
@@ -90,12 +118,44 @@ only for builds that enable the driver.
 
 ## 0. Set up
 
-1. Get the design and check its revision (`kicad-netlist` § 1).
-2. `--check-pcb` must pass (§ 2). If it doesn't, the review covers only what
-   the PCB's pad nets can establish, and says so at the top.
-3. **Decide what kind of review this is**, from `hw/<mcu>/reviews/`. Read only
+1. **Get the design and check its revision.**
+   - **KiCad:** `kicad-netlist` § 1. `$SCH` and `$PCB` are the project's root
+     `.kicad_sch` and `.kicad_pcb`.
+   - **Altium:** `altium-netlist` § 1–3, in order:
+     1. Run `altium-netlist.py prepare` on the source, with `--out` a new
+        folder in the scratchpad. The source is only read. Keep three things
+        from its output: the SHA-256s, the title blocks, which give the
+        revision (the imported title blocks can't), and any **WARNING**.
+     2. Give the user the import guide (`altium-netlist` § 2), with the two
+        paths `prepare` printed, and **stop until they report back**. Note
+        every message they report.
+     3. Run `altium-netlist.py check-import` on the import folder. Exit 0 is
+        required; if a file is missing, ask the user to save it and run it
+        again.
+
+     `$SCH` and `$PCB` are then the imported root `.kicad_sch` and
+     `.kicad_pcb`. Record the KiCad version that imported them: the root
+     sheet's `generator_version` (e.g. `10.0`), or the full version from the
+     user's *Help → About*.
+2. **Validate:** run `--check-pcb` (`kicad-netlist` § 2).
+3. **Choose the query mode** for every net query in the review:
+   - **schematic mode** when `--check-pcb` passes, with 0 split and 0 merged,
+     and `prepare` printed no WARNING;
+   - **board mode** otherwise: connections come from the board through
+     `--pcb-nets`, with the schematic's pin names (`altium-netlist` § 4). An
+     Altium design with harnesses, or hidden pins that aren't power pins,
+     always lands here. So does any design whose schematic and board
+     disagree; then also list the disagreeing pads at the top of the report.
+     When the only disagreement is a two-pin part with no polarity numbered
+     the other way round (`kicad-netlist` § 2), say that the circuit is the
+     same, and stay in board mode.
+4. **Altium variants:** run `altium-netlist.py check-variants` (`altium-netlist`
+   § 5) now, and carry each part it reports as differing to § 9.
+5. **Decide what kind of review this is**, from `hw/<mcu>/reviews/`. Read only
    the earlier reports' file names, and the design's SHA-256 in each one's
-   sources table (`grep -i sha-256`), not their findings:
+   sources table (`grep -i sha-256`), not their findings. For an Altium
+   design, the hash to compare is the archive's when it came as one, and
+   otherwise the `.PrjPcb`'s, as `prepare` printed them:
 
    | Since the last review | Do |
    |---|---|
@@ -106,7 +166,7 @@ only for builds that enable the driver.
    Earlier answers are not reused. Fresh passes find what earlier ones missed:
    on the XIAO nRF54LM20A, a blind re-run found the INT1 drain and the R3/VSET
    mislabel that #384's review had missed.
-4. **Read the board's HARDWARE.md and the previous report after the review, not
+6. **Read the board's HARDWARE.md and the previous report after the review, not
    before.** Then compare: each disagreement goes in § Corrections, with which
    side was right and why.
 
@@ -119,6 +179,11 @@ python3 -I $K $SCH --values
 - Every active part (U, Q, X, ANT, J/USB connectors, K, LEDs, ferrites on
   rails) goes in the parts table. **Name its role from the footprint and the
   part number, never from the reference designator.**
+- On an Altium design, a passive's value is usually in `(ALTIUM_VALUE …)`;
+  the plain value is Altium's Comment, often just the library part (`Res1`).
+  Its footprint has no library prefix. The manufacturer's part number, which
+  the datasheet search needs, is often in another Altium parameter (`MFGPN`,
+  …): read the part's fields in the `.kicad_sch` (`altium-netlist` § 6).
 - Fetch a datasheet (`kicad-netlist` § 5) for every IC and transistor. For
   crystals, ESD diodes, switches and connectors, fetch one only when a question
   below depends on it, e.g. the RF connector's type. For a part with none of
@@ -209,7 +274,8 @@ python3 -I $K $SCH 'D+=' 'D-=' 'DP=' 'DM=' 'DN=' 'VBUS=' 'DECUSB='
 - Follow D+/D− from the connector through any series resistors to the chip
   they reach.
 - For the MCU's own USB pins, a single-pin net is unconnected (confirm
-  `unconnected-(…)` on the PCB). A DNP part on the path means "not fitted",
+  `unconnected-(…)` on the PCB; an Altium board gives such a pad no net at
+  all, so it is missing from board-mode output). A DNP part on the path means "not fitted",
   not "wired".
 
 ## 6. Header and connector pin map
@@ -222,7 +288,8 @@ python3 -I $K $SCH <header ref>                      # the header part, exact
 - Recognise the header by the footprint's **name**, the part after the colon.
   The library part, before it, can contain the board's name on every part
   (`Seeed Studio XIAO nRF52840 v1.1:…`), so a text search of whole lines finds
-  everything.
+  everything. An Altium footprint has no library part: the whole field is the
+  name.
 - Map each header pin to its MCU pin and net, plus power, ground and VBUS.
 - **A header can continue on pads.** The XIAO nRF54LM20A's D11–D18 are bottom
   test pads (TP11–TP18), not pins of the header part. Check the MCU pins the
@@ -286,6 +353,13 @@ ringed and labelled with its pads' nets. Use the view of the side they're on
 as a figure. Avoid `'(DNP)*'` here: a not-fitted part with a pin on GND
 prints the whole ground net. A side on GND is a shunt; note it and don't print
 it.
+
+**Variants.** If the output ends by naming variants, the list above is the
+default's. Repeat it with `--variant <NAME>` for each one, and report what each
+fits or leaves off. On an Altium design, the default's list is usually empty:
+Altium marks parts not fitted in its variants, so this is where fitting is
+decided. Each part that § 0 step 4's `check-variants` reported as differing
+is a finding: report Altium's answer for it, not `--variant`'s.
 
 ## 10. Hazards
 

@@ -10,8 +10,8 @@ read as 510k from an archive that turned out to hold the *previous* board
 revision. See zephyr/sophon/hw/nrf52840/HARDWARE.md.
 
 Usage:
-    kicad-netlist.py <file.kicad_sch> [filter ...]
-    kicad-netlist.py <file.kicad_sch> --values [filter ...]
+    kicad-netlist.py <file.kicad_sch> [--variant NAME] [filter ...]
+    kicad-netlist.py <file.kicad_sch> --values [--variant NAME] [filter ...]
     kicad-netlist.py <file.kicad_sch> --check-pcb <file.kicad_pcb>
     kicad-netlist.py --copper <file.kicad_pcb> [net filter ...]
     kicad-netlist.py --draw <file.kicad_pcb> <out_dir> [ref filter ...]
@@ -78,6 +78,32 @@ fitted. The mark is KiCad's DNP attribute, or a Value of `DNP` / `DNF`, which
 some designs use instead. The flag is not part of any name a filter is compared
 with.
 
+Variants (KiCad 10; #395). A design can have named variants, each overriding
+DNP per placed symbol. `--variant NAME` applies that variant's overrides on top
+of the default; without it the (DNP) marks are the default's, and on a design
+with variants the output ends by naming them. KiCad's Altium import turns each
+Altium variant into one of these.
+
+A design imported from Altium also carries `ALTIUM_VALUE`: Altium's Value
+parameter (the resistance, `5k1`), while KiCad's Value holds Altium's Comment,
+often only the library part (`Res1`). --values prints both when they differ:
+`Res1 (ALTIUM_VALUE 5k1)`. Where the import wrote Value as a reference to the
+field, `${ALTIUM_VALUE}`, it is expanded, as KiCad shows it: `12pF`.
+
+--pcb-nets <file.kicad_pcb> prints nets as the PCB connects its pads, in the
+same form as a net query and with the same filters: the PCB's net name, then
+`REF pin N [name]`, with pin names, (DNP) and --variant from the schematic.
+Only the connectivity comes from the board. It is for a schematic whose wiring
+didn't survive conversion while its symbols did: an Altium design with
+harnesses, imported into KiCad, splits 121 of the nRF54LM20 DK's 241 nets,
+while its board, compiled by Altium, has them whole (#395). On the XIAO
+nRF54LM20A, the XIAO nRF52840 v1.1 and cyber60-mx, which pass --check-pcb, it
+gives exactly the schematic's nets and pin names. `[?]` marks a pad whose
+number no schematic pin has.
+
+Runs on Windows as on macOS. Output that a non-UTF-8 console can't show is
+replaced with `?` rather than stopping the script.
+
 --check-pcb compares the result with the nets the PCB assigns to every pad: for
 each pair of pads, does the schematic put them on one net exactly when the PCB
 does? It is the independent check this script is validated against.
@@ -136,6 +162,7 @@ on, which is why no generated netlist is committed alongside it.
 import contextlib
 import html
 import itertools
+import json
 import math
 import os
 import re
@@ -234,6 +261,20 @@ def properties(symbol):
     return {val(p): val(p, 2) for p in kids(symbol, "property") if val(p)}
 
 
+def expand_fields(text, props):
+    """Expand `${NAME}` references to the symbol's own fields, as KiCad does
+    when it shows them. KiCad's Altium import writes Value as
+    `${ALTIUM_VALUE}` when Altium's Comment showed the Value parameter (#395).
+    A name matches case-insensitively; an unknown one is left as it is."""
+    lower = {k.lower(): v for k, v in props.items()}
+
+    def sub(m):
+        name = m.group(1)
+        return props.get(name, lower.get(name.lower(), m.group(0)))
+
+    return re.sub(r"\$\{([^}]+)\}", sub, text or "")
+
+
 def placed_symbols(root):
     """Every symbol instance that carries a Reference."""
     for sym in kids(root, "symbol"):
@@ -250,21 +291,61 @@ def placed_symbols(root):
 DNP_VALUES = {"dnp", "dnf"}
 
 
-def is_dnp(symbol):
-    """Not fitted: KiCad's DNP attribute, or a Value of DNP / DNF (#387)."""
+def instance_variants(symbol):
+    """KiCad 10's per-instance variant overrides: (variant name, node) pairs,
+    from `(instances (project (path (variant (name "X") (dnp yes) ...))))`.
+    KiCad's Altium import writes each Altium variant's not-fitted parts this
+    way (#395)."""
+    for inst in kids(symbol, "instances"):
+        for proj in kids(inst, "project"):
+            for p in kids(proj, "path"):
+                for v in kids(p, "variant"):
+                    name = kids(v, "name")
+                    if name:
+                        yield val(name[0]), v
+
+
+def is_dnp(symbol, variant=None):
+    """Not fitted: KiCad's DNP attribute, or a Value of DNP / DNF (#387). With
+    a variant, that variant's own `dnp` for the instance wins where it has one."""
+    if variant:
+        for name, node in instance_variants(symbol):
+            if name == variant and kids(node, "dnp"):
+                return val(kids(node, "dnp")[0]) != "no"
     flag = kids(symbol, "dnp")
     if flag and val(flag[0]) != "no":
         return True
-    return (properties(symbol).get("Value") or "").strip().lower() in DNP_VALUES
+    props = properties(symbol)
+    return expand_fields(props.get("Value"), props).strip().lower() in DNP_VALUES
 
 
-def dnp_refs(path):
+def dnp_refs(path, variant=None):
     return {
         props["Reference"]
         for _, root, _ in load_sheets(path)
         for sym, _, props in placed_symbols(root)
-        if is_dnp(sym)
+        if is_dnp(sym, variant)
     }
+
+
+def variant_names(path):
+    """The design's variants: those the .kicad_pro beside the root sheet
+    declares, and any an instance overrides, in that order."""
+    names = []
+    pro = os.path.splitext(path)[0] + ".kicad_pro"
+    if os.path.isfile(pro):
+        with open(pro, encoding="utf-8", errors="replace") as fh, contextlib.suppress(ValueError):
+            names = [
+                v["name"]
+                for v in json.load(fh).get("schematic", {}).get("variants", [])
+                if isinstance(v, dict) and v.get("name")
+            ]
+    for _, root, _ in load_sheets(path):
+        for sym, _, _ in placed_symbols(root):
+            for name, _ in instance_variants(sym):
+                if name not in names:
+                    names.append(name)
+    return names
 
 
 def transform(px, py, ox, oy, rot, mirror):
@@ -329,7 +410,10 @@ def load_sheets(path):
     seen = set()
 
     def walk(fname, spath):
-        with open(os.path.join(base, fname), encoding="utf-8", errors="replace") as fh:
+        sheet = os.path.join(base, fname)
+        if not os.path.isfile(sheet):
+            sys.exit(f"sheet not found: {sheet}")
+        with open(sheet, encoding="utf-8", errors="replace") as fh:
             root = parse(tokenize(fh.read()))[0]
         children = []
         for i, sh in enumerate(kids(root, "sheet")):
@@ -572,6 +656,26 @@ def svg_text(
     )
 
 
+def text_box(x, y, lines, size, angle, anchor="middle", baseline="central", flip=False):
+    """The approximate box, (x, y, w, h) on the page, of what svg_text() draws
+    with the same arguments: ~0.6 em per character, lines 1.15 em apart."""
+    w = max((len(t) for t in lines), default=0) * size * 0.6
+    h = size * (1 + 1.15 * (len(lines) - 1))
+    lx = {"start": (0, w), "end": (-w, 0)}.get(anchor, (-w / 2, w / 2))
+    if flip:
+        lx = (-lx[1], -lx[0])
+    top = {"text-before-edge": 0, "text-after-edge": -size, "central": -size / 2}
+    ly0 = top.get(baseline, -0.8 * size)
+    t = math.radians(-angle)
+    pts = [
+        (x + px * math.cos(t) - py * math.sin(t), y + px * math.sin(t) + py * math.cos(t))
+        for px in lx
+        for py in (ly0, ly0 + h)
+    ]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
+
+
 def draw_board(pcb_path, out_dir, filters, credit=None, name=None):
     """Write <out_dir>/<board>-front.svg and -back.svg (see the module docstring)."""
     with open(pcb_path, encoding="utf-8", errors="replace") as fh:
@@ -673,27 +777,8 @@ def draw_board(pcb_path, out_dir, filters, credit=None, name=None):
             ring = max(math.hypot(g[1] - cx, g[2] - cy) + g[3] / 2 for g in group) + 0.25
             rings.append((ref, group, cx, cy, ring))
             placed.append((cx - ring, cy - ring, 2 * ring, 2 * ring))
-        # Second pass: each label goes up and to the right of its ring, moved
-        # down until it is clear of every ring and every label already placed.
-        # Text boxes are estimated (0.3 mm text, ~0.6 em per character).
-        for ref, group, cx, cy, ring in rings:
-            lines = [ref] + [f"{pad}: {n}" for pad, _, _, _, n in sorted(group)]
-            bw, bh = max(len(t) for t in lines) * 0.3 * 0.62 + 0.2, len(lines) * 0.345 + 0.1
-            lx, ly = cx + ring + 1.2, cy - ring - 0.6
-            while any(
-                lx < ox + ow and ox < lx + bw and ly - 0.35 < oy + oh and oy < ly - 0.35 + bh
-                for ox, oy, ow, oh in placed
-            ):
-                ly += 0.2
-            placed.append((lx, ly - 0.35, bw, bh))
-            labels.append(
-                f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{ring:.3f}" fill="none" '
-                f'stroke="#e67e22" stroke-width="0.12"/>'
-                f'<line x1="{cx + ring * 0.7:.3f}" y1="{cy - ring * 0.7:.3f}" x2="{lx:.3f}" '
-                f'y2="{ly:.3f}" stroke="#e67e22" stroke-width="0.06"/>'
-                + svg_text(lx + 0.1, ly, lines, 0.3, 0, "start", "text-after-edge", weight="bold")
-            )
-        for t in kids(root, "gr_text"):
+        silk = []  # the board's silkscreen texts, drawn below; their boxes are
+        for t in kids(root, "gr_text"):  # taken before any label is placed
             layer = kids(t, "layer")
             if not layer or val(layer[0]) != f"{side}.SilkS" or not kids(t, "at"):
                 continue
@@ -728,11 +813,50 @@ def draw_board(pcb_path, out_dir, filters, credit=None, name=None):
             rot = a[2] if len(a) > 2 else 0
             mirrored = "mirror" in just
             angle, flip = (-rot, not mirrored) if side == "B" else (rot, mirrored)
-            out.append(
-                svg_text(
-                    vx, vy, lines, size * 1.35, angle, anchor, base, color="#7d3c98", flip=flip
+            args = (vx, vy, lines, size * 1.35, angle, anchor, base)
+            silk.append(svg_text(*args, color="#7d3c98", flip=flip))
+            placed.append(text_box(*args, flip=flip))
+        # Second pass: each label goes up and to the right of its ring, else to
+        # its left, moving down until it is clear of every ring, silkscreen
+        # text and label already placed, without leaving the drawing or
+        # reaching the footer (#395: a header at the board's edge had its label
+        # drawn off the page). Where neither side has room, it goes on the
+        # right, clamped to the page. Text boxes are estimated (0.3 mm text,
+        # ~0.6 em per character).
+        right, bottom = left + span - 0.1, y1 + m
+        for ref, group, cx, cy, ring in rings:
+            lines = [ref] + [f"{pad}: {n}" for pad, _, _, _, n in sorted(group)]
+            bw, bh = max(len(t) for t in lines) * 0.3 * 0.62 + 0.2, len(lines) * 0.345 + 0.1
+            ly0 = max(cy - ring - 0.6, top + head_h + 0.35)
+
+            def clear(lx, ly, bw=bw, bh=bh, placed=placed):
+                return not any(
+                    lx < ox + ow and ox < lx + bw and ly - 0.35 < oy + oh and oy < ly - 0.35 + bh
+                    for ox, oy, ow, oh in placed
                 )
+
+            spot = None
+            for on_left, lx in ((False, cx + ring + 1.2), (True, cx - ring - 1.2 - bw)):
+                if lx < left + 0.1 or lx + bw > right:
+                    continue
+                ly = ly0
+                while ly - 0.35 + bh < bottom and not clear(lx, ly):
+                    ly += 0.2
+                if ly - 0.35 + bh < bottom:
+                    spot = (on_left, lx, ly)
+                    break
+            fallback = max(left + 0.1, min(cx + ring + 1.2, right - bw))
+            on_left, lx, ly = spot or (False, fallback, ly0)
+            placed.append((lx, ly - 0.35, bw, bh))
+            ex, tx = (cx - ring * 0.7, lx + bw) if on_left else (cx + ring * 0.7, lx)
+            labels.append(
+                f'<circle cx="{cx:.3f}" cy="{cy:.3f}" r="{ring:.3f}" fill="none" '
+                f'stroke="#e67e22" stroke-width="0.12"/>'
+                f'<line x1="{ex:.3f}" y1="{cy - ring * 0.7:.3f}" x2="{tx:.3f}" '
+                f'y2="{ly:.3f}" stroke="#e67e22" stroke-width="0.06"/>'
+                + svg_text(lx + 0.1, ly, lines, 0.3, 0, "start", "text-after-edge", weight="bold")
             )
+        out += silk
         out += labels
         out.append(svg_text(left + 0.3, top + 0.9, legend, 0.6, 0, "start", "auto"))
         out.append(f"<metadata>{html.escape(' '.join(notes))}</metadata>")
@@ -977,8 +1101,22 @@ def matches(names, text, filters, pin_names=()):
     return False
 
 
-def print_nets(path, filters):
-    shown, dnp = 0, dnp_refs(path)
+def variant_note(path, variant):
+    """The line that ends net and --values output on a design with variants:
+    which one the (DNP) marks follow."""
+    names = variant_names(path)
+    if variant and variant not in names:
+        sys.exit(f"no variant {variant!r}; this design has: {', '.join(names) or '(none)'}")
+    if variant:
+        return f"variant: {variant}"
+    if names:
+        return f"DNP as in the default; variants: {', '.join(names)} (--variant NAME)"
+    return None
+
+
+def print_nets(path, filters, variant=None):
+    note = variant_note(path, variant)
+    shown, dnp = 0, dnp_refs(path, variant)
     for data in build_nets(path).values():
         if not data["pins"] and not data["labels"]:
             continue
@@ -997,31 +1135,101 @@ def print_nets(path, filters):
         print()
         shown += 1
     print(f"{shown} net(s)")
+    if note:
+        print(note)
 
 
-def print_values(path, filters):
+def pin_names(path):
+    """{(ref, pin number): pin name} from every placed symbol's library pins.
+    It reads the symbols only, not the wiring, so it holds even where the
+    schematic's connectivity doesn't."""
+    out = {}
+    for _, root, _ in load_sheets(path):
+        lib_pins, _ = lib_tables(root)
+        for sym, lib_id, props in placed_symbols(root):
+            unit_node = kids(sym, "unit")
+            unit = int(val(unit_node[0])) if unit_node else 1
+            units = lib_pins.get(lib_id, {})
+            for _, _, pname, pnum in units.get(0, []) + units.get(unit, []):
+                out[(props["Reference"], pnum)] = pname
+    return out
+
+
+def print_pcb_nets(path, pcb_path, filters, variant=None):
+    """Nets as the PCB connects its pads, printed like print_nets(): pin names,
+    (DNP) and variants from the schematic, connectivity from the board (#395).
+    For a design whose schematic doesn't survive conversion, e.g. an Altium
+    design with harnesses, imported into KiCad: Altium compiled the board's
+    nets itself, harnesses and hidden pins included."""
+    note = variant_note(path, variant)
+    names, dnp = pin_names(path), dnp_refs(path, variant)
+    nets = defaultdict(list)
+    for (ref, pad), net in pcb_pad_nets(pcb_path).items():
+        nets[net].append((ref, pad, names.get((ref, pad))))
+    shown, unnamed = 0, 0
+    for net in sorted(nets):
+        pins = nets[net]
+        members = sorted(
+            f"{r} pin {n} [{'?' if pn is None else pn}]{' (DNP)' if r in dnp else ''}"
+            for r, n, pn in pins
+        )
+        exact = {net}
+        for r, n, _ in pins:
+            exact |= {r, f"{r} pin {n}"}
+        if not matches(exact, " ".join([net, *members]), filters, [pn or "" for *_, pn in pins]):
+            continue
+        print(net)
+        print("     " + ", ".join(members))
+        print()
+        shown += 1
+        unnamed += sum(1 for *_, pn in pins if pn is None)
+    print(f"{shown} net(s), from the PCB; pin names from the schematic")
+    if unnamed:
+        print(f"[?]: {unnamed} pad(s) with no schematic pin of that number")
+    if note:
+        print(note)
+
+
+def print_values(path, filters, variant=None):
     """One `REF  VALUE  FOOTPRINT` row per placed part, then a count; see the
     module docstring for an example. Filters match the reference only. A part
     placed as several units yields identical rows, which the set() collapses."""
-    rows = []
+    note = variant_note(path, variant)
+    dnp, rows = dnp_refs(path, variant), []
     for _, root, _ in load_sheets(path):
-        for sym, _, props in placed_symbols(root):
+        for _, _, props in placed_symbols(root):
             ref = props["Reference"]
             if ref.startswith(("#PWR", "#FLG")):
                 continue
             if matches({ref}, ref, filters):
-                ref += "(DNP)" if is_dnp(sym) else ""
-                rows.append((ref, props.get("Value", ""), props.get("Footprint", "")))
+                value = expand_fields(props.get("Value", ""), props)
+                # KiCad's Altium import puts Altium's Comment in Value (often
+                # just the library part, `Res1`) and Altium's own Value
+                # parameter, the resistance or capacitance, here (#395).
+                alt = props.get("ALTIUM_VALUE")
+                if alt and alt != value:
+                    value = f"{value} (ALTIUM_VALUE {alt})"
+                ref += "(DNP)" if ref in dnp else ""
+                rows.append((ref, value, props.get("Footprint", "")))
     for ref, value, footprint in sorted(set(rows)):
         print(f"{ref:>11}  {value:<24} {footprint}")
     print(f"{len(set(rows))} component(s)")
+    if note:
+        print(note)
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        # A Windows console that isn't UTF-8 would otherwise raise on the first
+        # non-ASCII name (U4's Value on the XIAO nRF52840 is `英联`) (#395).
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(errors="replace")
     args = sys.argv[1:]
     if not args:
         sys.exit(
-            "usage: kicad-netlist.py <file.kicad_sch> [--values] [filter ...]\n"
+            "usage: kicad-netlist.py <file.kicad_sch> [--values] [--variant NAME] [filter ...]\n"
+            "       kicad-netlist.py <file.kicad_sch> --pcb-nets <file.kicad_pcb>"
+            " [--variant NAME] [filter ...]\n"
             "       kicad-netlist.py <file.kicad_sch> --check-pcb <file.kicad_pcb>\n"
             "       kicad-netlist.py --copper <file.kicad_pcb> [net filter ...]\n"
             "       kicad-netlist.py --draw <file.kicad_pcb> <out_dir> [ref filter ...]"
@@ -1043,12 +1251,24 @@ def main():
     if "--check-pcb" in args:
         i = args.index("--check-pcb")
         sys.exit(check_pcb(path, args[i + 1]))
+    variant = None
+    if "--variant" in args:
+        i = args.index("--variant")
+        variant = args[i + 1]
+        del args[i : i + 2]
+    pcb_nets = None
+    if "--pcb-nets" in args:
+        i = args.index("--pcb-nets")
+        pcb_nets = args[i + 1]
+        del args[i : i + 2]
     want_values = "--values" in args
     filters = [a for a in args if a != "--values"]
-    if want_values:
-        print_values(path, filters)
+    if pcb_nets:
+        print_pcb_nets(path, pcb_nets, filters, variant)
+    elif want_values:
+        print_values(path, filters, variant)
     else:
-        print_nets(path, filters)
+        print_nets(path, filters, variant)
 
 
 if __name__ == "__main__":

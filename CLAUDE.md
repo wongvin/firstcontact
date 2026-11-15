@@ -37,8 +37,10 @@ Does not require an issue:
 
 Prefix every new issue title with the sub-project it concerns, followed by a
 colon: `webapp:` for the webapp target, `iOS:` for the ios target, `sophon:` for
-the Sophon firmware+app pair (e.g. `webapp: Add dark-mode toggle`,
-`iOS: Pull-to-refresh on news list`, `sophon: Stream raw 6-axis IMU`).
+the Sophon firmware+app pair, `skills:` for the Claude Code skills in
+`.claude/skills/` (e.g. `webapp: Add dark-mode toggle`,
+`iOS: Pull-to-refresh on news list`, `sophon: Stream raw 6-axis IMU`,
+`skills: altium-netlist and hardware-design-review`).
 
 `sophon:` covers both `zephyr/sophon/` and `ios/Sophon/` — it is one logical
 project spanning two folders, so a change touching both is one issue on one

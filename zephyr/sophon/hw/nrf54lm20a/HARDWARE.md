@@ -3,7 +3,7 @@
 What the board *is*, independent of any firmware on it. Established while
 backing up and inspecting the first board (#369), then reviewed from the
 design source as a whole (#384), and reviewed again with the
-`kicad-design-review` skill (#387; [report](reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md), merged in #389), as
+`hardware-design-review` skill (then `kicad-design-review`; #387, #395; [report](reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md), merged in #389), as
 part of the nRF54LM20A port (#368; plan in
 [NRF54LM20A-UPDATED-PLAN.md](../../NRF54LM20A-UPDATED-PLAN.md)).
 
@@ -23,7 +23,7 @@ the correction next to them.
 | [KiCad project](https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_V1.0_SCH&PCB_260508.zip) | root sheet + six hierarchical sub-sheets, `.kicad_pcb`, `.kicad_pro`, `.step`. SHA-256 `ca7f509f5716c57dd0d9a3f3098e249d805c3037fc3d80fd5e7d3cf6e4f60ada` |
 | [Schematic PDF](https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_Schematic.pdf) | KiCad 10 export, 7 pages. SHA-256 `f877501a6ff64b1fd9da15eb7df643c339f426869e8cf81ca4c727ec97260da3` |
 | Zephyr board | `~/zephyrproject/zephyr/boards/seeed/xiao_nrf54lm20a/` (Zephyr v4.5.0, #379) |
-| [Design review, 2026-11-10](reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md) | the `kicad-design-review` report (#387): every checklist question, its figures (probe pads, DNP parts, RF chain), and how each finding was verified for this file (#389). Frozen; where it and this file disagree, this file is right |
+| [Design review, 2026-11-10](reviews/2026-11-10-xiao-nrf54lm20a-v1.0.md) | the `hardware-design-review` report (then `kicad-design-review`; #387): every checklist question, its figures (probe pads, DNP parts, RF chain), and how each finding was verified for this file (#389). Frozen; where it and this file disagree, this file is right |
 
 **The archive name agrees with its contents** — unlike the nRF52840's (see
 [HARDWARE.md § The archive naming is a trap](../../HARDWARE.md)). Every sheet's

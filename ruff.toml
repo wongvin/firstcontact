@@ -1,7 +1,7 @@
 # Ruff configuration (#279). Repo-wide, because the Python here lives in three
 # unrelated places: zephyr/sophon/scripts/ (build and flash tooling),
-# api/server/ (the local FastAPI backend), and .claude/skills/kicad-netlist/
-# (the kicad-netlist skill's script, #386). None owns the others, so the config
+# api/server/ (the local FastAPI backend), and .claude/skills/ (the
+# kicad-netlist and altium-netlist skills' scripts, #386, #395). None owns the others, so the config
 # sits at the root rather than in any one manifest.
 #
 # Run with `ruff check .` and `ruff format .` from the repo root.
