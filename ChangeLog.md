@@ -2,6 +2,11 @@
 
 ## 2026-11-15
 
+### docs: nRF54LM20-DK reference review (#397)
+
+- `zephyr/sophon/hw/nrf54lm20a/reviews/2026-11-15-nrf54lm20-dk-0.7.0.md`: a `hardware-design-review` report on Nordic's nRF54LM20-DK (PCA10184) 0.7.0, imported from Altium, kept as a reference beside the XIAO's review. Its figures are in `figures/2026-11-15/` with Nordic's licence (`LICENSE-nordic.txt`).
+- `hw/nrf54lm20a/HARDWARE.md`: two facts about the chip only, not the DK's board facts: the 98-ball map agreeing with the datasheet, and the NFC pins needing `PADCONFIG` disabled before use as GPIO. `README.md` lists the report.
+
 ### feat: altium-netlist and hardware-design-review skills (#395)
 
 - New `altium-netlist` skill: guides the user through KiCad 10's Altium import (*Import Non-KiCad Project*, then saving both editors), on Windows or macOS, from a copy in the scratchpad (the source is never modified), and answers questions from the result with `kicad-netlist.py`, validated by `--check-pcb`. Its `altium-netlist.py` helper prepares the copy (libraries removed, SHA-256s, title blocks with `=Name` expressions resolved, a warning for harnesses and hidden pins), checks that every imported file was saved, and checks each variant's not-fitted parts against Altium's unique IDs, which catches the importer's false DNP on cyber60-mx's CON303.
