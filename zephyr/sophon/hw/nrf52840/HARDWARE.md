@@ -11,7 +11,7 @@ Companion: [MEMORY-MAP.md](MEMORY-MAP.md) is what occupies this board's flash.
 ## Design reviews
 
 Both boards were reviewed from their KiCad source with the
-`kicad-design-review` skill (#391). The reports are frozen records; their
+`hardware-design-review` skill (then `kicad-design-review`; #391, #395). The reports are frozen records; their
 verified findings are merged below, each citing its report. Where a report and
 this file disagree, this file is right.
 

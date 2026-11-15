@@ -16,6 +16,9 @@ The tool is [`kicad-netlist.py`](kicad-netlist.py), next to this file: Python
 `python3 -I .claude/skills/kicad-netlist/kicad-netlist.py`. Its docstring has
 the details and the limits.
 
+**An Altium design** is imported into KiCad first, with the `altium-netlist`
+skill (#395). Everything below then applies to the imported project.
+
 ## 1. Get the design
 
 The design may be in one of three places.
@@ -73,7 +76,23 @@ If it fails:
   schematic's answer for them;
 - look for a known limit of the script (buses, a repeated sheet), and say
   which;
-- for those pins, use the PCB's pad nets instead, tagged *PCB*.
+- for those pins, use the PCB's pad nets instead, tagged *PCB*:
+  `python3 -I $K <root.kicad_sch> --pcb-nets <root.kicad_pcb> <filters>`
+  prints them as a net query does, with pin names and DNP from the schematic.
+  Tag the connection *PCB*, and a pin name *netlist*. When the schematic's
+  wiring is broken as a whole, as in an Altium import with harnesses
+  (`altium-netlist` § 4), answer every net question this way.
+
+**A two-pin part numbered the other way round** fails the check as two splits
+and two merges, all on that part's pads: the schematic puts pin 1 where the
+board has pin 2. On NRFMOD-001 Rev B, L1, a 2.7 nH inductor in the antenna
+match, is swapped this way (#395). For a part with no polarity (a resistor,
+capacitor, inductor or ferrite), the circuit is the same, so say so in the
+report, by reference. The check still failed, though, and the two disagree on
+which pin is which, so `"L1 pin 1"` answers differently in each: keep to the
+PCB's pad nets, as above. A swapped diode, LED or polarised capacitor is a
+real disagreement: report which side is right, from the footprint and the
+datasheet.
 
 Never change the script to make a check pass without understanding the
 disagreement. This check is what exposed the script's transform bug in #384 (the
@@ -87,6 +106,8 @@ mirrored.
 |---|---|
 | What is on a net, or a pin? | `python3 -I $K <root.kicad_sch> VSYS "U8 pin K7"` |
 | Values and footprints | `python3 -I $K <root.kicad_sch> --values U5 R17 'ANT*'` |
+| Either, in a variant | add `--variant NAME`; without it, the output ends by naming the design's variants |
+| Nets as the PCB has them | `python3 -I $K <root.kicad_sch> --pcb-nets <root.kicad_pcb> VSYS 'U8 pin K*'` |
 | Everything | `python3 -I $K <root.kicad_sch>` |
 
 Filters ignore case. **The last character picks the mode:**
@@ -165,7 +186,10 @@ $ python3 -I $K board.kicad_sch --values 'R1*' U3 J1
 - **Order:** rows sort as text, so R10 comes before R2.
 - **Omitted:** power symbols and flags. A multi-unit part prints once.
 - **The `Value` field is whatever the designer typed.** Trust the footprint
-  over it when naming a part's role.
+  over it when naming a part's role. A reference to another of the symbol's
+  fields, `${NAME}`, is expanded as KiCad shows it: KiCad's Altium import can
+  write Value as `${ALTIUM_VALUE}`, which prints as `12pF`. The DNP check
+  reads the expanded value too.
 
 Reading the output:
 
@@ -176,6 +200,9 @@ Reading the output:
   Test points are DNP as a matter of course: bare pads. The mark is KiCad's DNP
   attribute, or a Value of `DNP` / `DNF`: Seeed's XIAO nRF52840 v1.1 marks its
   not-fitted parts only by Value, with every DNP attribute left at `no`.
+- **On a design with variants**, `(DNP)` is the default's, and the output's
+  last line names the variants. `--variant NAME` applies that variant's
+  per-part overrides (KiCad 10).
 - **A single-pin net means the pin is unconnected.** The script ignores
   no-connect flags. Confirm in the `.kicad_pcb`: an unconnected pad's net is
   named `unconnected-(…)`.
@@ -251,7 +278,10 @@ yourself.
 
 Small parts with close pads (an 0201's are 0.47 mm apart) get one ringed label
 listing each pad's net, with a leader line. Test pads and widely spaced pads
-get a label each.
+get a label each. A ringed label goes to the right of its ring, or to the left
+when the right has no room, clear of the silkscreen text and of the other
+labels, and inside the drawing. Only a label too big to fit anywhere, such as
+a whole module's 40 pads, can still overlap something.
 
 ## 4. Tag every fact with its source
 
@@ -286,6 +316,12 @@ in the document the facts go into. The model is
   distributor's HTML comes back with HTTP 200. When only an HTML version can be
   had, the datasheet is not held: say so under § Not established, rather than
   citing pages read through a web fetch.
+- **Check every unit against the page image.** Some PDFs set µ and Ω in a
+  symbol font that `pdftotext` turns into `m` and `W`: onsemi's FR015L3EZ
+  reads "15 mW" for 15 mΩ and "10 mA" for 10 µA, and its CAT24C512 reads
+  "2 mA" for a 2 µA standby current (#395). A figure whose unit decides
+  anything, a current, a resistance, a capacitance, gets read off the page
+  with the Read tool's `pages`.
 - **Read** with poppler: `pdftotext -layout <pdf> -` for tables, or the Read
   tool's `pages` for figures and ball maps.
 - **A part with no datasheet of its own:** use a same-package proxy only after
@@ -375,8 +411,14 @@ This is a reading of the licence, not legal advice.
 5. For a change to `--draw`: draw the XIAO nRF52840 v1.1 and overlay the
    `B_Silkscreen` Gerber from its archive. The archive was plotted in board
    coordinates with Y negated; mirror X as the back view does. Every label's
-   text must lie on the plotted strokes.
+   text must lie on the plotted strokes. Every ringed label must lie inside
+   the drawing and clear of the silkscreen text: check NRFMOD-001's J1, at the
+   board's right edge (`altium-netlist`, *Changing the scripts*).
 6. For a change to `--copper`: on the nRF54LM20A, `'Net-(U8B-ANT)'` gives pads
    `L5.1, U8.E1` and `'Net-(ANT2-D)'` gives `ANT2.1, R25.2`, with no zones and
    no copper graphics on the board. On the nRF52840, `Net-(ANT1-S)` reaches
    `ANT1.1`.
+7. For a change to `--pcb-nets`, or to how pin names or nets are read: on both
+   reference designs, every net `--pcb-nets` prints must hold exactly the pads
+   and pin names of the schematic net that carries them, as it does for all
+   117 and 74 nets now.
