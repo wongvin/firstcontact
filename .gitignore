@@ -251,3 +251,6 @@ zephyr/*/compile_commands.json
 # `.pub.pem` to be committable at all, so a private key cannot reach the repo by
 # being dropped in the right place with the wrong name.
 !*.pub.pem
+
+# Local scratch space, never committed.
+sandbox/

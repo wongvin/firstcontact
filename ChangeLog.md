@@ -2,6 +2,10 @@
 
 ## 2026-11-15
 
+### chore: ignore sandbox/
+
+- `.gitignore`: `sandbox/`, for local scratch space that is never committed.
+
 ### docs: nRF54LM20-DK reference review (#397)
 
 - `zephyr/sophon/hw/nrf54lm20a/reviews/2026-11-15-nrf54lm20-dk-0.7.0.md`: a `hardware-design-review` report on Nordic's nRF54LM20-DK (PCA10184) 0.7.0, imported from Altium, kept as a reference beside the XIAO's review. Its figures are in `figures/2026-11-15/` with Nordic's licence (`LICENSE-nordic.txt`).
